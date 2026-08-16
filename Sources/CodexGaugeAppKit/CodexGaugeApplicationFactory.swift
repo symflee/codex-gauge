@@ -24,10 +24,99 @@ public enum CodexGaugeApplicationFactory {
             _ in
         }
     ) -> CodexGaugeApplicationCoordinator {
-        let eventRelay = CodexGaugeApplicationEventRelay()
+        let launchOptions = CodexGaugeApplicationLaunchOptions(
+            arguments: launchArguments
+        )
+        switch launchOptions.mode {
+        case .production:
+            return makeProduction(
+                repository: repository,
+                workspace: workspace,
+                application: application,
+                launchOptions: launchOptions,
+                startupHook: startupHook
+            )
+        case .uiTestFixture83:
+            return makeUITestFixture(
+                repository: repository,
+                workspace: workspace,
+                application: application,
+                launchOptions: launchOptions,
+                startupHook: startupHook
+            )
+        }
+    }
+
+    private static func makeProduction(
+        repository: AppPreferencesRepository,
+        workspace: NSWorkspace,
+        application: NSApplication,
+        launchOptions: CodexGaugeApplicationLaunchOptions,
+        startupHook: @escaping CodexGaugeApplicationCoordinator.StartupHook
+    ) -> CodexGaugeApplicationCoordinator {
         let workspaceRuntime = NSWorkspaceCodexApplicationAdapter(
             workspace: workspace
         )
+        let diagnosticsProvider = SystemConnectionDiagnosticsProvider()
+        let refreshBuilder = SystemApplicationRefreshCoordinatorBuilder {
+            workspaceRuntime.applicationURL
+        }
+        return makeApplication(
+            repository: repository,
+            workspace: workspace,
+            application: application,
+            workspaceRuntime: workspaceRuntime,
+            refreshBuilder: refreshBuilder,
+            preferencesLoader: RepositoryApplicationPreferencesLoader(
+                repository: repository
+            ),
+            launchAtLoginController: LaunchAtLoginController(),
+            diagnosticsProvider: diagnosticsProvider.provider,
+            executableSelector: NSOpenPanelCodexExecutableSelector(),
+            launchOptions: launchOptions,
+            startupHook: startupHook
+        )
+    }
+
+    private static func makeUITestFixture(
+        repository: AppPreferencesRepository,
+        workspace: NSWorkspace,
+        application: NSApplication,
+        launchOptions: CodexGaugeApplicationLaunchOptions,
+        startupHook: @escaping CodexGaugeApplicationCoordinator.StartupHook
+    ) -> CodexGaugeApplicationCoordinator {
+        let diagnosticsProvider = UITestFixtureConnectionDiagnosticsProvider()
+        return makeApplication(
+            repository: repository,
+            workspace: workspace,
+            application: application,
+            workspaceRuntime: UITestFixtureCodexWorkspace(),
+            refreshBuilder: UITestFixtureRefreshCoordinatorBuilder(),
+            preferencesLoader: UITestFixtureApplicationPreferencesLoader(
+                repository: repository
+            ),
+            launchAtLoginController: UITestFixtureLaunchAtLoginController(),
+            diagnosticsProvider: diagnosticsProvider.provider,
+            executableSelector: UITestFixtureCodexExecutableSelector(),
+            launchOptions: launchOptions,
+            startupHook: startupHook
+        )
+    }
+
+    private static func makeApplication(
+        repository: AppPreferencesRepository,
+        workspace: NSWorkspace,
+        application: NSApplication,
+        workspaceRuntime: any CodexApplicationWorkspacing,
+        refreshBuilder: any ApplicationRefreshCoordinatorBuilding,
+        preferencesLoader: any ApplicationPreferencesLoading,
+        launchAtLoginController: any ApplicationLaunchAtLoginControlling,
+        diagnosticsProvider: @escaping SettingsConnectionDiagnosticsProvider,
+        executableSelector: (any CodexExecutableSelecting)?,
+        launchOptions: CodexGaugeApplicationLaunchOptions,
+        startupHook: @escaping CodexGaugeApplicationCoordinator.StartupHook
+    ) -> CodexGaugeApplicationCoordinator {
+        let eventRelay = CodexGaugeApplicationEventRelay()
         let presenter = SystemStatusItemPresenter()
         let statusController = StatusItemController(presenter: presenter)
         let statusRuntime = StatusItemRuntimeAdapter(controller: statusController)
@@ -38,20 +127,19 @@ public enum CodexGaugeApplicationFactory {
         )
         let settingsRuntime = makeSettingsRuntime(
             repository: repository,
-            eventRelay: eventRelay
+            eventRelay: eventRelay,
+            diagnosticsProvider: diagnosticsProvider,
+            executableSelector: executableSelector
         )
         let firstLaunchSettings = FirstLaunchSettingsCoordinator(
             repository: repository,
             settingsRuntime: settingsRuntime,
-            testingOptions: FirstLaunchTestingOptions(arguments: launchArguments)
+            testingOptions: launchOptions.firstLaunchTestingOptions
         )
         let applicationStartupHook: CodexGaugeApplicationCoordinator.StartupHook = {
             preferences in
             await firstLaunchSettings.runAfterInitialRefreshStarted()
             await startupHook(preferences)
-        }
-        let refreshBuilder = SystemApplicationRefreshCoordinatorBuilder {
-            workspaceRuntime.applicationURL
         }
         let coordinator = CodexGaugeApplicationCoordinator(
             statusRuntime: statusRuntime,
@@ -60,11 +148,9 @@ public enum CodexGaugeApplicationFactory {
             systemActivityMonitor: SystemActivityMonitor(workspace: workspace),
             assistiveDisplayMonitor: AssistiveDisplayMonitor(workspace: workspace),
             deadlineSchedulerBuilder: .system(),
-            launchAtLoginController: LaunchAtLoginController(),
+            launchAtLoginController: launchAtLoginController,
             refreshCoordinatorBuilder: refreshBuilder,
-            preferencesLoader: RepositoryApplicationPreferencesLoader(
-                repository: repository
-            ),
+            preferencesLoader: preferencesLoader,
             workspace: workspaceRuntime,
             terminator: NSApplicationTerminator(application: application),
             startupHook: applicationStartupHook
@@ -95,15 +181,16 @@ public enum CodexGaugeApplicationFactory {
 
     private static func makeSettingsRuntime(
         repository: AppPreferencesRepository,
-        eventRelay: CodexGaugeApplicationEventRelay
+        eventRelay: CodexGaugeApplicationEventRelay,
+        diagnosticsProvider: @escaping SettingsConnectionDiagnosticsProvider,
+        executableSelector: (any CodexExecutableSelecting)?
     ) -> SettingsWindowRuntimeAdapter {
-        let diagnosticsProvider = SystemConnectionDiagnosticsProvider()
         let coordinator = SettingsWindowCoordinator(
             repository: repository,
             discoveredQuotaProvider: { eventRelay.discoveredQuotaIDs },
-            connectionDiagnosticsProvider: diagnosticsProvider.provider,
+            connectionDiagnosticsProvider: diagnosticsProvider,
             connectionStatusProvider: { eventRelay.connectionStatus },
-            executableSelector: NSOpenPanelCodexExecutableSelector(),
+            executableSelector: executableSelector,
             clipboardWriter: SystemDiagnosticClipboardWriter(),
             onSettingsFormValuesChanged: { values in
                 eventRelay.settingsFormValuesDidChange(values)
