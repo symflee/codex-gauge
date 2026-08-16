@@ -18,9 +18,10 @@ jobs:
   build-test:
     name: build-test
     runs-on: macos-26
-    timeout-minutes: 20
+    timeout-minutes: 30
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+      XCODE_DERIVED_DATA: ${{ runner.temp }}/CodexGaugeDerivedData
     steps:
       - name: Check out repository
         # actions/checkout v7.0.1
@@ -53,3 +54,54 @@ jobs:
           swift build -c release
           --explicit-target-dependency-import-check error
           -Xswiftc -warnings-as-errors
+
+      - name: Test Xcode unit target
+        run: >-
+          xcodebuild test
+          -project CodexGauge.xcodeproj
+          -scheme CodexGauge
+          -destination 'platform=macOS,arch=arm64'
+          -derivedDataPath "$XCODE_DERIVED_DATA"
+          -only-testing:CodexGaugeUnitTests
+          CODE_SIGNING_ALLOWED=NO
+          SWIFT_TREAT_WARNINGS_AS_ERRORS=YES
+
+      - name: Test Xcode UI smoke
+        if: github.event_name != 'pull_request'
+        run: >-
+          xcodebuild test
+          -project CodexGauge.xcodeproj
+          -scheme CodexGauge
+          -destination 'platform=macOS,arch=arm64'
+          -derivedDataPath "$XCODE_DERIVED_DATA"
+          -only-testing:CodexGaugeUITests
+          CODE_SIGN_IDENTITY=-
+          DEVELOPMENT_TEAM=
+          SWIFT_TREAT_WARNINGS_AS_ERRORS=YES
+
+      - name: Build universal application
+        run: >-
+          xcodebuild build
+          -project CodexGauge.xcodeproj
+          -scheme CodexGauge
+          -configuration Release
+          -destination 'generic/platform=macOS'
+          -derivedDataPath "$XCODE_DERIVED_DATA"
+          CODE_SIGNING_ALLOWED=NO
+          ONLY_ACTIVE_ARCH=NO
+          ARCHS='arm64 x86_64'
+          SWIFT_TREAT_WARNINGS_AS_ERRORS=YES
+
+      - name: Verify universal application
+        shell: bash
+        run: |
+          set -euo pipefail
+          binary="$XCODE_DERIVED_DATA/Build/Products/Release/CodexGauge.app/Contents/MacOS/CodexGauge"
+          test -x "$binary"
+          architectures="$(lipo -archs "$binary")"
+          case "$architectures" in
+            "arm64 x86_64"|"x86_64 arm64") ;;
+            *) exit 1 ;;
+          esac
+          plist="$XCODE_DERIVED_DATA/Build/Products/Release/CodexGauge.app/Contents/Info.plist"
+          test "$(plutil -extract LSUIElement raw -o - "$plist")" = "true"

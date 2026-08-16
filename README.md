@@ -62,7 +62,7 @@ xcodebuild -project CodexGauge.xcodeproj \
   test
 ```
 
-공개 CI는 사용자 인증이나 실제 Codex 설치에 의존하지 않으며 합성 fixture로 프로토콜을 검증합니다. 실제 App Server smoke test는 개발자가 명시적으로 실행하는 로컬 테스트로만 제공합니다.
+공개 CI는 SwiftPM 전체 테스트와 Xcode unit smoke, main·수동 실행의 UI smoke 및 signing-disabled universal Release 빌드를 검증합니다. 사용자 인증이나 실제 Codex 설치에 의존하지 않으며 protocol 테스트는 합성 fixture만 사용합니다. 실제 App Server smoke test는 개발자가 명시적으로 실행하는 로컬 테스트로만 제공합니다.
 
 ## 개인정보와 보안
 

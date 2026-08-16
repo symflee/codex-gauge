@@ -260,12 +260,13 @@ feat(menubar): render quota status frames
 
 - 현재 `.github/workflows/ci.yml`은 pull request, main push와 수동 실행에서 동일한 `build-test` job을 실행한다. branch ruleset의 필수 check 이름도 `build-test`로 고정한다.
 - runner는 floating `macos-latest`가 아닌 `macos-26`을 사용하고 `DEVELOPER_DIR=/Applications/Xcode_26.6.app/Contents/Developer`로 toolchain을 고정한다.
-- 현재 gate는 package describe, warnings-as-errors 및 explicit dependency import check를 적용한 SwiftPM Debug build, `swift run codex-gauge-tests`, 동일한 strict Release build다.
-- job timeout은 20분이며 같은 workflow와 ref의 이전 실행은 취소한다.
+- gate는 package describe, warnings-as-errors 및 explicit dependency import check를 적용한 SwiftPM Debug build, `swift run codex-gauge-tests`, 동일한 strict Release build와 Xcode unit smoke다. main push와 수동 실행에서는 최초 실행 UI smoke도 수행한다.
+- Xcode UI smoke는 별도 인증서나 secret 없이 ad-hoc signing으로 실행한다. Release는 signing을 비활성화하고 exact `arm64 x86_64`로 빌드한 뒤 `lipo`에서 두 architecture와 bundle의 `LSUIElement=true`를 검증한다. ad-hoc test signing과 unsigned build로 배포 서명·공증이나 실제 macOS 13 실행을 대신 주장하지 않는다.
+- job timeout은 30분이며 같은 workflow와 ref의 이전 실행은 취소한다.
 - workflow `GITHUB_TOKEN`은 `contents: read`만 허용하고 checkout credential을 작업 copy에 유지하지 않는다. checkout 이외의 action, cache, Codecov와 secret을 사용하지 않는다.
 - 테스트는 synthetic fixture와 fake 경계만 사용한다. build·test 단계에는 Codex executable, Codex 로그인, OpenAI API key, 사용자 인증 파일 또는 애플리케이션 네트워크 요청이 필요하지 않다.
 - `.github/dependabot.yml`은 GitHub Actions reference를 매주 확인한다. action update PR에서는 release tag뿐 아니라 full commit SHA와 version comment가 함께 바뀌었는지 검토한다.
-- Xcode wrapper는 app·unit·UI target과 shared scheme을 제공한다. signing-disabled universal `arm64 x86_64` build와 UI smoke의 공개 CI 연결은 별도 CI task로 관리하고, resource baseline은 실제 macOS hardware의 opt-in performance gate로 유지한다.
+- CI는 `.app` bundle, unit smoke, main의 UI smoke와 universal binary를 검증한다. Instruments resource baseline은 실제 macOS hardware의 opt-in performance gate로 유지한다.
 - main은 force push, branch 삭제와 merge commit을 차단한다.
 - 첫 바이너리는 Developer ID 서명과 notarization을 준비한 뒤 공증된 universal ZIP으로만 배포한다.
 - 자동 업데이트, DMG와 Homebrew cask는 v0.1 이후 task다.
