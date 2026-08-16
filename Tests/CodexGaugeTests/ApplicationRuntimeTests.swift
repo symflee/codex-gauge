@@ -10,6 +10,7 @@ func applicationRuntimeTests() -> [TestCase] {
     [
         applicationDelegateStartsOneRuntimeTest(),
         applicationRuntimeStartsStatusBeforePreferencesTest(),
+        applicationRuntimeStartsFirstLaunchAfterRefreshTest(),
         applicationRuntimeDefersInitialWakeBaselineTest(),
         applicationRuntimePublishesOnePresentationTransactionTest(),
         applicationRuntimeRoutesMenuAndSettingsTest(),
@@ -21,6 +22,46 @@ func applicationRuntimeTests() -> [TestCase] {
         applicationRuntimeSharesShutdownDrainTest(),
         applicationRuntimeDrainsReplacementOnShutdownTest()
     ]
+}
+
+private func applicationRuntimeStartsFirstLaunchAfterRefreshTest() -> TestCase {
+    TestCase(name: "application runtime opens first launch settings after refresh start") {
+        try await applicationRuntimeStartsFirstLaunchAfterRefreshScenario()
+    }
+}
+
+@MainActor
+private func applicationRuntimeStartsFirstLaunchAfterRefreshScenario() async throws {
+    let suiteName = "io.github.symflee.codex-gauge.tests.runtime-first-launch.\(UUID().uuidString)"
+    guard let cleanupDefaults = UserDefaults(suiteName: suiteName) else {
+        throw TestFailure(description: "Unable to create runtime first-launch defaults")
+    }
+    defer { cleanupDefaults.removePersistentDomain(forName: suiteName) }
+    guard let repositoryDefaults = UserDefaults(suiteName: suiteName) else {
+        throw TestFailure(description: "Unable to inject runtime first-launch defaults")
+    }
+    let repository = AppPreferencesRepository(userDefaults: repositoryDefaults)
+    let firstLaunchSettings = RuntimeSettingsSpy()
+    let firstLaunch = FirstLaunchSettingsCoordinator(
+        repository: repository,
+        settingsRuntime: firstLaunchSettings
+    )
+    let harness = RuntimeHarness { _ in
+        await firstLaunch.runAfterInitialRefreshStarted()
+    }
+
+    harness.coordinator.start()
+    await harness.coordinator.waitForPendingOperations()
+
+    try expect(firstLaunchSettings.showCount == 1, "Expected first-launch settings")
+    try expect(
+        harness.startupRecorder.statusPresentationCounts.first ?? 0 > 0,
+        "Expected status before first-launch settings"
+    )
+    try expect(
+        harness.startupRecorder.refreshEvents.first == [.start],
+        "Expected refresh start before first-launch settings"
+    )
 }
 
 private func applicationRuntimeDefersInitialWakeBaselineTest() -> TestCase {
@@ -112,6 +153,14 @@ private func applicationRuntimeStartsStatusBeforePreferencesScenario() async thr
     try expect(events == [.start], "Expected initial start")
     try expect(harness.launch.enabledValues == [true], "Expected login intent reconciliation")
     try expect(harness.startupRecorder.preferences == [preferences], "Expected post-start hook")
+    try expect(
+        harness.startupRecorder.statusPresentationCounts.first ?? 0 > 0,
+        "Expected status before the startup hook"
+    )
+    try expect(
+        harness.startupRecorder.refreshEvents.first == [.start],
+        "Expected initial refresh start before the startup hook"
+    )
 }
 
 private func applicationRuntimePublishesOnePresentationTransactionTest() -> TestCase {
@@ -431,10 +480,15 @@ private final class RuntimeHarness {
 
     init(
         preferencesLoader: any ApplicationPreferencesLoading = RuntimePreferencesLoader(),
-        firstStopGate: RuntimeStopGate? = nil
+        firstStopGate: RuntimeStopGate? = nil,
+        afterStartupRecorded: @escaping CodexGaugeApplicationCoordinator.StartupHook = {
+            _ in
+        }
     ) {
         refreshBuilder = RuntimeRefreshBuilderSpy(firstStopGate: firstStopGate)
         let scheduler = deadlineScheduler
+        let statusRuntime = status
+        let refreshBuilder = refreshBuilder
         coordinator = CodexGaugeApplicationCoordinator(
             statusRuntime: status,
             menuRuntime: menu,
@@ -454,7 +508,13 @@ private final class RuntimeHarness {
             terminator: terminator,
             now: { Date(timeIntervalSince1970: 1_900_000_000) },
             startupHook: { [startupRecorder] preferences in
-                startupRecorder.preferences.append(preferences)
+                let refreshEvents = await refreshBuilder.coordinators.last?.events ?? []
+                startupRecorder.record(
+                    preferences: preferences,
+                    statusPresentationCount: statusRuntime.presentedFrames.count,
+                    refreshEvents: refreshEvents
+                )
+                await afterStartupRecorded(preferences)
             }
         )
     }
@@ -462,7 +522,19 @@ private final class RuntimeHarness {
 
 @MainActor
 private final class RuntimeStartupRecorder {
-    var preferences = [AppPreferences]()
+    private(set) var preferences = [AppPreferences]()
+    private(set) var statusPresentationCounts = [Int]()
+    private(set) var refreshEvents = [[RuntimeRefreshSpy.Event]]()
+
+    func record(
+        preferences: AppPreferences,
+        statusPresentationCount: Int,
+        refreshEvents: [RuntimeRefreshSpy.Event]
+    ) {
+        self.preferences.append(preferences)
+        statusPresentationCounts.append(statusPresentationCount)
+        self.refreshEvents.append(refreshEvents)
+    }
 }
 
 @MainActor
@@ -505,8 +577,9 @@ private final class RuntimeSettingsSpy: ApplicationSettingsRuntime {
     private(set) var showCount = 0
     private(set) var shutdownCount = 0
 
-    func showSettings() async {
+    func showSettings() async -> Bool {
         showCount += 1
+        return true
     }
 
     func requestExecutableSelection() {

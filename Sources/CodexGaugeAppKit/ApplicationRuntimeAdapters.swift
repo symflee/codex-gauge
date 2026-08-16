@@ -55,7 +55,7 @@ public final class StatusMenuRuntimeAdapter: ApplicationMenuRuntime {
 
 @MainActor
 public protocol ApplicationSettingsRuntime: AnyObject {
-    func showSettings() async
+    func showSettings() async -> Bool
     func requestExecutableSelection()
     func updateDiscoveredQuotaIDs(_ identifiers: Set<QuotaSelectionID>)
     func updateConnectionStatus(_ status: CodexConnectionStatus)
@@ -70,8 +70,11 @@ public final class SettingsWindowRuntimeAdapter: ApplicationSettingsRuntime {
         self.coordinator = coordinator
     }
 
-    public func showSettings() async {
-        _ = await coordinator.showSettings()
+    public func showSettings() async -> Bool {
+        guard let controller = await coordinator.showSettings() else {
+            return false
+        }
+        return controller.window?.isVisible == true
     }
 
     public func requestExecutableSelection() {

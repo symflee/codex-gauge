@@ -18,6 +18,7 @@ public enum CodexGaugeApplicationFactory {
         ),
         workspace: NSWorkspace = .shared,
         application: NSApplication = .shared,
+        launchArguments: [String] = ProcessInfo.processInfo.arguments,
         startupHook: @escaping CodexGaugeApplicationCoordinator.StartupHook = {
             _ in
         }
@@ -38,6 +39,16 @@ public enum CodexGaugeApplicationFactory {
             repository: repository,
             eventRelay: eventRelay
         )
+        let firstLaunchSettings = FirstLaunchSettingsCoordinator(
+            repository: repository,
+            settingsRuntime: settingsRuntime,
+            testingOptions: FirstLaunchTestingOptions(arguments: launchArguments)
+        )
+        let applicationStartupHook: CodexGaugeApplicationCoordinator.StartupHook = {
+            preferences in
+            await firstLaunchSettings.runAfterInitialRefreshStarted()
+            await startupHook(preferences)
+        }
         let refreshBuilder = SystemApplicationRefreshCoordinatorBuilder {
             workspaceRuntime.applicationURL
         }
@@ -55,7 +66,7 @@ public enum CodexGaugeApplicationFactory {
             ),
             workspace: workspaceRuntime,
             terminator: NSApplicationTerminator(application: application),
-            startupHook: startupHook
+            startupHook: applicationStartupHook
         )
         eventRelay.coordinator = coordinator
         return coordinator
