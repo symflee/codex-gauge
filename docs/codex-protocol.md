@@ -41,6 +41,18 @@ v0.1은 다음 흐름만 사용한다.
 - EOF, timeout, JSON 파싱 실패와 method-not-found를 서로 다른 typed failure로 바꾼다.
 - JSON-RPC error에서는 정수 `code`만 보존하고 원문 `message`와 `data`는 앱의 value type으로 옮기지 않는다.
 
+### 실행 파일 탐색
+
+App Server session을 열기 전에 `CodexLocating`에서 검증된 executable URL을 받는다.
+
+1. 저장된 사용자 선택이 있으면 그 URL만 검사한다.
+2. 선택이 없으면 `com.openai.codex`용 adapter가 주입한 app bundle의 `Contents/Resources/codex`를 검사한다.
+3. 이후 macOS application resource, Apple Silicon·Intel Homebrew 위치와 주입된 home의 local CLI 후보를 순서대로 검사한다.
+
+사용자 선택이 invalid 또는 broken symlink이면 자동 후보가 있더라도 `invalidSelection`이다. 자동 후보가 모두 유효하지 않으면 `notFound`다. 두 오류에는 원문 path를 associated value나 description으로 넣지 않는다.
+
+탐색은 Foundation filesystem API만 사용한다. file URL, 존재 여부, directory 여부, symlink 최종 target의 regular-file type과 executable permission을 검증한다. symlink cycle과 broken target은 거부하며 PATH, shell, CLI version 실행, 실제 process 시작은 이 단계에서 수행하지 않는다. 단위 테스트는 주입된 합성 home·system root만 사용하고 실제 machine 설치를 smoke test하지 않는다.
+
 ## 4. 합성 예제
 
 아래 값은 문서 설명을 위한 가상 데이터다. 실제 계정, 시각, 퍼센트 또는 응답을 복사한 것이 아니다. App Server 버전에 따라 initialize parameter와 응답의 부가 field가 달라질 수 있다.

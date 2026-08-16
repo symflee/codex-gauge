@@ -78,7 +78,13 @@ Preference는 제품 모드와 자동·직접 한도 선택을 표현한다. Fra
 3. 지원 목록에 명시된 Homebrew·CLI 설치 위치
 4. 찾지 못하면 typed `notFound` 실패
 
-Finder로 실행한 앱은 사용자의 interactive shell `PATH`를 신뢰할 수 없으므로 PATH만으로 탐색하지 않는다. 사용자 선택 경로는 regular executable file인지 다시 확인한다.
+사용자 선택은 권위가 있다. 선택값이 있으면 그 후보만 검증하며 사라졌거나 유효하지 않아도 자동 후보로 fallback하지 않고 `invalidSelection`을 반환한다. 선택값이 없을 때만 bundle 후보와 알려진 경로를 순서대로 검사한다.
+
+`CodexExecutableLocator`는 Foundation만 사용하는 filesystem adapter다. AppKit의 `NSWorkspace`를 직접 알지 않으며, 향후 별도 adapter가 bundle ID `com.openai.codex`로 찾은 application URL을 `bundleApplicationURL`로 주입한다. locator는 그 아래의 `Contents/Resources/codex`를 만든다. 알려진 자동 후보는 system·user Applications의 Codex/ChatGPT app resource, `/opt/homebrew/bin/codex`, `/usr/local/bin/codex`, 주입된 home의 `.local/bin/codex`다.
+
+모든 후보는 file URL, 존재하는 non-directory, 최종 regular file과 executable permission을 만족해야 한다. symlink는 상대·절대 target을 제한된 hop 수 안에서 표준화해 Homebrew link를 허용하고 broken link, directory target과 cycle은 거부한다. 성공 시 symlink 자체가 아니라 검증된 최종 target URL을 반환한다.
+
+Finder로 실행한 앱은 사용자의 interactive shell `PATH`를 신뢰할 수 없으므로 PATH 검색이나 shell 호출을 하지 않는다. home과 test용 system root는 constructor로 주입해 단위 테스트가 실제 사용자 directory나 설치 binary를 읽지 않게 한다. 공개 오류는 associated path가 없는 `notFound`와 `invalidSelection`뿐이며 CLI version 실행은 별도 task다.
 
 ### `CodexUsageProviding`과 `UsageSession`
 
