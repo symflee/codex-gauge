@@ -1,27 +1,28 @@
 import AppKit
-import CodexGaugeCore
 
 @MainActor
 public final class CodexGaugeApplicationDelegate: NSObject, NSApplicationDelegate {
-    private var statusItemController: StatusItemController?
+    public typealias RuntimeFactory = @MainActor () -> any CodexGaugeApplicationRunning
 
-    public override init() {
+    private let runtimeFactory: RuntimeFactory
+    private var applicationRuntime: (any CodexGaugeApplicationRunning)?
+
+    public override convenience init() {
+        self.init(runtimeFactory: { CodexGaugeApplicationFactory.makeDefault() })
+    }
+
+    public init(runtimeFactory: @escaping RuntimeFactory) {
+        self.runtimeFactory = runtimeFactory
         super.init()
     }
 
     public func applicationDidFinishLaunching(_ notification: Notification) {
         _ = notification
-        let presenter = SystemStatusItemPresenter()
-        let controller = StatusItemController(presenter: presenter)
-        controller.setFrames([initialFrame])
-        statusItemController = controller
-    }
-
-    private var initialFrame: DisplayFrame {
-        .single(DisplayQuota(identifier: unknownCodexQuota, value: .loading))
-    }
-
-    private var unknownCodexQuota: QuotaSelectionID {
-        QuotaSelectionID(product: .codex, rawDurationMinutes: nil)
+        guard applicationRuntime == nil else {
+            return
+        }
+        let runtime = runtimeFactory()
+        applicationRuntime = runtime
+        runtime.start()
     }
 }
