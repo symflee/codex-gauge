@@ -78,6 +78,10 @@ Java 전용 코딩 규칙은 이 Swift 프로젝트에 적용하지 않는다. J
 - manual selection 결정적 encoding, file URL 제한과 defaults suite 격리
 - 저장 payload에 quota, account, 오류와 원문 응답 field가 없는지 검증
 - 로그인 실행 등록·해제의 idempotence, 승인 필요 상태와 typed 오류 축약
+- 설정 form reducer의 제품 filter, 자동·직접 선택과 누락 식별자 유지
+- 설정 presenter의 checkbox 활성화와 빈 상태 도출
+- 제품 변경 후 off-product 직접 선택 제외와 빈 유효 선택의 자동 복구
+- 설정 기간 접근성 문구의 언어별 완전한 단위
 - 최초 실행 상태
 
 ### XCTest와 UI 테스트
@@ -86,6 +90,8 @@ Java 전용 코딩 규칙은 이 Swift 프로젝트에 적용하지 않는다. J
 - 메뉴에서 설정 창 열기
 - 최초 실행에 한 번만 설정 창 자동 표시
 - 설정 저장 후 닫기·재생성
+- 설정 변경 시 숨은 executable URL·최초 실행 field 보존
+- 창이 열린 동안 외부에서 바뀐 숨은 field와 form 변경의 원자적 merge
 - 설정 window/controller/view deallocation
 - 로그인 시 실행 adapter
 - Release CPU와 memory metric

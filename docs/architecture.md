@@ -169,7 +169,9 @@ frame이 하나면 scheduler에 timer 생성이나 취소 command를 보내지 �
 
 ### 설정 창
 
-앱 delegate는 설정 controller를 강하게 영구 보유하지 않는다. 설정을 열 때 controller를 만들고, window close callback에서 참조를 제거한다. 설정 값은 변경 시 `UserDefaults`에 저장한다. quota snapshot이나 오류 원문은 저장하지 않는다.
+`CodexGaugeSettings`의 `SettingsFormState`, reducer와 presenter가 표시 제품, 자동·직접 선택, 발견·누락 quota 행, 갱신 프리셋과 로그인 실행 의도를 UI와 무관한 immutable value로 다룬다. AppKit view controller는 이 결과를 programmatic `NSStackView`와 Auto Layout에 투영하고 사용자 event를 reducer로 돌려보내는 얇은 adapter다. 발견한 quota 식별자는 메모리 provider로 주입하며 UI가 provider나 process를 직접 호출하지 않는다.
+
+`SettingsWindowCoordinator`는 창을 요청할 때만 약 440pt 폭의 독립 `NSWindowController`를 만들고 한 번에 하나만 보유한다. 변경된 `SettingsFormValues`는 actor repository에 순서대로 전달하며 repository가 저장 시점의 최신 executable URL과 최초 실행 field에 원자적으로 merge한다. 따라서 창이 열린 동안 다른 owner가 갱신한 숨은 field를 오래된 form state가 덮어쓰지 않는다. 창을 닫은 뒤 다시 열 때는 진행 중인 저장을 먼저 마치고 `UserDefaults`를 새로 읽는다. window close callback은 coordinator의 강한 참조와 AppKit content graph를 제거한다. 로그인 실행 UI는 intent만 저장하며 `SMAppService` 호출은 launch adapter 경계에 남긴다. quota snapshot이나 오류 원문은 저장하지 않는다.
 
 window controller와 view controller가 실제로 해제되는지는 weak-reference 단위 테스트로 검증한다.
 
@@ -194,7 +196,7 @@ macOS 호출이 실패해도 호출 직후 시스템 상태가 이미 요청 결
 - 사용자가 선택한 Codex 실행 파일 경로
 - 최초 실행 완료 여부
 
-`AppPreferencesRepository` actor만 주입받은 `UserDefaults`에 접근한다. 전체 값을 `io.github.symflee.codex-gauge.preferences`라는 하나의 namespaced key에 versioned JSON `Data`로 저장해 같은 defaults domain의 다른 key를 건드리지 않는다. UI용 부분 업데이트 API는 실제 필요가 생기기 전에는 추가하지 않고 현재 경계는 전체 `load`와 `save`만 제공한다.
+`AppPreferencesRepository` actor만 주입받은 `UserDefaults`에 접근한다. 전체 값을 `io.github.symflee.codex-gauge.preferences`라는 하나의 namespaced key에 versioned JSON `Data`로 저장해 같은 defaults domain의 다른 key를 건드리지 않는다. 일반적인 전체 `load`·`save` 외에 설정 form용 저장은 표시 설정, refresh와 로그인 의도만 받아 최신 전체 값에 actor 내부에서 merge한다.
 
 저장 envelope에는 schema version을 별도로 포함한다. 현재 version 1은 display 설정을 중첩하고 나머지 허용 필드를 top-level에 둔다. version 0은 `displayProductMode`, `displayQuotaSelection`, `manualQuotaSelections`가 분리된 초기 flat schema이며 순수 decoder에서 현재 `AppPreferences`로 migration한다. manual selection은 제품 raw value 오름차순, 같은 제품 안에서는 양수 raw duration 오름차순과 기간 미상 마지막 순서로 정렬해 항상 같은 byte를 만든다. 빈 manual selection은 automatic으로 정규화한다.
 
