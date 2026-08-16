@@ -74,6 +74,7 @@ Java 전용 코딩 규칙은 이 Swift 프로젝트에 적용하지 않는다. J
 - backoff, timeout과 요청 coalescing
 - sleep, wake, 잠금과 Low Power Mode
 - workspace·power notification의 typed system activity event 변환과 observer 해제
+- VoiceOver KVO·accessibility display notification의 최초 상태, 변경 중복 제거와 observer 해제
 - versioned `UserDefaults` 기본값, round trip, field 복구와 v0 migration
 - manual selection 결정적 encoding, file URL 제한과 defaults suite 격리
 - 저장 payload에 quota, account, 오류와 원문 응답 field가 없는지 검증
