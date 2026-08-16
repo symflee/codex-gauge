@@ -96,6 +96,8 @@ Codex Gauge는 Codex 사용 한도를 확인하기 위해 작업 흐름을 끊�
 
 reset 상대 시간은 메뉴를 구성하는 시점에만 계산한다. 매초 countdown을 갱신하지 않는다. 조회 중 spinner나 상태바 애니메이션도 사용하지 않는다.
 
+`Codex 열기`는 `NSWorkspace`가 열 수 있는 Codex application bundle이 실제로 있을 때만 제공한다. CLI-only 설치처럼 사용량은 조회할 수 있어도 열 application이 없으면 무동작 항목 대신 `Codex 선택…`을 제공한다.
+
 ## 4. 설정 창
 
 설정은 popover가 아니라 약 440pt 폭의 일반적인 단일 macOS 창이다. Dock 아이콘이 없는 앱에서도 표준 창 동작, 키보드 이동과 VoiceOver 탐색을 제공한다.

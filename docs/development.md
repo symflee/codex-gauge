@@ -69,6 +69,7 @@ Java 전용 코딩 규칙은 이 Swift 프로젝트에 적용하지 않는다. J
 - 제품별 모든 quota·절대 reset·마지막 성공·typed 오류 menu model
 - 메뉴 open/close의 rotation pause와 cached `NSMenu` 무-I/O 경계
 - `Codex 열기`·`Codex 선택…` 조건 및 주입 action dispatch
+- CLI-only 설치에서 무동작 open 대신 executable 선택 action 제공
 - partial, malformed와 unknown-field protocol fixture
 - legacy Codex fallback과 Spark key
 - 네 refresh profile과 burst 진입·종료

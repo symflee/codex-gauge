@@ -36,6 +36,8 @@ UI adapter는 provider를 직접 호출하지 않는다. 모든 조회는 `Refre
 
 `RefreshPresentationAdapter`는 coordinator가 발행한 immutable 제품별 결과를 하나의 시각에 맞춰 상태바 frame, 상세 메뉴 input과 설정용 discovered quota ID로 투영한다. 전역 실패는 두 제품에 같은 복구 사유를 적용하되 partial·malformed 같은 제품별 issue와 마지막 성공 시각은 서로 오염시키지 않는다. adapter는 AppKit, process, timer와 I/O를 알지 않으며 초기 loading 상태에서 임의의 오류나 quota를 만들지 않는다.
 
+composition은 `NSWorkspace`에서 실제 application bundle을 찾았는지를 boolean capability로 presentation adapter에 전달한다. typed not-found·invalid-selection 오류 또는 열 application 부재는 `Codex 선택…` action을 만들고, bundle을 열 수 있을 때만 `Codex 열기`를 만든다. CLI 조회 성공을 application open 가능 상태로 추측하지 않는다.
+
 SwiftPM은 Core, Protocol, Refresh, Settings와 AppKit 모듈의 단일 source of truth다. Xcode application target은 이 package의 `CodexGaugeAppKit` product와 `App/CodexGauge`의 bundle metadata만 소유한다. 같은 Swift 소스를 package와 Xcode target membership에 중복 등록하지 않는다.
 
 ## 3. 도메인 경계
