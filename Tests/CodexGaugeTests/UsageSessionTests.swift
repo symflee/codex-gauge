@@ -13,6 +13,8 @@ func usageSessionTests() -> [TestCase] {
         sessionAllowsUnknownProviderTest(),
         sessionClassifiesAccountFailuresTest(),
         sessionClassifiesUnsupportedVersionTest(),
+        sessionClassifiesDeterministicProtocolFailuresTest(),
+        sessionPreservesTransientRPCFailuresTest(),
         sessionClassifiesMalformedAndOversizedOutputTest(),
         sessionClassifiesEOFAndProcessFailureTest(),
         sessionTimesOutAndCancelsTest(),
@@ -147,6 +149,22 @@ private func sessionClassifiesUnsupportedVersionTest() -> TestCase {
     TestCase(name: "usage session maps method-not-found and handshake mismatch") {
         try await expectReadError(.unsupportedVersion, mode: .methodNotFound)
         try await expectStartError(.unsupportedVersion, mode: .handshakeMismatch)
+    }
+}
+
+private func sessionClassifiesDeterministicProtocolFailuresTest() -> TestCase {
+    TestCase(name: "usage session classifies deterministic JSON-RPC shape failures") {
+        try await expectReadError(.protocolIncompatible, mode: .parseError)
+        try await expectReadError(.protocolIncompatible, mode: .invalidRequest)
+        try await expectReadError(.protocolIncompatible, mode: .invalidParameters)
+    }
+}
+
+private func sessionPreservesTransientRPCFailuresTest() -> TestCase {
+    TestCase(name: "usage session preserves server and internal JSON-RPC failures") {
+        try await expectReadError(.rpcFailure(code: -32_603), mode: .internalError)
+        try await expectReadError(.rpcFailure(code: -32_001), mode: .serverError)
+        try await expectReadError(.rpcFailure(code: 42), mode: .positiveError)
     }
 }
 
