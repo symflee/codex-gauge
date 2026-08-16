@@ -4,10 +4,14 @@ import Foundation
 @main
 struct TestRunner {
     static func main() async {
-        let failures = await run(scaffoldTests())
+        let failures = await run(allTests())
         guard failures == 0 else {
             exit(EXIT_FAILURE)
         }
+    }
+
+    private static func allTests() -> [TestCase] {
+        scaffoldTests() + quotaDomainTests()
     }
 
     private static func run(_ tests: [TestCase]) async -> Int32 {
