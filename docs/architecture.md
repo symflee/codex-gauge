@@ -82,7 +82,7 @@ Codex와 Spark를 나타낸다. App Server의 문자열 ID는 protocol adapter�
 
 Preference는 제품 모드와 자동·직접 한도 선택을 표현한다. Frame은 상태바 title을 만들 제품·기간·상태 의미를 보존한다. Core formatter는 locale과 무관한 compact title만 만들고 AppKit의 `StatusAccessibilityFormatter`가 localization resource와 기간 단위 vocabulary로 완전한 접근성 문장을 구성한다. 여러 frame은 builder에서 미리 생성하고 rotation timer는 배열 index만 바꾼다.
 
-직접 선택 ID는 제품과 normalized raw duration의 값 조합이다. `ProductUsageState`는 제품마다 loading, fresh value, stale value와 unavailable을 독립적으로 유지한다. `DisplayFrameBuilder`는 주입받은 현재 시각을 기준으로 reset 도달 또는 24시간 경과 값을 폐기하며 AppKit이나 timer에 의존하지 않는다.
+직접 선택 ID는 제품과 normalized raw duration의 값 조합이다. `ProductUsageState`는 제품마다 loading, fresh value, stale value와 unavailable을 독립적으로 유지한다. `DisplayFrameBuilder`는 주입받은 현재 시각을 기준으로 reset 도달 또는 24시간 경과 값을 폐기하며 AppKit이나 timer에 의존하지 않는다. 정규화 경계를 우회한 직접 선택에 표시 제품 식별자가 하나도 없더라도 빈 frame 배열을 만들지 않고 해당 제품의 자동 frame으로 복구한다.
 
 ### `UsageState`
 
@@ -300,7 +300,7 @@ Quit 또는 Command-Q가 들어오면 AppDelegate는 `.terminateLater`를 반환
 
 `AppPreferencesRepository` actor만 주입받은 `UserDefaults`에 접근한다. 전체 값을 `io.github.symflee.codex-gauge.preferences`라는 하나의 namespaced key에 versioned JSON `Data`로 저장해 같은 defaults domain의 다른 key를 건드리지 않는다. 일반적인 전체 `load`·`save` 외에 설정 form, 선택 executable과 최초 실행 완료 저장은 각각 담당 field만 받아 최신 전체 값에 actor 내부에서 read-modify-write한다. 세 연산에는 suspension point가 없어 동시 호출도 직렬화되며 서로의 최신 값을 잃지 않는다. 최초 실행 완료 저장은 true에서 no-op인 단방향·멱등 연산이다.
 
-저장 envelope에는 schema version을 별도로 포함한다. 현재 version 1은 display 설정을 중첩하고 나머지 허용 필드를 top-level에 둔다. version 0은 `displayProductMode`, `displayQuotaSelection`, `manualQuotaSelections`가 분리된 초기 flat schema이며 순수 decoder에서 현재 `AppPreferences`로 migration한다. manual selection은 제품 raw value 오름차순, 같은 제품 안에서는 양수 raw duration 오름차순과 기간 미상 마지막 순서로 정렬해 항상 같은 byte를 만든다. 빈 manual selection은 automatic으로 정규화한다.
+저장 envelope에는 schema version을 별도로 포함한다. 현재 version 1은 display 설정을 중첩하고 나머지 허용 필드를 top-level에 둔다. version 0은 `displayProductMode`, `displayQuotaSelection`, `manualQuotaSelections`가 분리된 초기 flat schema이며 순수 decoder에서 현재 `AppPreferences`로 migration한다. `AppPreferences`는 생성 경로와 schema version에 관계없이 manual selection을 표시 제품과의 교집합으로 제한하고, 교집합이 비면 automatic으로 정규화한다. manual selection은 제품 raw value 오름차순, 같은 제품 안에서는 양수 raw duration 오름차순과 기간 미상 마지막 순서로 정렬해 항상 같은 byte를 만든다.
 
 version이나 root가 해석되지 않거나 미래 version이면 전체 기본값을 사용한다. 현재 또는 version 0 schema의 개별 enum, boolean, manual item과 URL이 잘못되면 해당 field만 기본값으로 복구하고 나머지는 유지한다. 선택한 executable은 file URL만 받는다. quota snapshot, used/remaining percent, reset, account/error와 raw response는 schema에 없으며 repository는 payload나 경로를 log 또는 description에 넣지 않는다.
 

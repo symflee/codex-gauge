@@ -121,7 +121,9 @@ Java 전용 코딩 규칙은 이 Swift 프로젝트에 적용하지 않는다. J
 - workspace·power notification의 typed system activity event 변환과 observer 해제
 - VoiceOver KVO·accessibility display notification의 최초 상태, 변경 중복 제거와 observer 해제
 - versioned `UserDefaults` 기본값, round trip, field 복구와 v0 migration
-- manual selection 결정적 encoding, file URL 제한과 defaults suite 격리
+- manual selection의 표시 제품 교집합 정규화, 빈 교집합 자동 복구와 결정적 encoding
+- programmatic 생성·save/load·v0/v1 불일치 payload 정규화와 빈 frame 방어
+- file URL 제한과 defaults suite 격리
 - 저장 payload에 quota, account, 오류와 원문 응답 field가 없는지 검증
 - 로그인 실행 등록·해제의 idempotence, 승인 필요 상태와 typed 오류 축약
 - 로그인 실행 actual status의 off·on·mixed UI, unavailable 비활성화와 System Settings recovery

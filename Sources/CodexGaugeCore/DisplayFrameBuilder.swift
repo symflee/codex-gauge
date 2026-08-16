@@ -83,6 +83,13 @@ public struct DisplayFrameBuilder: Sendable {
         let relevant = identifiers.filter {
             productMode.products.contains($0.product)
         }
+        guard !relevant.isEmpty else {
+            return automaticFrames(
+                productMode: productMode,
+                productStates: productStates,
+                now: now
+            )
+        }
         let durations = orderedDurations(from: relevant)
         return durations.compactMap {
             manualFrame(

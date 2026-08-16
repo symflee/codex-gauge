@@ -150,6 +150,7 @@ private func displayFrameBuilderTests() -> [TestCase] {
         manualMissingSelectionTest(),
         manualGroupingAndOrderingTest(),
         manualProductModeFilterTest(),
+        manualDisjointProductFallbackTest(),
         productStatePlaceholderTest(),
         freshnessDeadlineTest(),
         resetDeadlineTest(),
@@ -178,6 +179,27 @@ private func manualProductModeFilterTest() -> TestCase {
         let item = try singleDisplayItem(from: makeFrames(preference, states, now))
 
         try expect(item.identifier.product == .codex, "Expected Spark selection to be filtered")
+    }
+}
+
+private func manualDisjointProductFallbackTest() -> TestCase {
+    TestCase(name: "manual frames recover when every identifier is off-product") {
+        let now = displayReferenceDate()
+        let preference = DisplayPreference(
+            productMode: .codex,
+            quotaSelection: .manual([
+                QuotaSelectionID(product: .spark, rawDurationMinutes: 300)
+            ])
+        )
+        let states = displayStates(
+            codex: [try displayWindow(usedPercent: 17, durationMinutes: 300)],
+            capturedAt: now
+        )
+
+        let item = try singleDisplayItem(from: makeFrames(preference, states, now))
+
+        try expect(item.identifier.product == .codex, "Expected displayed product fallback")
+        try expect(item.value == .fresh(83), "Expected automatic quota fallback")
     }
 }
 
