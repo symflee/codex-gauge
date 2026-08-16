@@ -1,4 +1,17 @@
 "status.loading" = "Checking Codex usage";
+"status.accessibility.quota.format" = "{product} {duration} quota, {value}";
+"status.accessibility.value.fresh" = "{percent} percent remaining";
+"status.accessibility.value.stale" = "last confirmed value {percent} percent remaining";
+"status.accessibility.value.loading" = "checking usage";
+"status.accessibility.value.unavailable" = "usage unavailable";
+"status.accessibility.comparison.separator" = ", ";
+"status.accessibility.duration.unknown" = "unknown duration";
+"status.accessibility.duration.one-hour" = "1 hour";
+"status.accessibility.duration.hours" = "{count} hours";
+"status.accessibility.duration.one-day" = "1 day";
+"status.accessibility.duration.days" = "{count} days";
+"status.accessibility.duration.one-week" = "1 week";
+"status.accessibility.duration.weeks" = "{count} weeks";
 "menu.product.codex" = "Codex";
 "menu.product.spark" = "Spark";
 "menu.quota.with_reset" = "[{duration}] · {remaining}% remaining · resets {reset}";

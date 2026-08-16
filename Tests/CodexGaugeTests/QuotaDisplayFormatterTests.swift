@@ -15,15 +15,11 @@ func displayFrameFormatterTests() -> [TestCase] {
 }
 
 private func codexFreshTitleTest() -> TestCase {
-    TestCase(name: "formatter renders Codex fresh title and accessibility") {
+    TestCase(name: "formatter renders Codex fresh title") {
         let item = formatterItem(product: .codex, duration: 300, value: .fresh(83))
         let output = DisplayFrameFormatter().format(.single(item))
 
         try expect(output.title == "[5h] 83%", "Unexpected Codex title")
-        try expect(
-            output.accessibilityLabel == "Codex 5시간 한도 남은 사용량 83퍼센트",
-            "Unexpected Codex accessibility label"
-        )
     }
 }
 
@@ -33,10 +29,6 @@ private func sparkFreshTitleTest() -> TestCase {
         let output = DisplayFrameFormatter().format(.single(item))
 
         try expect(output.title == "S[5h] 91%", "Unexpected Spark title")
-        try expect(
-            output.accessibilityLabel == "Spark 5시간 한도 남은 사용량 91퍼센트",
-            "Unexpected Spark accessibility label"
-        )
     }
 }
 
@@ -47,11 +39,6 @@ private func sameDurationComparisonTitleTest() -> TestCase {
         let output = DisplayFrameFormatter().format(.comparison(codex: codex, spark: spark))
 
         try expect(output.title == "[w] C75% · S82%", "Unexpected shared-duration title")
-        try expect(
-            output.accessibilityLabel
-                == "Codex 1주 한도 남은 사용량 75퍼센트, Spark 1주 한도 남은 사용량 82퍼센트",
-            "Unexpected comparison accessibility label"
-        )
     }
 }
 
@@ -71,10 +58,6 @@ private func staleTitleTest() -> TestCase {
         let output = DisplayFrameFormatter().format(.single(item))
 
         try expect(output.title == "[5h] ~83%", "Unexpected stale title")
-        try expect(
-            output.accessibilityLabel == "Codex 5시간 한도 남은 사용량 마지막 확인값 83퍼센트",
-            "Unexpected stale accessibility label"
-        )
     }
 }
 
@@ -84,10 +67,6 @@ private func loadingTitleTest() -> TestCase {
         let output = DisplayFrameFormatter().format(.single(item))
 
         try expect(output.title == "[5h] …", "Unexpected loading title")
-        try expect(
-            output.accessibilityLabel == "Codex 5시간 한도 사용량 확인 중",
-            "Unexpected loading accessibility label"
-        )
     }
 }
 
@@ -97,10 +76,6 @@ private func unavailableTitleTest() -> TestCase {
         let output = DisplayFrameFormatter().format(.single(item))
 
         try expect(output.title == "[5h] —", "Unexpected unavailable title")
-        try expect(
-            output.accessibilityLabel == "Codex 5시간 한도 사용량 확인 불가",
-            "Unexpected unavailable accessibility label"
-        )
     }
 }
 

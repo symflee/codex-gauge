@@ -4,15 +4,9 @@ public struct DisplayFrameFormatter: Sendable {
     public func format(_ frame: DisplayFrame) -> FormattedDisplayFrame {
         switch frame {
         case .single(let quota):
-            FormattedDisplayFrame(
-                title: singleTitle(quota),
-                accessibilityLabel: accessibilityLabel(for: quota)
-            )
+            FormattedDisplayFrame(title: singleTitle(quota))
         case .comparison(let codex, let spark):
-            FormattedDisplayFrame(
-                title: comparisonTitle(codex: codex, spark: spark),
-                accessibilityLabel: comparisonAccessibility(codex: codex, spark: spark)
-            )
+            FormattedDisplayFrame(title: comparisonTitle(codex: codex, spark: spark))
         }
     }
 
@@ -59,38 +53,4 @@ public struct DisplayFrameFormatter: Sendable {
         }
     }
 
-    private func comparisonAccessibility(
-        codex: DisplayQuota,
-        spark: DisplayQuota
-    ) -> String {
-        accessibilityLabel(for: codex) + ", " + accessibilityLabel(for: spark)
-    }
-
-    private func accessibilityLabel(for quota: DisplayQuota) -> String {
-        let product = productName(quota.identifier.product)
-        let duration = quota.durationBadge.accessibilityLabel
-        return "\(product) \(duration) 한도 \(accessibilityValue(quota.value))"
-    }
-
-    private func productName(_ product: UsageProduct) -> String {
-        switch product {
-        case .codex:
-            "Codex"
-        case .spark:
-            "Spark"
-        }
-    }
-
-    private func accessibilityValue(_ value: DisplayValueState) -> String {
-        switch value {
-        case .fresh(let percent):
-            "남은 사용량 \(percent)퍼센트"
-        case .stale(let percent):
-            "남은 사용량 마지막 확인값 \(percent)퍼센트"
-        case .loading:
-            "사용량 확인 중"
-        case .unavailable:
-            "사용량 확인 불가"
-        }
-    }
 }

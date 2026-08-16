@@ -75,11 +75,11 @@ private func normalizesNonpositiveDurationTest() -> TestCase {
 private func knownDurationBadgesTest() -> TestCase {
     TestCase(name: "duration badge preserves known product labels") {
         let expectations = [
-            DurationExpectation(minutes: 300, label: "5h", accessibilityLabel: "5시간"),
-            DurationExpectation(minutes: 1_440, label: "d", accessibilityLabel: "1일"),
-            DurationExpectation(minutes: 10_080, label: "w", accessibilityLabel: "1주"),
-            DurationExpectation(minutes: 20_160, label: "2w", accessibilityLabel: "2주"),
-            DurationExpectation(minutes: 43_200, label: "30d", accessibilityLabel: "30일")
+            DurationExpectation(minutes: 300, label: "5h"),
+            DurationExpectation(minutes: 1_440, label: "d"),
+            DurationExpectation(minutes: 10_080, label: "w"),
+            DurationExpectation(minutes: 20_160, label: "2w"),
+            DurationExpectation(minutes: 43_200, label: "30d")
         ]
 
         for expectation in expectations {
@@ -91,10 +91,10 @@ private func knownDurationBadgesTest() -> TestCase {
 private func exactDurationBadgesTest() -> TestCase {
     TestCase(name: "duration badge labels only exact safe units") {
         let expectations = [
-            DurationExpectation(minutes: 60, label: "1h", accessibilityLabel: "1시간"),
-            DurationExpectation(minutes: 120, label: "2h", accessibilityLabel: "2시간"),
-            DurationExpectation(minutes: 2_880, label: "2d", accessibilityLabel: "2일"),
-            DurationExpectation(minutes: 30_240, label: "21d", accessibilityLabel: "21일")
+            DurationExpectation(minutes: 60, label: "1h"),
+            DurationExpectation(minutes: 120, label: "2h"),
+            DurationExpectation(minutes: 2_880, label: "2d"),
+            DurationExpectation(minutes: 30_240, label: "21d")
         ]
 
         for expectation in expectations {
@@ -152,17 +152,12 @@ private func sendableDomainValuesTest() -> TestCase {
 private struct DurationExpectation {
     let minutes: Int
     let label: String
-    let accessibilityLabel: String
 }
 
 private func verify(_ expectation: DurationExpectation) throws {
     let badge = DurationBadge(windowDurationMinutes: expectation.minutes)
 
     try expect(badge.label == expectation.label, "Unexpected compact duration label")
-    try expect(
-        badge.accessibilityLabel == expectation.accessibilityLabel,
-        "Unexpected accessible duration label"
-    )
 }
 
 private func makeOptionalWindow(

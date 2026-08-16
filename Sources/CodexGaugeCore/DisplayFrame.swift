@@ -26,10 +26,8 @@ public enum DisplayFrame: Equatable, Sendable {
 
 public struct FormattedDisplayFrame: Equatable, Sendable {
     public let title: String
-    public let accessibilityLabel: String
 
-    public init(title: String, accessibilityLabel: String) {
+    public init(title: String) {
         self.title = title
-        self.accessibilityLabel = accessibilityLabel
     }
 }

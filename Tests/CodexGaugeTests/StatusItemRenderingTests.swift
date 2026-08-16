@@ -5,6 +5,7 @@ import CodexGaugeCore
 func statusItemRenderingTests() -> [TestCase] {
     [
         badgeImageCacheTest(),
+        localizedAccessibilityTest(),
         attributedFrameRenderingTest(),
         renderedStateSemanticsTest(),
         fixedWidthPolicyTest(),
@@ -15,6 +16,44 @@ func statusItemRenderingTests() -> [TestCase] {
         rotationTickUsesCachedFramesTest(),
         accessibilityUpdateTest()
     ]
+}
+
+private func localizedAccessibilityTest() -> TestCase {
+    TestCase(name: "status accessibility supports Korean and English localization") {
+        let korean = StatusAccessibilityFormatter(
+            vocabulary: statusVocabulary(language: .korean),
+            durationVocabulary: durationVocabulary(language: .korean)
+        )
+        let english = StatusAccessibilityFormatter(
+            vocabulary: statusVocabulary(language: .english),
+            durationVocabulary: durationVocabulary(language: .english)
+        )
+        let comparison = DisplayFrame.comparison(
+            codex: menubarQuota(product: .codex, duration: 300, value: .stale(75)),
+            spark: menubarQuota(product: .spark, duration: nil, value: .unavailable)
+        )
+
+        try expect(
+            korean.format(comparison)
+                == "Codex 5시간 한도 남은 사용량 마지막 확인값 75퍼센트, "
+                + "Spark 기간 미상 한도 사용량 확인 불가",
+            "Unexpected Korean status accessibility"
+        )
+        try expect(
+            english.format(comparison)
+                == "Codex 5 hours quota, last confirmed value 75 percent remaining, "
+                + "Spark unknown duration quota, usage unavailable",
+            "Unexpected English status accessibility"
+        )
+        let unknownDuration = try statusLocalizationValue(
+            language: "en",
+            key: "status.accessibility.duration.unknown"
+        )
+        try expect(
+            unknownDuration == "unknown duration",
+            "Expected sentence-case English duration resource"
+        )
+    }
 }
 
 private func badgeImageCacheTest() -> TestCase {
@@ -357,6 +396,89 @@ private func hasMonospacedValueFont(
     return font as? NSFont == expected
 }
 
+private enum StatusTestLanguage {
+    case korean
+    case english
+}
+
+private func statusVocabulary(
+    language: StatusTestLanguage
+) -> StatusAccessibilityVocabulary {
+    switch language {
+    case .korean:
+        StatusAccessibilityVocabulary(
+            quotaFormat: "{product} {duration} 한도 {value}",
+            freshValueFormat: "남은 사용량 {percent}퍼센트",
+            staleValueFormat: "남은 사용량 마지막 확인값 {percent}퍼센트",
+            loadingValue: "사용량 확인 중",
+            unavailableValue: "사용량 확인 불가",
+            comparisonSeparator: ", "
+        )
+    case .english:
+        StatusAccessibilityVocabulary(
+            quotaFormat: "{product} {duration} quota, {value}",
+            freshValueFormat: "{percent} percent remaining",
+            staleValueFormat: "last confirmed value {percent} percent remaining",
+            loadingValue: "checking usage",
+            unavailableValue: "usage unavailable",
+            comparisonSeparator: ", "
+        )
+    }
+}
+
+private func durationVocabulary(
+    language: StatusTestLanguage
+) -> SettingsDurationAccessibilityVocabulary {
+    switch language {
+    case .korean:
+        SettingsDurationAccessibilityVocabulary(
+            unknown: "기간 미상",
+            oneHour: "1시간",
+            hours: "{count}시간",
+            oneDay: "1일",
+            days: "{count}일",
+            oneWeek: "1주",
+            weeks: "{count}주"
+        )
+    case .english:
+        SettingsDurationAccessibilityVocabulary(
+            unknown: "unknown duration",
+            oneHour: "1 hour",
+            hours: "{count} hours",
+            oneDay: "1 day",
+            days: "{count} days",
+            oneWeek: "1 week",
+            weeks: "{count} weeks"
+        )
+    }
+}
+
+private func statusLocalizationValue(
+    language: String,
+    key: String
+) throws -> String {
+    let contents = try String(
+        contentsOf: statusLocalizationFile(language: language),
+        encoding: .utf8
+    )
+    let prefix = "\"\(key)\" = \""
+    guard let line = contents.split(separator: "\n").first(where: {
+        $0.hasPrefix(prefix)
+    }) else {
+        throw TestFailure(description: "Missing status localization key")
+    }
+    return String(line.dropFirst(prefix.count).dropLast(2))
+}
+
+private func statusLocalizationFile(language: String) -> URL {
+    URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .appendingPathComponent("Sources/CodexGaugeAppKit/Resources")
+        .appendingPathComponent("\(language).lproj/Localizable.strings")
+}
+
 @MainActor
 private struct ControllerFixture {
     let controller: StatusItemController
@@ -392,6 +514,10 @@ private final class RecordingStatusItemPresenter: StatusItemPresenting {
 private final class RecordingStatusFrameRenderer: StatusFrameRendering {
     private let widths: [String: CGFloat]
     private let formatter = DisplayFrameFormatter()
+    private let accessibilityFormatter = StatusAccessibilityFormatter(
+        vocabulary: statusVocabulary(language: .korean),
+        durationVocabulary: durationVocabulary(language: .korean)
+    )
     private(set) var renderCount = 0
 
     init(widths: [String: CGFloat] = [:]) {
@@ -408,7 +534,7 @@ private final class RecordingStatusFrameRenderer: StatusFrameRendering {
         return RenderedStatusFrame(
             attributedTitle: NSAttributedString(string: formatted.title),
             semanticTitle: formatted.title,
-            accessibilityLabel: formatted.accessibilityLabel,
+            accessibilityLabel: accessibilityFormatter.format(frame),
             badgeLabels: [],
             measuredWidth: widths[formatted.title] ?? CGFloat(formatted.title.count * 8)
         )
