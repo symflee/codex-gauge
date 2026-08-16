@@ -95,6 +95,7 @@ let package = Package(
             dependencies: [
                 "CodexGaugeCore",
                 "CodexGaugeProtocol",
+                "CodexGaugeRefresh",
                 "CodexGaugeSettings"
             ]
         )
