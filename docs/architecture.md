@@ -114,7 +114,17 @@ shell을 거치지 않고 실행 파일 URL을 `Process`에 직접 전달한다.
 
 `RefreshCoordinator`는 timer, 수동 요청, reset 요청, 시스템 상태를 하나의 actor에서 직렬화한다. 정책 자체는 현재 시각이 포함된 event와 immutable state를 받아 command를 반환하는 순수 reducer다. reducer는 `Task`, timer, process 또는 system notification을 직접 소유하지 않으며 coordinator의 executor가 command를 실행한다.
 
-polling, burst와 backoff deadline은 wall clock 변경의 영향을 받지 않도록 `ContinuousClock.Instant`와 `Duration`으로 계산한다. 서버가 준 quota reset 시각은 `Date`로 유지해 reset cycle identity와 snapshot freshness 판단에만 사용한다. 두 시간 축을 서로 변환해 예약하지 않는다.
+polling, burst와 backoff deadline은 wall clock 변경의 영향을 받지 않도록 `ContinuousClock.Instant`와 `Duration`으로 계산한다. 서버가 준 quota reset 시각과 제품별 cached value의 `capturedAt + 24시간` 유효기간은 `Date` 기반 별도 `QuotaResetRefreshScheduler`가 처리한다. polling deadline과 wall-clock deadline은 서로 변환하거나 같은 state에 저장하지 않는다.
+
+`QuotaResetRefreshScheduler`는 최신 `[UsageProduct: ProductUsageState]` publication을 입력으로 받는다. fresh와 stale value 각각에서 모든 reset과 해당 value의 24시간 유효기간을 추출하고 loading, unavailable과 quota가 없는 value는 제외한다. 따라서 부분 성공으로 Codex와 Spark의 `capturedAt`이 달라도 오래된 제품의 유효기간이 먼저 예약된다. deadline identity는 typed reason과 정확한 `Date`의 조합이며, 처리하지 않은 가장 이른 시각 하나만 main run loop의 non-repeating timer로 예약한다. production tolerance는 5초이고 `.common` mode를 사용한다. 같은 deadline publication에는 timer를 다시 만들지 않으며 generation 검증으로 publication 교체, sleep 또는 stop 뒤의 늦은 callback을 버린다. 시스템 시계 변경 알림은 명시적으로 구독하고 stop에서 해제한다.
+
+처리 완료 identity 집합은 새 publication마다 최신 후보 집합과 교집합만 유지한다. 따라서 retained history는 항상 현재 제품 상태에서 파생된 후보 수 이하이며 앱 수명에 따라 증가하지 않는다. publication에서 사라졌다가 다시 나타난 지난 identity는 새 현재 후보로 취급하지만, 교체 전에 예약된 timer callback은 별도 generation 검증으로 계속 무시한다.
+
+timer fire, 새 snapshot, wake 또는 시스템 시계 변경에서 현재 wall clock 이하인 deadline을 종류별로 한 번만 처리하고 다음 미래 deadline을 예약한다. 여러 지난 quota reset은 조회 신호 하나로 합치며 24시간 유효기간은 별도의 presentation-only 신호다. reset과 유효기간이 같은 시각이면 하나의 timer에서 유효기간 invalidation, reset refresh 순서로 전달한다. sleep과 stop은 timer를 취소하며 sleep 중 도래한 deadline은 wake 재평가에서 처리한다.
+
+두 typed reason 모두 cached frame을 현재 `Date`로 즉시 다시 만들어 reset 또는 24시간 경계의 값을 `—`로 바꾼다. 평상시 quota reset reason에만 `RefreshCoordinator.refreshAfterQuotaReset()`을 전달하며 coordinator가 자신의 `ContinuousClock`을 읽고 in-flight 요청과 합친다. wall-clock timer callback은 provider I/O를 직접 수행하지 않으며 terminal polling 실패 중에도 24시간 presentation invalidation은 계속 동작한다. 어느 경로에서도 reset 도래를 `100%` 사용으로 추측하지 않는다.
+
+wake composition은 마지막 system suspension 사유가 해제될 때 scheduler의 `systemDidWake()`를 먼저 호출하고 coordinator의 `resumeAfterSystemWake()`를 한 번 호출한다. scheduler 재평가 중 발생한 quota-reset callback은 중단 상태의 coordinator가 intent로 latch하고, 5초 resume timer가 fire할 때 wake request를 quota-reset baseline으로 승격한다. 따라서 callback에서 provider I/O를 직접 실행하지 않으면서 stopped 신호 유실과 별도 wake child 생성을 모두 피한다.
 
 executor는 reducer command를 다음 주입 가능 경계에 연결한다.
 
@@ -176,7 +186,7 @@ system suspension 중 또는 5초 resume timer가 대기하는 동안 `refreshAf
 
 composition의 `ApplicationActivityReducer`는 sleep과 session lock을 중복 가능한 set으로 유지한다. 첫 중단 사유가 시작될 때만 coordinator에 suspend command를 보내고 마지막 사유가 끝날 때만 resume command를 보낸다. 중복 notification이나 존재하지 않는 사유의 종료는 no-op이므로 wake 뒤에도 여전히 잠긴 session에서 polling이 먼저 재개되지 않는다.
 
-reset 절대 시각은 wall clock `Date`이므로 polling의 단조 deadline으로 변환하지 않는다. 현재 coordinator는 reset adapter용 단발 trigger seam까지 소유하고, clock change와 새 snapshot에 따라 reset observer를 재등록하는 구현은 별도 system-integration task에서 다룬다. 이 분리는 polling timer가 wall-clock 변경으로 앞당겨지거나 지연되는 것을 막는다.
+reset 절대 시각과 제품별 24시간 만료는 wall clock `Date`이므로 polling의 단조 deadline으로 변환하지 않는다. `QuotaResetRefreshScheduler`가 clock change, publication 교체와 sleep/wake에 맞춰 별도 one-shot을 재등록하며 이 분리는 polling timer가 wall-clock 변경으로 앞당겨지거나 지연되는 것을 막는다.
 
 ## 6. AppKit 생명주기
 

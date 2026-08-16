@@ -84,6 +84,10 @@ Java 전용 코딩 규칙은 이 Swift 프로젝트에 적용하지 않는다. J
 - quota-reset 단발 trigger의 coalescing과 baseline-only 처리
 - 제품별 partial 성공 publication, 제품별 성공 시각과 stale 값 보존
 - refresh publication의 상태바 frame·상세 메뉴·discovered quota 단일 투영과 오류 격리
+- 제품별 quota reset과 각 cached value의 `capturedAt + 24시간` 중 가장 이른 wall-clock one-shot 예약
+- reset·validity typed reason, 지난 deadline 병합과 동일 deadline 중복 방지
+- handled identity를 최신 publication 후보로 제한하는 bounded pruning
+- snapshot 교체, 시스템 시계 변경, sleep/wake/stop과 늦은 timer generation 폐기
 - sleep, wake, 잠금과 Low Power Mode
 - sleep·잠금 중첩에서 최초 1회 suspend와 최종 1회 resume
 - workspace·power notification의 typed system activity event 변환과 observer 해제

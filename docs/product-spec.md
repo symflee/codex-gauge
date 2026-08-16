@@ -155,6 +155,8 @@ reset 상대 시간은 메뉴를 구성하는 시점에만 계산한다. 매초 
 - reset 시각에는 단발 조회하되 실패했다고 100%로 추측하지 않는다.
 - 중단 중 또는 wake 5초 대기 중 reset이 도래하면 별도 조회를 만들거나 신호를 버리지 않는다. reset을 wake 조회에 합쳐 원래 5초 시점에 reset baseline 한 번만 조회한다.
 
+메모리에 게시된 제품별 상태에는 polling timer와 별도로 wall-clock one-shot deadline 하나만 둔다. Codex와 Spark에서 quota window가 있는 fresh 또는 stale value마다 quota reset과 해당 value의 `capturedAt + 24시간`을 독립적으로 보존하고, 아직 처리하지 않은 가장 이른 시각을 예약한다. loading, unavailable과 quota가 없는 value는 deadline을 만들지 않는다. quota reset 도래는 기존 표시를 즉시 재평가하면서 reset 조회 신호를 보내고, 24시간 유효기간 도래는 provider 조회 없이 표시만 다시 계산해 `—`로 바꾼다. terminal 오류로 자동 polling이 멈춘 상태에서도 유효기간 전환은 동작해야 한다. 새 제품 상태 publication, wake와 시스템 시계 변경에서 deadline을 다시 계산하고 sleep과 stop에서는 취소한다. 이미 지난 deadline은 종류별로 즉시 한 번만 처리하며 reset 도래를 `100%` 사용으로 추측하지 않는다.
+
 설정에서 프리셋을 바꾸면 실행 중인 앱에 즉시 적용한다. 자동 프리셋끼리 바꿀 때 진행 중인 조회는 중단하지 않고 그 결과 이후부터 새 간격을 적용하며, 진행 중인 조회가 없으면 현재 시각부터 새 간격으로 다시 예약한다. 이미 예약된 일시 실패 재시도는 간격을 바꾸지 않는다. 수동으로 바꾸면 진행 중인 자동 조회와 예약을 취소하고 burst와 실패 횟수를 지우되 마지막 비교 baseline은 유지한다. 수동에서 자동으로 바꿀 때 즉시 조회하지 않고 현재 시각부터 새 평상시 간격을 예약한다.
 
 ## 7. 상태와 오류
@@ -173,6 +175,8 @@ reset 상대 시간은 메뉴를 구성하는 시점에만 계산한다. 매초 
 제품별 상태를 독립적으로 유지한다. 한 제품만 성공한 경우 성공한 제품은 새 값으로 바꾸고 나머지만 stale 처리한다. 오류 메시지에는 token, 이메일, 원문 JSON이나 사용자 경로를 노출하지 않는다.
 
 마지막 성공 시각으로부터 정확히 24시간이 되었거나 현재 시각이 해당 window의 reset 시각에 도달하면 그 값은 stale이 아니라 조회 불가로 처리한다. 두 조건 중 먼저 도달하는 시점이 유효기간의 끝이다.
+
+이 경계 전환은 다음 polling 성공을 기다리지 않는다. wall-clock one-shot이 presentation invalidation을 요청해 cached frame을 현재 시각으로 다시 만들며, reset과 제품별 24시간 경계가 같으면 timer 하나에서 두 typed reason을 중복 없이 처리한다.
 
 ## 8. v0.1 제외 범위
 
