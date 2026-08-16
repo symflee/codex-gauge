@@ -614,7 +614,7 @@ private actor SettingsDiagnosticsProviderStub {
     private let version: CodexCLIVersion
 
     init() throws {
-        version = try CodexCLIVersionParser().parse(Data("1.2.3".utf8))
+        version = try CodexCLIVersionParser().parse(Data("codex-cli 1.2.3\n".utf8))
     }
 
     func snapshot(

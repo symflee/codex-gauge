@@ -24,6 +24,7 @@ public enum CodexCLIVersionProbeError: Error, Equatable, Sendable {
 
 public struct CodexCLIVersionParser: Sendable {
     public static let maximumInputBytes = 4_096
+    private static let commandPrefixes = ["codex-cli ", "codex "]
 
     public init() {}
 
@@ -36,63 +37,173 @@ public struct CodexCLIVersionParser: Sendable {
         guard let output = String(data: data, encoding: .utf8) else {
             throw .invalidOutput
         }
-        guard let token = output.split(whereSeparator: \Character.isWhitespace)
-            .compactMap(normalizedVersionToken)
-            .first else {
+        guard let line = singleOutputLine(output) else {
+            throw .invalidOutput
+        }
+        guard let token = versionToken(in: line), isSemverLike(token) else {
             throw .invalidOutput
         }
         return CodexCLIVersion(value: token)
     }
 
-    private func normalizedVersionToken(
-        _ candidate: Substring
-    ) -> String? {
-        let token = candidate.first == "v" ? candidate.dropFirst() : candidate[...]
-        guard token.count <= 64, token.count >= 3 else {
+    private func singleOutputLine(_ output: String) -> String? {
+        var line = output
+        if line.hasSuffix("\r\n") || line.hasSuffix("\n") {
+            line.removeLast()
+        }
+        guard line.isEmpty == false else {
             return nil
         }
-        guard token.first?.isNumber == true else {
+        guard line.unicodeScalars.contains(where: isLineEnding) == false else {
             return nil
         }
-        guard token.contains("."), token.allSatisfy(isVersionCharacter) else {
-            return nil
-        }
-        return String(token)
+        return line
     }
 
-    private func isVersionCharacter(_ character: Character) -> Bool {
-        character.isASCII && (
-            character.isNumber
-                || character.isLetter
-                || character == "."
-                || character == "-"
-                || character == "+"
+    private func isLineEnding(_ scalar: Unicode.Scalar) -> Bool {
+        scalar.value == 10 || scalar.value == 13
+    }
+
+    private func versionToken(in line: String) -> String? {
+        for prefix in Self.commandPrefixes where line.hasPrefix(prefix) {
+            let token = line.dropFirst(prefix.count)
+            guard token.isEmpty == false else {
+                return nil
+            }
+            return String(token)
+        }
+        return nil
+    }
+
+    private func isSemverLike(_ token: String) -> Bool {
+        guard token.count <= 64 else {
+            return false
+        }
+        let buildParts = token.split(
+            separator: "+",
+            omittingEmptySubsequences: false
         )
+        guard buildParts.count <= 2 else {
+            return false
+        }
+        guard buildParts.allSatisfy({ $0.isEmpty == false }) else {
+            return false
+        }
+        guard validCoreAndPrerelease(buildParts[0]) else {
+            return false
+        }
+        guard buildParts.count == 2 else {
+            return true
+        }
+        return validIdentifiers(buildParts[1])
+    }
+
+    private func validCoreAndPrerelease(_ value: Substring) -> Bool {
+        let parts = value.split(
+            separator: "-",
+            maxSplits: 1,
+            omittingEmptySubsequences: false
+        )
+        guard validCore(parts[0]) else {
+            return false
+        }
+        guard parts.count == 2 else {
+            return true
+        }
+        return validIdentifiers(parts[1])
+    }
+
+    private func validCore(_ value: Substring) -> Bool {
+        let components = value.split(
+            separator: ".",
+            omittingEmptySubsequences: false
+        )
+        guard components.count == 3 else {
+            return false
+        }
+        return components.allSatisfy(validNumericIdentifier)
+    }
+
+    private func validNumericIdentifier(_ value: Substring) -> Bool {
+        value.isEmpty == false && value.allSatisfy {
+            $0.isASCII && $0.isNumber
+        }
+    }
+
+    private func validIdentifiers(_ value: Substring) -> Bool {
+        let identifiers = value.split(
+            separator: ".",
+            omittingEmptySubsequences: false
+        )
+        return identifiers.allSatisfy(validIdentifier)
+    }
+
+    private func validIdentifier(_ value: Substring) -> Bool {
+        value.isEmpty == false && value.allSatisfy {
+            $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "-")
+        }
     }
 }
 
 public struct CodexCLIVersionProbeConfiguration: Equatable, Sendable {
-    public static let production = CodexCLIVersionProbeConfiguration(
-        timeout: .seconds(2),
-        stopGracePeriod: .milliseconds(250),
-        maximumOutputBytes: CodexCLIVersionParser.maximumInputBytes
-    )
+    private static let productionEnvironmentKeys = ["LANG", "LC_ALL", "LC_CTYPE"]
+    private static let productionSafeSearchPath =
+        "/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/bin"
+
+    public static var production: CodexCLIVersionProbeConfiguration {
+        production(inheriting: ProcessInfo.processInfo.environment)
+    }
+
+    package static func production(
+        inheriting environment: [String: String]
+    ) -> CodexCLIVersionProbeConfiguration {
+        production(
+            inheriting: environment,
+            safeSearchPath: productionSafeSearchPath
+        )
+    }
+
+    package static func production(
+        inheriting environment: [String: String],
+        safeSearchPath: String
+    ) -> CodexCLIVersionProbeConfiguration {
+        CodexCLIVersionProbeConfiguration(
+            timeout: .seconds(2),
+            stopGracePeriod: .milliseconds(250),
+            maximumOutputBytes: CodexCLIVersionParser.maximumInputBytes,
+            environment: allowlistedEnvironment(
+                from: environment,
+                safeSearchPath: safeSearchPath
+            )
+        )
+    }
 
     public let timeout: Duration
     public let stopGracePeriod: Duration
     public let maximumOutputBytes: Int
-    public let environment: [String: String]?
+    public let environment: [String: String]
 
     public init(
         timeout: Duration,
         stopGracePeriod: Duration,
         maximumOutputBytes: Int,
-        environment: [String: String]? = nil
+        environment: [String: String] = [:]
     ) {
         self.timeout = timeout
         self.stopGracePeriod = stopGracePeriod
         self.maximumOutputBytes = max(1, maximumOutputBytes)
         self.environment = environment
+    }
+
+    private static func allowlistedEnvironment(
+        from environment: [String: String],
+        safeSearchPath: String
+    ) -> [String: String] {
+        var allowed = ["PATH": safeSearchPath]
+        for key in productionEnvironmentKeys {
+            allowed[key] = environment[key]
+        }
+        return allowed
     }
 }
 
@@ -178,6 +289,7 @@ public actor CodexCLIVersionProbe: CodexCLIVersionProbing {
     ) {
         child.executableURL = executableURL
         child.arguments = ["--version"]
+        child.standardInput = FileHandle.nullDevice
         child.standardOutput = outputPipe
         child.standardError = FileHandle.nullDevice
         child.environment = configuration.environment

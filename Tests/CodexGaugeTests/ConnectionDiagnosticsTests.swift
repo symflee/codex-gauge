@@ -7,7 +7,10 @@ import Foundation
 func connectionDiagnosticsTests() -> [TestCase] {
     [
         cliVersionParserTest(),
+        cliVersionParserRejectsUnexpectedShapeTest(),
         cliVersionProbeTest(),
+        cliVersionProbeIsolationTest(),
+        cliVersionProbeSafeSearchPathTest(),
         cliVersionProbeFailureTest(),
         cliVersionProbeCleanupTest(),
         cliVersionProbeCancellationTest(),
@@ -20,15 +23,46 @@ func connectionDiagnosticsTests() -> [TestCase] {
 }
 
 private func cliVersionParserTest() -> TestCase {
-    TestCase(name: "CLI version parser keeps only a bounded version token") {
+    TestCase(name: "CLI version parser accepts known complete command output shapes") {
         let parser = CodexCLIVersionParser()
-        let version = try parser.parse(Data("codex-cli 1.2.3-beta.1+7\n".utf8))
+        let version = try parser.parse(Data("codex-cli 0.148.0-alpha.9\n".utf8))
+        let alternate = try parser.parse(Data("codex 1.2.3-beta.1+7\r\n".utf8))
+        let noLineEnding = try parser.parse(Data("codex-cli 2.0.0".utf8))
 
-        try expect(version.value == "1.2.3-beta.1+7", "Expected normalized version token")
+        try expect(version.value == "0.148.0-alpha.9", "Expected current CLI version shape")
+        try expect(alternate.value == "1.2.3-beta.1+7", "Expected alternate CLI prefix")
+        try expect(noLineEnding.value == "2.0.0", "Expected optional final line ending")
         try expect(
-            String(describing: version) == "1.2.3-beta.1+7",
+            String(describing: version) == "0.148.0-alpha.9",
             "Expected no raw command output"
         )
+    }
+}
+
+private func cliVersionParserRejectsUnexpectedShapeTest() -> TestCase {
+    TestCase(name: "CLI version parser rejects extra fields lines and invalid components") {
+        let parser = CodexCLIVersionParser()
+        let oversizedVersion = "codex-cli 1.2.3-\(String(repeating: "a", count: 60))\n"
+        let invalidOutputs = [
+            "1.2.3\n",
+            "other-cli 1.2.3\n",
+            "codex-cli synthetic-account 1.2.3\n",
+            "codex-cli 1.2.3 4242\n",
+            "codex-cli 1..2\n",
+            "codex-cli 1.2\n",
+            "codex-cli 1.2.3-\n",
+            "codex-cli 1.2.3+\n",
+            "codex-cli 1.2.3\nsynthetic-account\n",
+            "codex-cli 1.2.3\n\n",
+            " codex-cli 1.2.3\n",
+            "codex-cli 1.2.3 \n",
+            oversizedVersion
+        ]
+        for output in invalidOutputs {
+            try await expectVersionError(.invalidOutput) {
+                _ = try parser.parse(Data(output.utf8))
+            }
+        }
         try await expectVersionError(.invalidOutput) {
             _ = try parser.parse(Data("synthetic-account.example\n".utf8))
         }
@@ -41,10 +75,44 @@ private func cliVersionParserTest() -> TestCase {
 private func cliVersionProbeTest() -> TestCase {
     TestCase(name: "CLI version probe executes the validated URL with version argument") {
         let valid = try await probeVersion(mode: .valid)
-        try expect(valid.value == "1.2.3", "Expected synthetic CLI version")
+        try expect(valid.value == "0.148.0-alpha.9", "Expected synthetic CLI version")
 
         let stderrFlood = try await probeVersion(mode: .stderrFlood)
         try expect(stderrFlood.value == "2.3.4", "Expected stderr to be discarded")
+    }
+}
+
+private func cliVersionProbeIsolationTest() -> TestCase {
+    TestCase(name: "CLI version probe closes stdin and excludes parent secrets") {
+        let standardInputVersion = try await probeVersion(mode: .standardInputEndOfFile)
+        try expect(standardInputVersion.value == "3.4.5", "Expected standard input EOF")
+
+        let configuration = isolatedEnvironmentProbeConfiguration()
+        try expect(
+            configuration.environment[SyntheticCLIVersionCommand.secretEnvironmentKey] == nil,
+            "Expected synthetic parent secret removed"
+        )
+        try expect(
+            configuration.environment["PATH"] == productionSafeSearchPath,
+            "Expected fixed safe search path"
+        )
+        try expect(configuration.environment["HOME"] == nil, "Expected HOME removed")
+        let probe = CodexCLIVersionProbe(configuration: configuration)
+        let version = try await probe.version(of: syntheticExecutableURL)
+        try expect(version.value == "4.5.6", "Expected allowlisted child environment")
+    }
+}
+
+private func cliVersionProbeSafeSearchPathTest() -> TestCase {
+    TestCase(name: "CLI version probe resolves an env interpreter through injected safe PATH") {
+        let store = try SyntheticVersionPathStore()
+        defer { store.cleanUp() }
+        let configuration = safeSearchPathProbeConfiguration(store: store)
+        let probe = CodexCLIVersionProbe(configuration: configuration)
+
+        let version = try await probe.version(of: store.wrapperURL)
+
+        try expect(version.value == "5.6.7", "Expected synthetic interpreter version")
     }
 }
 
@@ -278,6 +346,49 @@ private func versionProbeConfiguration(
     )
 }
 
+private func isolatedEnvironmentProbeConfiguration() -> CodexCLIVersionProbeConfiguration {
+    let inheritedEnvironment = [
+        "LANG": "C",
+        "PATH": "synthetic-path",
+        "HOME": "synthetic-home",
+        SyntheticCLIVersionCommand.secretEnvironmentKey: "synthetic-sensitive-value"
+    ]
+    let production = CodexCLIVersionProbeConfiguration.production(
+        inheriting: inheritedEnvironment
+    )
+    var environment = production.environment
+    environment[SyntheticCLIVersionCommand.modeEnvironmentKey] =
+        SyntheticCLIVersionMode.environmentIsolation.rawValue
+    return CodexCLIVersionProbeConfiguration(
+        timeout: .milliseconds(150),
+        stopGracePeriod: .milliseconds(150),
+        maximumOutputBytes: 256,
+        environment: environment
+    )
+}
+
+private var productionSafeSearchPath: String {
+    "/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/bin"
+}
+
+private func safeSearchPathProbeConfiguration(
+    store: SyntheticVersionPathStore
+) -> CodexCLIVersionProbeConfiguration {
+    let production = CodexCLIVersionProbeConfiguration.production(
+        inheriting: ["PATH": "synthetic-parent-path"],
+        safeSearchPath: store.directoryURL.path
+    )
+    var environment = production.environment
+    environment[SyntheticCLIVersionCommand.modeEnvironmentKey] =
+        SyntheticCLIVersionMode.safeSearchPath.rawValue
+    return CodexCLIVersionProbeConfiguration(
+        timeout: .seconds(2),
+        stopGracePeriod: .milliseconds(150),
+        maximumOutputBytes: 256,
+        environment: environment
+    )
+}
+
 private func probeVersion(
     mode: SyntheticCLIVersionMode
 ) async throws -> CodexCLIVersion {
@@ -320,7 +431,7 @@ private func expectVersionTaskError(
 }
 
 private func parsedVersion(_ value: String) throws -> CodexCLIVersion {
-    try CodexCLIVersionParser().parse(Data(value.utf8))
+    try CodexCLIVersionParser().parse(Data("codex-cli \(value)\n".utf8))
 }
 
 private func readSyntheticVersionProcessIdentifier(
@@ -387,4 +498,44 @@ private func publication(failure: RefreshFailure) -> RefreshPublication {
 
 private func requireConnectionSendable<Value: Sendable>(_ value: Value) {
     _ = value
+}
+
+private struct SyntheticVersionPathStore {
+    static let interpreterName = "codex-gauge-synthetic-version-interpreter"
+
+    let directoryURL: URL
+    let wrapperURL: URL
+
+    init() throws {
+        let directoryURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("codex-gauge-version-path-\(UUID().uuidString)")
+        let interpreterURL = directoryURL.appendingPathComponent(Self.interpreterName)
+        let wrapperURL = directoryURL.appendingPathComponent("synthetic-codex")
+        try FileManager.default.createDirectory(
+            at: directoryURL,
+            withIntermediateDirectories: false
+        )
+        try FileManager.default.copyItem(at: syntheticExecutableURL, to: interpreterURL)
+        try Self.makeExecutable(interpreterURL)
+        try Self.writeWrapper(to: wrapperURL)
+        self.directoryURL = directoryURL
+        self.wrapperURL = wrapperURL
+    }
+
+    func cleanUp() {
+        try? FileManager.default.removeItem(at: directoryURL)
+    }
+
+    private static func makeExecutable(_ url: URL) throws {
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o755],
+            ofItemAtPath: url.path
+        )
+    }
+
+    private static func writeWrapper(to url: URL) throws {
+        let contents = "#!/usr/bin/env \(interpreterName)\n"
+        try Data(contents.utf8).write(to: url, options: .atomic)
+        try makeExecutable(url)
+    }
 }
