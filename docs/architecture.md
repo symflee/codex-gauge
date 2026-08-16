@@ -170,6 +170,8 @@ AppKit의 `SystemActivityMonitor`는 `NSWorkspace`의 sleep, wake와 user sessio
 
 executor의 `suspend()`는 reducer stop command를 통해 timer, in-flight request와 retained burst session을 모두 정리한다. `resumeAfterSystemWake()`는 같은 단조 timer slot에서 중복 resume 요청을 합치고 5초 뒤 한 번만 wake-baseline request를 만든다. 수동 profile에서는 running 상태만 복구하고 자동 조회는 만들지 않는다. `setLowPowerMode(_:)`는 reducer에 power 상태를 전달해 기존 retry가 아닌 schedule을 제한된 간격으로 교체한다. 앱 composition은 `SystemActivityEvent`를 이 세 API에 연결하며 별도 polling 정책을 만들지 않는다.
 
+composition의 `ApplicationActivityReducer`는 sleep과 session lock을 중복 가능한 set으로 유지한다. 첫 중단 사유가 시작될 때만 coordinator에 suspend command를 보내고 마지막 사유가 끝날 때만 resume command를 보낸다. 중복 notification이나 존재하지 않는 사유의 종료는 no-op이므로 wake 뒤에도 여전히 잠긴 session에서 polling이 먼저 재개되지 않는다.
+
 reset 절대 시각은 wall clock `Date`이므로 polling의 단조 deadline으로 변환하지 않는다. 현재 coordinator는 reset adapter용 단발 trigger seam까지 소유하고, clock change와 새 snapshot에 따라 reset observer를 재등록하는 구현은 별도 system-integration task에서 다룬다. 이 분리는 polling timer가 wall-clock 변경으로 앞당겨지거나 지연되는 것을 막는다.
 
 ## 6. AppKit 생명주기

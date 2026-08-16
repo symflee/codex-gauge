@@ -83,6 +83,7 @@ Java 전용 코딩 규칙은 이 Swift 프로젝트에 적용하지 않는다. J
 - 제품별 partial 성공 publication, 제품별 성공 시각과 stale 값 보존
 - refresh publication의 상태바 frame·상세 메뉴·discovered quota 단일 투영과 오류 격리
 - sleep, wake, 잠금과 Low Power Mode
+- sleep·잠금 중첩에서 최초 1회 suspend와 최종 1회 resume
 - workspace·power notification의 typed system activity event 변환과 observer 해제
 - VoiceOver KVO·accessibility display notification의 최초 상태, 변경 중복 제거와 observer 해제
 - versioned `UserDefaults` 기본값, round trip, field 복구와 v0 migration
