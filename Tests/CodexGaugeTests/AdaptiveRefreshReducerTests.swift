@@ -18,6 +18,7 @@ func adaptiveRefreshReducerTests() -> [TestCase] {
         lateGenerationDiscardTest(),
         manualProfileBehaviorTest(),
         explicitStopTest(),
+        systemResumeReducerTest(),
         lowPowerSchedulingTest(),
         sameProfileChangeTest(),
         automaticProfileChangeTest(),
@@ -413,6 +414,34 @@ private func explicitStopTest() -> TestCase {
         try expect(!harness.state.isRunning, "Expected stopped state")
         try expect(harness.state.baseline == nil, "Expected cleared baseline")
         try expect(harness.state.scheduledRefresh == nil, "Expected cleared schedule")
+    }
+}
+
+private func systemResumeReducerTest() -> TestCase {
+    TestCase(name: "system resume restores running state with one wake baseline") {
+        var automatic = RefreshHarness()
+        try establishBaseline(&automatic, samples: refreshSamples(codexUsed: 10))
+        _ = automatic.send(.stop)
+
+        let commands = automatic.send(
+            .resumeAfterSystemWake(at: refreshInstant(5))
+        )
+        let request = try refreshRequest(from: commands)
+        try expect(automatic.state.isRunning, "Expected automatic refresh restored")
+        try expect(request.reason == .wakeBaseline, "Expected wake baseline reason")
+
+        var manual = RefreshHarness(profile: .manual)
+        try establishBaseline(&manual, samples: refreshSamples(codexUsed: 10))
+        _ = manual.send(.stop)
+        let manualCommands = manual.send(
+            .resumeAfterSystemWake(at: refreshInstant(5))
+        )
+
+        try expect(manualCommands.isEmpty, "Expected no automatic manual-profile request")
+        try expect(manual.state.isRunning, "Expected manual coordinator restored")
+        _ = try refreshRequest(
+            from: manual.send(.manualRefresh(at: refreshInstant(6)))
+        )
     }
 }
 

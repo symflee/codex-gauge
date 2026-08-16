@@ -2,12 +2,13 @@ public enum RefreshRequestReason: Equatable, Sendable {
     case startup
     case manual
     case wakeBaseline
+    case quotaReset
     case normal
     case burst
     case retry
 
     var establishesBaseline: Bool {
-        self == .startup || self == .wakeBaseline
+        self == .startup || self == .wakeBaseline || self == .quotaReset
     }
 }
 
@@ -76,6 +77,8 @@ public enum RefreshEvent: Equatable, Sendable {
     case start(at: ContinuousClock.Instant)
     case manualRefresh(at: ContinuousClock.Instant)
     case wakeBaseline(at: ContinuousClock.Instant)
+    case quotaReset(at: ContinuousClock.Instant)
+    case resumeAfterSystemWake(at: ContinuousClock.Instant)
     case scheduledRefreshFired(
         generation: UInt64,
         at: ContinuousClock.Instant
@@ -97,6 +100,7 @@ public enum RefreshEvent: Equatable, Sendable {
         generation: UInt64,
         at: ContinuousClock.Instant
     )
+    case terminalFailure(generation: UInt64)
     case stop
 }
 

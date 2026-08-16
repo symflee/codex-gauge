@@ -1,7 +1,9 @@
 import CodexGaugeRefresh
 
 func refreshTests() -> [TestCase] {
-    refreshProfileTests() + adaptiveRefreshReducerTests()
+    refreshProfileTests()
+        + adaptiveRefreshReducerTests()
+        + refreshCoordinatorTests()
 }
 
 private func refreshProfileTests() -> [TestCase] {

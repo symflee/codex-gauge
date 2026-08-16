@@ -12,7 +12,7 @@ Codex Gauge는 AppKit 기반의 작은 메뉴 막대 프로세스로 유지한�
 - App Sandbox 비활성화, Hardened Runtime 활성화
 - bundle identifier `io.github.symflee.codex-gauge`
 - 계정 snapshot은 메모리에만 유지
-- UI와 timer는 main actor, blocking I/O는 main actor 밖에서 실행
+- UI와 상태바 rotation timer는 main actor, polling timer와 blocking I/O는 main actor 밖에서 실행
 
 ## 2. 데이터 흐름
 
@@ -112,17 +112,28 @@ shell을 거치지 않고 실행 파일 URL을 `Process`에 직접 전달한다.
 
 polling, burst와 backoff deadline은 wall clock 변경의 영향을 받지 않도록 `ContinuousClock.Instant`와 `Duration`으로 계산한다. 서버가 준 quota reset 시각은 `Date`로 유지해 reset cycle identity와 snapshot freshness 판단에만 사용한다. 두 시간 축을 서로 변환해 예약하지 않는다.
 
+executor는 reducer command를 다음 주입 가능 경계에 연결한다.
+
+- `RefreshClock`은 단조 시각, snapshot용 wall 시각과 deadline sleep을 제공한다.
+- `RefreshSessionProviding`은 실제 `CodexUsageProviding`을 감싸며 request command가 있을 때만 session을 만든다.
+- `SelectedQuotaSampleSelecting`은 현재 `DisplayPreference`에 따라 비교할 quota만 `SelectedQuotaSamples`로 바꾼다.
+- `RefreshPublicationHandler`는 immutable 제품별 상태를 `@MainActor`에 전달한다. process와 timer 작업은 main actor에서 실행하지 않는다.
+
+coordinator는 각각 하나의 timer task와 request task만 보유한다. polling schedule과 5초 system-resume delay는 같은 timer slot을 공유하고 purpose와 generation을 함께 검증한다. 새 schedule은 기존 timer를 취소하고, cancel 또는 stop 뒤 도착한 timer·request completion은 결과와 callback을 갱신하지 않는다. 여러 trigger가 겹쳐도 reducer가 한 request로 합치며 executor가 별도 pending queue를 만들지 않는다.
+
 - reducer state에는 최대 하나의 in-flight request와 하나의 예약만 존재한다.
 - request와 예약은 각각 단조 증가 generation을 사용한다. stop이나 재예약 뒤 도착한 이전 generation의 completion과 timer fire는 무시한다.
-- 겹친 trigger는 새 요청을 만들지 않고 현재 in-flight 요청으로 합친다. wake trigger가 합쳐지면 그 성공은 wake baseline으로 취급한다.
+- 겹친 trigger는 새 요청을 만들지 않고 현재 in-flight 요청으로 합친다. baseline-only reason의 결정적 우선순위는 `quotaReset > wakeBaseline > 기존 reason`이다. 따라서 normal·burst request 중 reset이 도착하거나 reset 뒤 wake가 도착해도 성공은 reset baseline으로만 사용한다.
 - 명시적 stop은 현재 request와 예약을 취소하는 command를 내보내고 비교 baseline을 비운다.
 
 ### 평상시
 
 - 프리셋의 평상시 간격에 맞춰 session을 시작한다.
 - snapshot을 받은 뒤 증가가 없으면 session을 종료한다.
+- session 생성, start와 read는 request task에서 실행한다. normal 조회 사이에는 child와 session을 유지하지 않는다.
 - timer, 메뉴의 수동 갱신, wake와 reset 요청이 겹치면 하나의 in-flight 작업으로 합친다.
 - 시작 후 첫 성공과 wake 성공은 비교 baseline만 교체하고 burst 신호로 사용하지 않는다.
+- `refreshAfterQuotaReset()`은 reset 도래를 감지한 외부 adapter가 호출하는 단발 seam이다. 중복 호출은 합치고 성공값을 새 baseline으로만 사용해 burst를 시작하지 않는다.
 - 동일한 프리셋으로의 변경은 아무 state나 command도 바꾸지 않는다.
 - 자동 프리셋 변경 시 in-flight 요청은 유지하고 완료 뒤 새 간격을 사용한다. 요청이 없으면 retry가 아닌 기존 예약을 취소하고 변경 시각부터 새 평상시 또는 burst 간격으로 예약한다.
 - 수동 프리셋 진입은 예약과 in-flight 요청을 취소하고 burst와 연속 실패 횟수를 지운다. baseline과 coordinator 실행 상태는 유지하며 취소 뒤 늦게 도착한 completion은 generation 검증으로 무시한다.
@@ -136,10 +147,14 @@ polling, burst와 backoff deadline은 wall clock 변경의 영향을 받지 않�
 - 프리셋의 burst 간격으로 최대 5분간 재조회한다.
 - 추가 증가 시 종료 deadline을 5분 연장한다.
 - deadline 도달 또는 연속 3회 실패 시 session을 종료한다.
+- 증가를 발견한 request의 session 하나를 burst가 끝날 때까지 재사용한다. burst tick은 account 검증이 끝난 같은 session에서 rate-limit 조회만 반복한다.
+- 조회 실패 시 session은 즉시 종료한다. retry가 필요하면 backoff 이후 새 transient session을 만들며 실패한 child를 재사용하지 않는다.
 
 ### backoff
 
 일시 실패는 30초, 1분, 2분, 4분, 8분, 16분, 30분 순으로 지수 backoff하고 이후 30분으로 제한한다. 성공하면 실패 횟수를 지우고 사용자가 선택한 프리셋으로 돌아간다. 수동 프리셋은 일시 실패에도 자동 재시도를 예약하지 않는다. 로그아웃, 실행 파일 미발견과 protocol 비호환은 무한 재시도하지 않고 사용자 조치 상태로 전환한다.
+
+성공 publication은 제품마다 독립적으로 갱신한다. `available` 또는 유효 window가 있는 `partial` 제품은 fresh가 되고 해당 제품의 마지막 성공 시각만 갱신한다. 현재 응답에서 unavailable·malformed인 제품은 이전 성공값과 제품별 성공 시각이 있으면 stale로 유지한다. 유효 window가 하나도 없는 성공 응답은 전역 마지막 성공 시각도 갱신하지 않는다. 전체 조회 실패도 이전 값은 stale로 보존하며 UI에는 raw error가 아닌 `RefreshFailure`만 전달한다. spend-control을 포함한 typed product detail과 snapshot은 메모리에만 둔다.
 
 ### 시스템 상태
 
@@ -150,6 +165,10 @@ polling, burst와 backoff deadline은 wall clock 변경의 영향을 받지 않�
 - Low Power Mode에서는 평상시 10분, burst 60초보다 빠르게 실행하지 않는다.
 
 AppKit의 `SystemActivityMonitor`는 `NSWorkspace`의 sleep, wake와 user session 활성 상태 알림 및 `ProcessInfo`의 power-state 알림만 구독한다. 시작 시에도 현재 Low Power Mode를 한 번 전달하고 이후 알림의 payload를 신뢰하지 않고 현재 값을 다시 읽는다. 이 adapter는 지연 timer나 process를 소유하지 않고 typed `SystemActivityEvent`만 내보낸다. observer 등록은 idempotent하며 명시적 `stop()`에서 모두 해제한다. 5초 wake 지연, 중복 resume 병합과 session 종료는 `RefreshCoordinator`가 monotonic clock 위에서 담당한다.
+
+executor의 `suspend()`는 reducer stop command를 통해 timer, in-flight request와 retained burst session을 모두 정리한다. `resumeAfterSystemWake()`는 같은 단조 timer slot에서 중복 resume 요청을 합치고 5초 뒤 한 번만 wake-baseline request를 만든다. 수동 profile에서는 running 상태만 복구하고 자동 조회는 만들지 않는다. `setLowPowerMode(_:)`는 reducer에 power 상태를 전달해 기존 retry가 아닌 schedule을 제한된 간격으로 교체한다. 앱 composition은 `SystemActivityEvent`를 이 세 API에 연결하며 별도 polling 정책을 만들지 않는다.
+
+reset 절대 시각은 wall clock `Date`이므로 polling의 단조 deadline으로 변환하지 않는다. 현재 coordinator는 reset adapter용 단발 trigger seam까지 소유하고, clock change와 새 snapshot에 따라 reset observer를 재등록하는 구현은 별도 system-integration task에서 다룬다. 이 분리는 polling timer가 wall-clock 변경으로 앞당겨지거나 지연되는 것을 막는다.
 
 ## 6. AppKit 생명주기
 

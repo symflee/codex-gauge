@@ -33,6 +33,8 @@ swift build -c release --explicit-target-dependency-import-check error
 
 package build와 단위 테스트는 실제 Codex 설치, 사용자 계정 또는 애플리케이션 네트워크 요청에 의존하지 않는다. decoder 테스트는 합성 JSONL fixture를 사용한다. process session 통합 테스트는 `codex-gauge-tests` 실행 파일 자체를 test-only 합성 `app-server`로 다시 실행해 handshake, timeout, flood와 종료를 검증한다. 이 mode는 test environment key로만 동작하며 account 이메일이나 원문 사용자 응답을 생성·기록하지 않는다.
 
+refresh executor 단위 테스트는 `RefreshClock`, `RefreshSessionProviding`과 `RefreshUsageSession` fake를 사용한다. 시간 경과는 `ContinuousClock.Instant`를 보존한 가짜 clock의 명시적 `advance`로만 만들며 실제 sleep이나 실제 Codex process를 사용하지 않는다. 비동기 완료 대기는 `Task.yield()`로 actor queue만 비워 wall-clock timing에 의존하지 않는다.
+
 ## 3. 구현 원칙
 
 - 모든 비-UI 기능은 실패하는 테스트부터 작성하고 최소 구현으로 통과시킨다.
@@ -72,6 +74,13 @@ Java 전용 코딩 규칙은 이 Swift 프로젝트에 적용하지 않는다. J
 - 네 refresh profile과 burst 진입·종료
 - reset, 감소와 동일 정수값
 - backoff, timeout과 요청 coalescing
+- 가짜 단조 시계에서 normal poll session 시작·종료와 timer 교체
+- burst당 session 하나 재사용, 증가 시 deadline 연장과 실패 시 session 폐기
+- terminal failure의 무한 재시도 방지와 수동 복구
+- stop 뒤 늦은 completion 폐기, 동시 trigger 병합과 suspend cleanup
+- 중복 system resume의 단일 5초 wake-baseline과 Low Power timer clamp
+- quota-reset 단발 trigger의 coalescing과 baseline-only 처리
+- 제품별 partial 성공 publication, 제품별 성공 시각과 stale 값 보존
 - sleep, wake, 잠금과 Low Power Mode
 - workspace·power notification의 typed system activity event 변환과 observer 해제
 - VoiceOver KVO·accessibility display notification의 최초 상태, 변경 중복 제거와 observer 해제
