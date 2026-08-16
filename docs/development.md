@@ -20,7 +20,16 @@ Codex Gauge는 외부 Swift package나 런타임을 사용하지 않는다. 새 
 
 ## 2. 빌드와 테스트
 
-shared `CodexGauge` scheme을 기준으로 한다.
+전체 Xcode가 없어도 SwiftPM 모듈과 AppKit 개발 호스트를 검증할 수 있다.
+
+```sh
+swift package describe
+swift build --explicit-target-dependency-import-check error
+swift run codex-gauge-tests
+swift build -c release --explicit-target-dependency-import-check error
+```
+
+shared `CodexGauge` scheme은 실제 `.app` bundle과 UI test의 기준이다. Xcode target은 root package의 `CodexGaugeAppKit` product를 연결하는 얇은 wrapper로 유지한다.
 
 ```sh
 xcodebuild -project CodexGauge.xcodeproj \
@@ -58,7 +67,9 @@ Java 전용 코딩 규칙은 이 Swift 프로젝트에 적용하지 않는다. J
 
 ## 4. 테스트 전략
 
-### Swift Testing
+### 단위 테스트
+
+저장소의 `codex-gauge-tests` executable은 Apple 테스트 framework가 포함되지 않은 Command Line Tools에서도 실행되는 작은 zero-dependency runner다. 순수 도메인·protocol·refresh 테스트는 이 runner에서 항상 검증한다. 전체 Xcode가 준비되면 UI·performance test에 XCTest를 사용하며, 프레임워크 차이 때문에 TDD를 미루지 않는다.
 
 - remaining percent의 0...100 경계
 - duration badge와 unknown duration

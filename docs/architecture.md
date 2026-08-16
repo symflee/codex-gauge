@@ -34,6 +34,8 @@ StatusItemController / menu / settings
 
 UI adapter는 provider를 직접 호출하지 않는다. 모든 조회는 `RefreshCoordinator`를 통해 직렬화하고, UI는 이미 해석된 snapshot과 상태만 소비한다.
 
+SwiftPM은 Core, Protocol, Refresh와 AppKit 모듈의 단일 source of truth다. Xcode application target은 이 package의 `CodexGaugeAppKit` product와 `App/CodexGauge`의 bundle metadata만 소유한다. 같은 Swift 소스를 package와 Xcode target membership에 중복 등록하지 않는다.
+
 ## 3. 도메인 경계
 
 ### `UsageProduct`

@@ -38,7 +38,15 @@ Codex Gauge는 별도의 OpenAI API key를 요구하지 않습니다. 설치된 
 
 ## 개발 상태와 빌드
 
-v0.1을 개발 중입니다. Xcode 프로젝트가 준비된 뒤에는 shared `CodexGauge` scheme으로 빌드하고 테스트합니다.
+v0.1을 개발 중입니다. 핵심 모듈과 AppKit 개발 호스트는 Swift Package Manager로 빌드하고 테스트할 수 있습니다.
+
+```sh
+swift build
+swift run codex-gauge-tests
+swift build -c release
+```
+
+전체 Xcode가 준비되면 얇은 macOS application wrapper와 shared `CodexGauge` scheme도 검증합니다.
 
 ```sh
 xcodebuild -project CodexGauge.xcodeproj \
