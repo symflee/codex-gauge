@@ -12,7 +12,10 @@ v0.1은 다음 흐름만 사용한다.
 
 1. `initialize`
 2. `initialized`
-3. `account/rateLimits/read`
+3. `account/read` (`refreshToken: false`)
+4. `account/rateLimits/read`
+
+`account/read`에서는 account provider type과 `requiresOpenaiAuth`만 즉시 비식별 상태로 분류한다. account의 이메일, plan 문자열과 그 밖의 개인 필드는 account 전용 model이나 앱 상태로 옮기지 않는다. API key와 Bedrock provider는 ChatGPT quota 미지원으로 분류하고, 미래의 알 수 없는 provider는 rate-limit 조회를 시도할 수 있는 unknown 상태로 보존한다.
 
 `account/rateLimits/updated` notification을 수신할 수는 있지만 외부 Codex 사용이 항상 기존 child에 전달된다고 가정하지 않는다. notification은 갱신 힌트로만 사용하고 polling 정책을 제거하지 않는다.
 
@@ -24,7 +27,7 @@ v0.1은 다음 흐름만 사용한다.
 - credits balance와 reset-credit 수
 - `individualLimit` spend-control
 
-`individualLimit`나 rate-limit reached 상태는 존재할 경우 메뉴의 별도 제한 정보로만 표시한다.
+`individualLimit`와 `spendControlReached`는 존재할 경우 메뉴의 별도 제한 정보로만 표시한다. 설치된 CLI가 생성한 version-specific schema에서 `individualLimit.remainingPercent`는 정수이고 `spendControlReached`는 nullable boolean이다. credits와 reset-credit는 typed 결과로 옮기지 않는다.
 
 ## 3. 전송 방식
 
@@ -32,8 +35,11 @@ v0.1은 다음 흐름만 사용한다.
 - request와 response는 UTF-8 JSON 한 개를 한 줄에 기록한다.
 - request ID는 session 내에서 단조 증가하며 matching ID 응답만 소비한다.
 - stdout의 알 수 없는 notification과 field는 무시한다.
+- JSONL은 chunk 경계, 한 chunk의 여러 줄, CRLF, 빈 줄과 마지막 newline이 없는 EOF를 처리한다.
+- 한 JSON line은 UTF-8 byte 기준 1 MiB로 제한한다.
 - stderr는 deadlock 방지를 위해 drain하지만 원문을 사용자 로그에 기록하지 않는다.
 - EOF, timeout, JSON 파싱 실패와 method-not-found를 서로 다른 typed failure로 바꾼다.
+- JSON-RPC error에서는 정수 `code`만 보존하고 원문 `message`와 `data`는 앱의 value type으로 옮기지 않는다.
 
 ## 4. 합성 예제
 
@@ -51,17 +57,38 @@ v0.1은 다음 흐름만 사용한다.
 {"method":"initialized","params":{}}
 ```
 
+### 계정 상태 조회
+
+```json
+{"id":2,"method":"account/read","params":{"refreshToken":false}}
+```
+
+```json
+{
+  "id": 2,
+  "result": {
+    "account": {
+      "type": "chatgpt",
+      "planType": "synthetic"
+    },
+    "requiresOpenaiAuth": true
+  }
+}
+```
+
+위 예제에는 의도적으로 이메일 field가 없다. Decoder가 외부에 제공하는 결과도 `rateLimitsAvailable`, `signedOut`, `unsupportedProvider`, `unknownProvider` 중 하나뿐이다.
+
 ### 한도 조회 요청
 
 ```json
-{"id":2,"method":"account/rateLimits/read","params":{}}
+{"id":3,"method":"account/rateLimits/read","params":{}}
 ```
 
 ### 한도 조회 응답
 
 ```json
 {
-  "id": 2,
+  "id": 3,
   "result": {
     "rateLimits": {
       "primary": {
@@ -81,7 +108,14 @@ v0.1은 다음 흐름만 사용한다.
           "usedPercent": 17,
           "windowDurationMins": 300,
           "resetsAt": 1893456000
-        }
+        },
+        "individualLimit": {
+          "remainingPercent": 64,
+          "limit": "synthetic",
+          "used": "synthetic",
+          "resetsAt": 1893456000
+        },
+        "spendControlReached": false
       },
       "codex_bengalfox": {
         "primary": {
@@ -105,7 +139,16 @@ v0.1은 다음 흐름만 사용한다.
 | `codex_bengalfox` | Spark | 표시 이름과 무관하게 wire key로 식별 |
 | top-level `rateLimits` | Codex fallback | multi-limit map이 없는 구버전 대응 |
 
-`rateLimitsByLimitId`가 있으면 해당 map을 우선한다. Codex key가 없고 top-level `rateLimits`만 유효하면 Codex로 사용한다. Spark를 top-level 값으로 추측하지 않는다. 한 제품의 malformed payload가 다른 제품의 성공값을 폐기하게 하지 않는다.
+`rateLimitsByLimitId`가 object로 존재하면 해당 map만 사용한다. 그 map에 Codex key가 없더라도 top-level 값을 대신 사용하지 않는다. top-level `rateLimits`는 multi-limit map이 없거나 `null`인 응답에서만 Codex fallback으로 사용한다. Spark를 top-level 값으로 추측하지 않는다.
+
+각 제품 결과는 독립적으로 다음 상태 중 하나가 된다.
+
+- `available`: 하나 이상의 정상 window가 있고 malformed window가 없음
+- `partial`: 정상 window와 malformed window가 함께 있음
+- `unavailable`: bucket 또는 모든 window가 없거나 `null`
+- `malformed`: bucket이 잘못되었거나 정상 window 없이 malformed window만 있음
+
+multi-limit map 자체가 object가 아니면 두 제품을 malformed로 분류하고 legacy 값으로 우회하지 않는다. 한 제품이나 window의 malformed payload가 다른 제품 또는 sibling window의 성공값을 폐기하게 하지 않는다.
 
 ## 6. quota 변환
 
@@ -119,9 +162,20 @@ remaining = 100 - boundedUsed
 - 유효한 값이 100 이상일 때만 남은 값을 `0%`로 표시한다.
 - 음수와 100 초과 값은 UI 안전을 위해 경계 안으로 보정하고 비식별 진단 code를 남긴다.
 - field 누락은 `0`으로 기본화하지 않고 해당 window의 부분 실패로 처리한다.
+- `usedPercent`는 정수와 부동소수 JSON number를 모두 받는다.
+- duration과 reset은 누락 또는 `null`일 수 있지만 잘못된 type은 해당 window의 malformed 결과다.
 - unknown field는 무시한다.
 - 알 수 없는 limit ID는 v0.1 표시 대상에서 제외하되 전체 decoding은 실패시키지 않는다.
 - duration이 없으면 `?`로 나타내고 월간 의미를 추측하지 않는다.
+
+Spend-control은 quota window와 별도로 최소 정보만 변환한다.
+
+- `individualLimit.remainingPercent`가 유한한 JSON number이면 `0...100`으로 clamp한 뒤 내림한다.
+- `spendControlReached`가 boolean이면 그대로 보존한다.
+- 두 field 중 해석 가능한 정보가 하나라도 있을 때만 `SpendControlLimit`를 만든다.
+- remaining percent가 없거나 잘못되면 `nil`, reached가 없으면 `nil`로 유지해 상태를 추측하지 않는다.
+- malformed spend-control은 제품의 quota `available/partial` 상태를 바꾸지 않는다.
+- `limit`, `used`, spend reset 시각, credits와 reset-credit 세부정보는 버린다.
 
 ## 7. 호환성과 오류 분류
 
@@ -140,14 +194,19 @@ remaining = 100 - boundedUsed
 
 Decoder fixture에는 다음을 포함한다.
 
+- initialize result와 JSON-RPC result/error/notification/request 분류
+- account의 로그인, 미지원 provider와 미래 provider 분류
 - Codex와 Spark가 모두 존재하는 응답
 - top-level Codex fallback
 - primary와 secondary
-- 제품별 부분 누락
+- 제품·window별 부분 누락과 독립 malformed
 - unknown field와 unknown limit ID
 - malformed JSON과 잘못된 field type
 - used percent 경계값
 - duration과 reset 시각 누락
+- 정상·malformed spend-control, remaining percent 내림과 clamp
+- split chunk, 여러 줄, CRLF, 빈 줄과 newline 없는 EOF
+- 정확히 1 MiB인 line과 상한 초과 line
 
 모든 fixture는 가상 값만 사용한다.
 
