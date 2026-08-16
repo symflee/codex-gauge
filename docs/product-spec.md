@@ -126,6 +126,8 @@ reset 상대 시간은 메뉴를 구성하는 시점에만 계산한다. 매초 
 
 창은 한 번에 하나만 연다. 닫으면 window controller, view controller와 관련 view의 강한 참조를 제거한다. 다음에 열 때 `UserDefaults`에서 설정을 읽어 화면을 다시 구성한다. allocator 특성상 프로세스 RSS가 즉시 줄지 않을 수 있지만 객체 graph는 해제되어야 한다. 실행 파일 선택 panel이 열린 상태에서 창을 닫거나 앱 종료를 시작하면 panel을 취소하고 continuation을 정확히 한 번 완료한다. 늦게 도착한 panel 응답은 무시하며 다시 연 창의 새 선택 작업과 섞지 않는다.
 
+Dock 아이콘이 없는 `LSUIElement`·accessory 앱에서도 설정이 다른 앱 뒤에 비활성 상태로 남지 않게 한다. 최초 실행과 메뉴의 `설정…`은 같은 표시 경계를 사용하며, 표시 가능한 window가 있고 종료가 시작되지 않았음을 먼저 확인한 뒤 앱을 foreground로 활성화하고 window를 key/front로 올린다. 이미 열린 창을 다시 요청할 때도 같은 순서를 한 번 수행한다. window 생성이 완료되지 않았거나 취소·종료로 표시가 거부된 요청은 앱을 불필요하게 활성화하지 않는다.
+
 연결 영역의 경로는 절대 경로 대신 `자동 감지` 또는 `사용자 선택` 출처와 안전한 executable basename을 표시한다. basename을 안전하게 표현할 수 없으면 애플리케이션 내부, Homebrew, 사용자 로컬 CLI 또는 기타 위치처럼 일반화한다. 연결 상태는 연결됨, 확인 중, 찾을 수 없음, 잘못된 선택, 로그아웃, 지원하지 않는 인증, 비호환 버전, timeout과 process 실패를 구분한다. 메모리의 연결 상태 변경은 별도 I/O 없이 열린 화면과 진단 복사 snapshot에 즉시 반영한다. 동시에 진행 중인 CLI version probe가 끝나도 시작 시점의 오래된 연결 상태로 이를 덮어쓰지 않는다.
 
 진단 복사에는 앱 버전, macOS 버전, architecture, CLI 버전, typed 연결·version 오류 code와 경로 출처·일반화 category만 포함한다. 절대 경로, 이메일, token, raw JSON과 원문 process 출력은 포함하지 않는다.

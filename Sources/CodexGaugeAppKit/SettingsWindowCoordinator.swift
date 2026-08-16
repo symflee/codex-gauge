@@ -11,6 +11,7 @@ public final class SettingsWindowCoordinator {
 
     private let repository: AppPreferencesRepository
     private let discoveredQuotaProvider: @MainActor () -> Set<QuotaSelectionID>
+    private let foregroundPresenter: any SettingsWindowForegroundPresenting
     private let launchAtLoginStateProvider: @MainActor () -> LaunchAtLoginSettingsState
     private let connectionDiagnosticsProvider: SettingsConnectionDiagnosticsProvider
     private let settingsFormValuesSaver: SettingsFormValuesSaver
@@ -42,6 +43,8 @@ public final class SettingsWindowCoordinator {
     public init(
         repository: AppPreferencesRepository,
         discoveredQuotaProvider: @escaping @MainActor () -> Set<QuotaSelectionID>,
+        foregroundPresenter: any SettingsWindowForegroundPresenting =
+            SettingsWindowForegroundPresenter(),
         connectionDiagnosticsProvider: @escaping SettingsConnectionDiagnosticsProvider = {
             selectedExecutableURL, status in
             ConnectionDiagnosticsSnapshot(
@@ -77,6 +80,7 @@ public final class SettingsWindowCoordinator {
     ) {
         self.repository = repository
         self.discoveredQuotaProvider = discoveredQuotaProvider
+        self.foregroundPresenter = foregroundPresenter
         self.launchAtLoginStateProvider = launchAtLoginStateProvider
         self.connectionDiagnosticsProvider = connectionDiagnosticsProvider
         self.settingsFormValuesSaver = settingsFormValuesSaver ?? { [repository] values in
@@ -111,9 +115,7 @@ public final class SettingsWindowCoordinator {
         }
         refreshLaunchAtLoginState()
         if let controller = activeWindowController {
-            controller.showWindow(nil)
-            controller.window?.makeKeyAndOrderFront(nil)
-            return controller
+            return present(controller)
         }
         await pendingSave?.value
         guard canShowSettings else {
@@ -124,14 +126,21 @@ public final class SettingsWindowCoordinator {
             return nil
         }
         if let controller = activeWindowController {
-            return controller
+            return present(controller)
         }
         let controller = makeWindowController(preferences: preferences)
         guard canShowSettings else {
-            controller.close()
+            discardUnpresented(controller)
             return nil
         }
-        return controller
+        guard let presentedController = present(controller) else {
+            return nil
+        }
+        scheduleConnectionDiagnostics(
+            selectedExecutableURL: preferences.selectedExecutableURL,
+            controller: presentedController
+        )
+        return presentedController
     }
 
     public func flushPendingSave() async {
@@ -238,13 +247,25 @@ public final class SettingsWindowCoordinator {
         )
         activeWindowController = controller
         onSettingsWindowCreated(controller)
-        controller.showWindow(nil)
-        controller.window?.makeKeyAndOrderFront(nil)
-        scheduleConnectionDiagnostics(
-            selectedExecutableURL: preferences.selectedExecutableURL,
-            controller: controller
-        )
         return controller
+    }
+
+    private func present(
+        _ controller: SettingsWindowController
+    ) -> SettingsWindowController? {
+        guard canShowSettings else {
+            return nil
+        }
+        guard foregroundPresenter.present(controller) else {
+            discardUnpresented(controller)
+            return nil
+        }
+        return controller
+    }
+
+    private func discardUnpresented(_ controller: SettingsWindowController) {
+        controller.close()
+        release(controller)
     }
 
     private func scheduleConnectionDiagnostics(

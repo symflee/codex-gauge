@@ -129,6 +129,7 @@ public enum CodexGaugeApplicationFactory {
         let settingsRuntime = makeSettingsRuntime(
             repository: repository,
             eventRelay: eventRelay,
+            application: application,
             diagnosticsProvider: diagnosticsProvider,
             executableSelector: executableSelector
         )
@@ -183,12 +184,18 @@ public enum CodexGaugeApplicationFactory {
     private static func makeSettingsRuntime(
         repository: AppPreferencesRepository,
         eventRelay: CodexGaugeApplicationEventRelay,
+        application: NSApplication,
         diagnosticsProvider: @escaping SettingsConnectionDiagnosticsProvider,
         executableSelector: (any CodexExecutableSelecting)?
     ) -> SettingsWindowRuntimeAdapter {
         let coordinator = SettingsWindowCoordinator(
             repository: repository,
             discoveredQuotaProvider: { eventRelay.discoveredQuotaIDs },
+            foregroundPresenter: SettingsWindowForegroundPresenter(
+                applicationActivator: NSApplicationSettingsWindowActivator(
+                    application: application
+                )
+            ),
             connectionDiagnosticsProvider: diagnosticsProvider,
             connectionStatusProvider: { eventRelay.connectionStatus },
             launchAtLoginStateProvider: { eventRelay.launchAtLoginState },

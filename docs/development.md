@@ -151,6 +151,8 @@ Java 전용 코딩 규칙은 이 Swift 프로젝트에 적용하지 않는다. J
 - pending diagnostics 중 설정 window/controller/view deallocation과 직렬 cleanup
 - terminal 설정 shutdown의 pending form save, diagnostics cleanup, panel 취소와 committed selection drain
 - form save·repository await 중 shutdown과 terminal 이후 direct show의 nil 반환·무생성
+- 설정 표시의 `activate(true) → show → key/front` 순서와 열린 창 재표시당 정확히 한 번의 activation
+- window 생성 실패·표시 전 cancellation·shutdown 이후 요청의 무-application-activation 경계
 - executable commit 중 close/reopen한 현재 window의 checking 전환과 새 URL diagnostics
 - 한국어·영어 비공식·비제휴·experimental App Server 안내 parity
 - form 변경의 runtime 적용 callback과 repository 저장 동시 전달
