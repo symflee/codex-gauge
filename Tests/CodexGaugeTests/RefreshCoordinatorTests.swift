@@ -9,6 +9,9 @@ func refreshCoordinatorTests() -> [TestCase] {
         normalPollingSessionLifecycleTest(),
         burstSessionReuseAndExtensionTest(),
         transientFailureRetryTest(),
+        serverRPCFailuresRetryTest(),
+        deterministicRawRPCFailuresStopRetryTest(),
+        deterministicRPCFailureStopsBurstTest(),
         terminalFailureWaitsForManualRetryTest(),
         missingExecutableFailureTest(),
         lateResultDiscardTest(),
@@ -164,6 +167,104 @@ private func transientFailureRetryTest() -> TestCase {
         try expect(coordinatorUsedPercent(publication, product: .codex) == 17, "Expected retry value")
         await coordinator.stop()
     }
+}
+
+private func serverRPCFailuresRetryTest() -> TestCase {
+    TestCase(name: "server JSON-RPC failures retain backoff retries") {
+        for code in [-32_603, -32_001, 42] {
+            try await expectRPCFailureRetry(code: code)
+        }
+    }
+}
+
+private func deterministicRPCFailureStopsBurstTest() -> TestCase {
+    TestCase(name: "deterministic JSON-RPC failure stops polling and retained burst child") {
+        let clock = TestRefreshClock()
+        let provider = TestRefreshSessionProvider(plans: [
+            [.success(coordinatorResult(codexUsed: 10))],
+            [
+                .success(coordinatorResult(codexUsed: 11)),
+                .failure(.protocolIncompatible)
+            ]
+        ])
+        let coordinator = makeCoordinator(clock: clock, provider: provider)
+
+        await coordinator.start()
+        try await expectMetrics(provider, starts: 1, reads: 1, stops: 1)
+        await coordinator.refreshManually()
+        try await expectMetrics(provider, starts: 2, reads: 2, stops: 1)
+        try await eventually { await coordinator.state.burstDeadline != nil }
+
+        await clock.advance(by: .seconds(20))
+        try await expectMetrics(provider, starts: 2, reads: 3, stops: 2)
+        let publication = await coordinator.publication
+        let state = await coordinator.state
+        let sleeperCount = await clock.pendingSleeperCount()
+        try expect(
+            publication.failure == .protocolIncompatible,
+            "Expected a typed protocol failure publication"
+        )
+        try expect(state.scheduledRefresh == nil, "Expected no automatic retry")
+        try expect(state.burstDeadline == nil, "Expected the retained burst state cleared")
+        try expect(sleeperCount == 0, "Expected no retained polling timer")
+
+        await clock.advance(by: .seconds(180))
+        await drainExecutor()
+        try await expectMetrics(provider, starts: 2, reads: 3, stops: 2)
+        await coordinator.stop()
+    }
+}
+
+private func deterministicRawRPCFailuresStopRetryTest() -> TestCase {
+    TestCase(name: "reserved deterministic JSON-RPC failures never retry") {
+        for code in [-32_700, -32_600, -32_601, -32_602] {
+            try await expectRPCFailureStopsRetry(code: code)
+        }
+    }
+}
+
+private func expectRPCFailureStopsRetry(code: Int) async throws {
+    let clock = TestRefreshClock()
+    let provider = TestRefreshSessionProvider(plans: [
+        [.failure(.rpcFailure(code: code))]
+    ])
+    let coordinator = makeCoordinator(clock: clock, provider: provider)
+
+    await coordinator.start()
+    try await expectMetrics(provider, starts: 1, reads: 1, stops: 1)
+    let publication = await coordinator.publication
+    let state = await coordinator.state
+    let sleeperCount = await clock.pendingSleeperCount()
+    try expect(
+        publication.failure == .protocolIncompatible,
+        "Expected a typed protocol failure"
+    )
+    try expect(state.scheduledRefresh == nil, "Expected no automatic retry")
+    try expect(sleeperCount == 0, "Expected no backoff timer")
+    await coordinator.stop()
+}
+
+private func expectRPCFailureRetry(code: Int) async throws {
+    let clock = TestRefreshClock()
+    let provider = TestRefreshSessionProvider(plans: [
+        [.failure(.rpcFailure(code: code))],
+        [.success(coordinatorResult(codexUsed: 17))]
+    ])
+    let coordinator = makeCoordinator(clock: clock, provider: provider)
+
+    await coordinator.start()
+    try await expectMetrics(provider, starts: 1, reads: 1, stops: 1)
+    let failedPublication = await coordinator.publication
+    try expect(
+        failedPublication.failure == .server(code: code),
+        "Expected a typed transient server failure"
+    )
+
+    await clock.advance(by: .seconds(30))
+    try await expectMetrics(provider, starts: 2, reads: 2, stops: 2)
+    let recoveredPublication = await coordinator.publication
+    try expect(recoveredPublication.failure == nil, "Expected retry recovery")
+    await coordinator.stop()
 }
 
 private func terminalFailureWaitsForManualRetryTest() -> TestCase {

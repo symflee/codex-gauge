@@ -105,6 +105,8 @@ SwiftPM의 `CodexGaugeStandardTests` test target은 Swift Testing의 `@Test`로 
 - 가짜 단조 시계에서 normal poll session 시작·종료와 timer 교체
 - burst당 session 하나 재사용, 증가 시 deadline 연장과 실패 시 session 폐기
 - terminal failure의 무한 재시도 방지와 수동 복구
+- JSON-RPC parse·invalid-request·invalid-params의 typed terminal 분류, 무-backoff와 retained burst child 정리
+- JSON-RPC internal·server·그 밖의 code의 typed transient publication과 backoff 복구
 - stop 뒤 늦은 completion 폐기, 동시 trigger 병합과 suspend cleanup
 - 중복 system resume의 단일 5초 wake-baseline과 Low Power timer clamp
 - system suspension·resume 대기 중 quota reset latch와 단일 reset-baseline child

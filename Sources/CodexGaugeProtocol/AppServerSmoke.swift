@@ -196,6 +196,8 @@ public struct AppServerSmokeRunner: Sendable {
             .unsupportedAuthentication
         case .unsupportedVersion:
             .unsupportedVersion
+        case .protocolIncompatible:
+            .incompatibleProtocol
         case .timeout:
             .timeout
         case .launchFailed, .processFailed, .endOfFile:

@@ -117,11 +117,13 @@ Provider는 `CodexLocating`이 검증한 URL로 session을 생성한다. `UsageS
 - `initialize` handshake
 - session 최초 조회의 `account/read` 인증 분류
 - `account/rateLimits/read`
-- timeout, EOF, malformed response와 unsupported method 분류
+- timeout, EOF, malformed response와 JSON-RPC code 분류
 
 `start()`는 child를 `app-server` argument 하나로 실행하고 5초 안에 initialize matching response를 받은 뒤 `initialized` notification을 보낸다. 첫 `readRateLimits()`는 `account/read`를 `refreshToken: false`로 한 번 호출한다. 로그인된 ChatGPT 계정 또는 미래의 unknown provider로 분류되면 그 사실만 session 메모리에 기록하고, 같은 burst session의 후속 조회는 15초 제한의 `account/rateLimits/read`만 호출한다. 새 session은 account를 다시 검증한다. signed-out과 지원하지 않는 provider는 서로 다른 typed error다.
 
 한 번에 matching response waiter 하나만 허용하고 ID는 1부터 단조 증가한다. notification, server request와 다른 ID의 response는 소비하지 않고 무시한다. stdout callback은 한 chunk를 읽는 즉시 handler를 해제하고 actor가 framing과 decoding을 끝낸 뒤에만 다시 연결한다. 따라서 noisy child에도 무한 queue나 chunk 유실 없이 pipe backpressure가 적용된다. stderr는 원문을 읽거나 기록하지 않고 null device로 직접 버려 pipe deadlock을 만들지 않는다.
+
+JSON-RPC의 `-32700` parse error, `-32600` invalid request와 `-32602` invalid params는 같은 요청을 다시 보내도 해결되지 않는 client/protocol shape 오류이므로 session의 `protocolIncompatible`로 축약한다. `-32601` method not found는 기존 `unsupportedVersion`을 유지한다. 서버 내부 오류 `-32603`, 구현 정의 server error인 `-32000...-32099`와 그 밖의 code는 원문 없이 정수 code만 가진 `rpcFailure`로 보존해 일시 실패 정책에 맡긴다.
 
 shell을 거치지 않고 실행 파일 URL을 `Process`에 직접 전달한다. production App Server child는 Codex 자체가 인증과 연결을 해석하는 데 필요한 `HOME`, locale, proxy 등을 잃지 않도록 부모 environment를 복사하되 `PATH`만 `/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/bin`으로 항상 교체한다. 따라서 Finder의 짧은 PATH나 hostile parent PATH에 의존하지 않으면서 알려진 system·Homebrew 위치의 `#!/usr/bin/env node` wrapper를 지원한다. 다른 parent environment는 필터링하지 않고 신뢰된 Codex child에 기존 상속 의미 그대로 전달하며 디스크, 진단 정보나 로그로 옮기지 않는다.
 
@@ -187,7 +189,7 @@ coordinator는 각각 하나의 timer task와 request task만 보유한다. poll
 
 ### backoff
 
-일시 실패는 30초, 1분, 2분, 4분, 8분, 16분, 30분 순으로 지수 backoff하고 이후 30분으로 제한한다. 성공하면 실패 횟수를 지우고 사용자가 선택한 프리셋으로 돌아간다. 수동 프리셋은 일시 실패에도 자동 재시도를 예약하지 않는다. 로그아웃, 실행 파일 미발견과 protocol 비호환은 무한 재시도하지 않고 사용자 조치 상태로 전환한다.
+일시 실패는 30초, 1분, 2분, 4분, 8분, 16분, 30분 순으로 지수 backoff하고 이후 30분으로 제한한다. 성공하면 실패 횟수를 지우고 사용자가 선택한 프리셋으로 돌아간다. 수동 프리셋은 일시 실패에도 자동 재시도를 예약하지 않는다. 로그아웃, 실행 파일 미발견과 protocol 비호환은 무한 재시도하지 않고 사용자 조치 상태로 전환한다. terminal JSON-RPC shape 오류가 burst 중 도착해도 보존 중인 session을 즉시 닫고 timer와 burst deadline을 모두 제거하며, UI에는 code나 message 대신 `protocolIncompatible`만 발행한다.
 
 성공 publication은 제품마다 독립적으로 갱신한다. `available` 또는 유효 window가 있는 `partial` 제품은 fresh가 되고 해당 제품의 마지막 성공 시각만 갱신한다. 정상 `unavailable` 제품의 empty window는 이전 표시값을 지우고 unavailable로 전환하되 제품별 마지막 성공 시각은 진단을 위해 유지할 수 있다. malformed 제품의 empty window만 이전 성공값과 제품별 성공 시각이 있으면 stale로 유지하며, 이전 값이 없으면 unavailable로 표시한다. 유효 window가 하나도 없는 성공 응답은 quota 값의 전역 마지막 성공 시각을 갱신하지 않지만, 별도 `lastAcceptedRateLimitResponse`에 정상 protocol 교환 시각을 기록한다. 전체 조회 실패도 이전 값은 stale로 보존하며 UI에는 raw error가 아닌 `RefreshFailure`만 전달한다. spend-control을 포함한 typed product detail과 snapshot은 메모리에만 둔다.
 

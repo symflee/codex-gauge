@@ -92,6 +92,7 @@ public enum UsageSessionError: Error, Equatable, Sendable {
     case malformedResponse
     case responseTooLarge
     case unsupportedVersion
+    case protocolIncompatible
     case signedOut
     case unsupportedAuth
     case rpcFailure(code: Int)
@@ -709,14 +710,23 @@ public actor UsageSession {
             return .malformedResponse
         }
         switch error {
-        case .rpcFailure(code: -32601):
-            return .unsupportedVersion
         case let .rpcFailure(code):
-            return .rpcFailure(code: code)
+            return mapRPCFailure(code)
         case .invalidInitializeResult:
             return handshake ? .unsupportedVersion : .malformedResponse
         case .invalidAccountResult, .invalidRateLimitsResult:
             return .malformedResponse
+        }
+    }
+
+    private func mapRPCFailure(_ code: Int) -> UsageSessionError {
+        switch code {
+        case -32_601:
+            .unsupportedVersion
+        case -32_700, -32_600, -32_602:
+            .protocolIncompatible
+        default:
+            .rpcFailure(code: code)
         }
     }
 

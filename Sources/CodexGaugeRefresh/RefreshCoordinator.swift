@@ -528,7 +528,7 @@ private struct RefreshFailureClassification {
             RefreshFailureClassification(failure: .signedOut, isTransient: false)
         case .unsupportedAuth:
             RefreshFailureClassification(failure: .unsupportedAuthentication, isTransient: false)
-        case .unsupportedVersion, .malformedResponse, .responseTooLarge:
+        case .unsupportedVersion, .protocolIncompatible, .malformedResponse, .responseTooLarge:
             RefreshFailureClassification(failure: .protocolIncompatible, isTransient: false)
         case .notStarted, .requestInProgress, .requestIdentifierExhausted:
             RefreshFailureClassification(failure: .protocolIncompatible, isTransient: false)
@@ -538,10 +538,12 @@ private struct RefreshFailureClassification {
     }
 
     private static func rpcFailure(_ code: Int) -> RefreshFailureClassification {
-        guard code != -32_601 else {
-            return RefreshFailureClassification(failure: .protocolIncompatible, isTransient: false)
+        switch code {
+        case -32_700, -32_600, -32_601, -32_602:
+            RefreshFailureClassification(failure: .protocolIncompatible, isTransient: false)
+        default:
+            RefreshFailureClassification(failure: .server(code: code), isTransient: true)
         }
-        return RefreshFailureClassification(failure: .server(code: code), isTransient: true)
     }
 }
 

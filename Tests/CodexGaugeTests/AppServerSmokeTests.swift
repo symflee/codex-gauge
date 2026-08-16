@@ -66,6 +66,12 @@ private func appServerSmokeMapsTypedSessionFailuresTest() -> TestCase {
             (.malformedResponse, .protocolFailure, "protocol_failure", 4),
             (.responseTooLarge, .protocolFailure, "protocol_failure", 4),
             (.unsupportedVersion, .unsupportedVersion, "unsupported_version", 4),
+            (
+                .protocolIncompatible,
+                .incompatibleProtocol,
+                "incompatible_protocol",
+                4
+            ),
             (.signedOut, .signedOut, "signed_out", 3),
             (
                 .unsupportedAuth,

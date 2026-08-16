@@ -231,6 +231,8 @@ presentation adapter는 이 protocol value를 AppKit과 독립적인 메뉴 의�
 
 ## 7. 호환성과 오류 분류
 
+JSON-RPC code의 의미는 공식 [JSON-RPC 2.0 Error object](https://www.jsonrpc.org/specification#error_object) 표를 기준으로 하며, 재시도 여부는 Codex Gauge가 요청 재전송의 유효성을 기준으로 정한다.
+
 | protocol 결과 | 앱 상태 |
 | --- | --- |
 | 정상 응답 | 제품별 snapshot 갱신 |
@@ -240,11 +242,15 @@ presentation adapter는 이 protocol value를 AppKit과 독립적인 메뉴 의�
 | request timeout | transient timeout 및 backoff |
 | child EOF 또는 비정상 종료 | transient process failure |
 | method-not-found | unsupported Codex version |
+| parse error (`-32700`) | terminal incompatible protocol |
+| invalid request (`-32600`) | terminal incompatible protocol |
+| invalid params (`-32602`) | terminal incompatible protocol |
+| internal error (`-32603`) 또는 server error | code만 보존한 transient failure 및 backoff |
 | initialize 실패 | incompatible protocol |
 | 인증되지 않은 account 상태 | logged out |
 | executable 없음 | Codex not found |
 
-Session adapter의 공개 오류는 lifecycle용 `notStarted`·`requestInProgress`·`requestIdentifierExhausted`, `launchFailed`, optional exit status만 가진 `processFailed`, `endOfFile`, operation별 `timeout`, `malformedResponse`, `responseTooLarge`, `unsupportedVersion`, `signedOut`, `unsupportedAuth`, code만 가진 `rpcFailure`, `stopped`, `cancelled`를 구분한다. 원문 stderr, JSON-RPC message/data, 이메일과 executable path는 오류 associated value에 넣지 않는다.
+Session adapter의 공개 오류는 lifecycle용 `notStarted`·`requestInProgress`·`requestIdentifierExhausted`, `launchFailed`, optional exit status만 가진 `processFailed`, `endOfFile`, operation별 `timeout`, `malformedResponse`, `responseTooLarge`, `unsupportedVersion`, `protocolIncompatible`, `signedOut`, `unsupportedAuth`, code만 가진 `rpcFailure`, `stopped`, `cancelled`를 구분한다. `protocolIncompatible`는 표준 JSON-RPC의 deterministic shape 오류 `-32700`, `-32600`, `-32602`만 축약한다. `-32601`은 `unsupportedVersion`이며, `-32603`, `-32000...-32099`, 양수와 그 밖의 code는 `rpcFailure`로 유지한다. 원문 stderr, JSON-RPC message/data, 이메일과 executable path는 오류 associated value에 넣지 않는다.
 
 정상 session은 소유자가 명시적으로 `stop()`한다. stop은 stdin을 닫고 제한된 grace 동안 비동기로 종료를 관찰한 뒤 필요하면 SIGKILL하며 blocking `waitUntilExit`를 사용하지 않는다. Failed session은 호출자가 stop을 누락해도 같은 bounded cleanup을 자동 실행한다.
 
@@ -253,6 +259,8 @@ Session adapter의 공개 오류는 lifecycle용 `notStarted`·`requestInProgres
 Decoder fixture에는 다음을 포함한다.
 
 - initialize result와 JSON-RPC result/error/notification/request 분류
+- method-not-found와 deterministic shape code의 terminal 분류
+- internal·server·그 밖의 JSON-RPC code의 transient 보존
 - account의 로그인, 미지원 provider와 미래 provider 분류
 - Codex와 Spark가 모두 존재하는 응답
 - top-level Codex fallback

@@ -9,6 +9,12 @@ enum SyntheticAppServerMode: String {
     case signedOut
     case unsupportedAuth
     case methodNotFound
+    case parseError
+    case invalidRequest
+    case invalidParameters
+    case internalError
+    case serverError
+    case positiveError
     case handshakeMismatch
     case malformed
     case oversized
@@ -206,8 +212,8 @@ enum SyntheticAppServer {
         identifier: Int64
     ) -> Bool {
         emitNoiseIfNeeded(mode)
-        if mode == .methodNotFound {
-            writeLine("{\"id\":\(identifier),\"error\":{\"code\":-32601,\"message\":\"synthetic\"}}")
+        if let errorCode = rateLimitFailureCode(for: mode) {
+            writeLine("{\"id\":\(identifier),\"error\":{\"code\":\(errorCode),\"message\":\"synthetic\"}}")
             return false
         }
         if mode == .malformed {
@@ -230,6 +236,29 @@ enum SyntheticAppServer {
         }
         writeLine(response)
         return true
+    }
+
+    private static func rateLimitFailureCode(
+        for mode: SyntheticAppServerMode
+    ) -> Int? {
+        switch mode {
+        case .methodNotFound:
+            -32_601
+        case .parseError:
+            -32_700
+        case .invalidRequest:
+            -32_600
+        case .invalidParameters:
+            -32_602
+        case .internalError:
+            -32_603
+        case .serverError:
+            -32_001
+        case .positiveError:
+            42
+        default:
+            nil
+        }
     }
 
     private static func emitNoiseIfNeeded(_ mode: SyntheticAppServerMode) {
