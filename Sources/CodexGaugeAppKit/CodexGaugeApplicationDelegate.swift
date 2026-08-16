@@ -1,17 +1,27 @@
 import AppKit
+import CodexGaugeCore
 
 @MainActor
 public final class CodexGaugeApplicationDelegate: NSObject, NSApplicationDelegate {
-    private var statusItem: NSStatusItem?
+    private var statusItemController: StatusItemController?
 
     public override init() {
         super.init()
     }
 
     public func applicationDidFinishLaunching(_ notification: Notification) {
-        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        item.button?.title = "…"
-        item.button?.setAccessibilityLabel("Codex 사용량 확인 중")
-        statusItem = item
+        _ = notification
+        let presenter = SystemStatusItemPresenter()
+        let controller = StatusItemController(presenter: presenter)
+        controller.setFrames([initialFrame])
+        statusItemController = controller
+    }
+
+    private var initialFrame: DisplayFrame {
+        .single(DisplayQuota(identifier: unknownCodexQuota, value: .loading))
+    }
+
+    private var unknownCodexQuota: QuotaSelectionID {
+        QuotaSelectionID(product: .codex, rawDurationMinutes: nil)
     }
 }

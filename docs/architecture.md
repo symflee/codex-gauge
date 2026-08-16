@@ -146,9 +146,13 @@ polling, burst와 backoff deadline은 wall clock 변경의 영향을 받지 않�
 
 ### 상태 항목
 
-`StatusItemController`는 앱 실행 동안 유지된다. `NSStatusItem`과 메뉴를 소유하고 현재 frame을 보여준다. menu opening 시 메모리 snapshot으로 항목을 새로 구성하지만 조회 완료를 기다리지 않는다.
+`StatusItemController`는 앱 실행 동안 유지되며 domain `DisplayFrame`을 AppKit 표현으로 바꾸는 얇은 경계다. production의 `SystemStatusItemPresenter`만 `NSStatusItem`을 알고 controller test는 주입한 presenter를 사용해 전역 status bar를 만들지 않는다. 상세 메뉴는 별도 adapter가 메모리 snapshot으로 구성하며 조회 완료를 기다리지 않는다.
 
-기간 배지는 label과 light/dark appearance를 key로 캐시한다. 캐시는 작은 고정 상한을 갖고 label이 바뀔 때만 렌더링한다.
+`StatusFrameRenderer`는 기존 `DisplayFrameFormatter`의 문자열과 접근성 의미를 그대로 사용한다. bracket token만 작은 단색 rounded-border template image로 치환하고 숫자 영역에는 monospaced digit font를 적용한다. 기간 배지는 label과 effective appearance를 key로 캐시하며 캐시는 작은 고정 상한을 갖는다. 상태 항목에는 별도 앱 아이콘이나 animation을 넣지 않는다.
+
+controller는 각 현재 frame의 제품·기간·비교 구조를 보존하고 모든 quota 값을 `stale(100)`으로 바꾼 최악값 prototype을 순수 변환으로 항상 만든다. 선택되었지만 현재 응답에 없는 대안은 호출자가 별도 prototype으로 더할 수 있다. 실제 frame과 모든 prototype을 한 번 렌더링하고 최대 측정 폭에 12pt를 더해 `NSStatusItem.length`를 고정하며, 최대 문자열을 자르는 임의 상한은 두지 않는다. 여러 frame은 attributed title과 접근성 label까지 미리 렌더링한다. `StatusFrameRotation`은 5초 timer(tolerance 1초)에서 배열 index와 presenter만 갱신하므로 tick에서 formatter, layout 측정 또는 I/O를 호출하지 않는다.
+
+frame이 하나면 scheduler에 timer 생성이나 취소 command를 보내지 않는다. 메뉴 열림, 화면 잠금, sleep, VoiceOver, Reduce Motion은 set으로 중첩 관리한다. 하나라도 활성화되면 timer를 취소하며 모든 사유가 해제되면 frame 0을 즉시 표시하고 새 5초 주기를 시작한다. 중단 중 경과한 tick은 실행하지 않는다.
 
 ### 설정 창
 
