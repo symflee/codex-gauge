@@ -25,6 +25,7 @@ Codex Gauge는 외부 Swift package나 런타임을 사용하지 않는다. 새 
 ```sh
 swift package describe
 swift build --explicit-target-dependency-import-check error
+swift test --explicit-target-dependency-import-check error
 swift run codex-gauge-tests
 swift build -c release --explicit-target-dependency-import-check error
 ```
@@ -48,7 +49,7 @@ xcodebuild -project CodexGauge.xcodeproj \
   build
 ```
 
-shared scheme의 UI smoke는 `CodexGaugeUITests`를 명시해 실행한다. 최초 실행 테스트의 두 launch는 모두 `--codex-gauge-ui-test-fixture-83`으로 외부 경계를 격리하고, 첫 launch에만 `--codex-gauge-ui-test-reset-first-launch`를 더해 완료 flag만 초기화한다. 실제 Codex 설치나 인증을 요구하지 않는다.
+shared scheme의 UI smoke는 `CodexGaugeUITests`를 명시해 실행한다. 최초 실행 테스트의 두 launch는 모두 `--codex-gauge-ui-test-fixture-83`으로 외부 경계를 격리하고, 첫 launch에만 `--codex-gauge-ui-test-reset-first-launch`를 더해 완료 flag만 초기화한다. 후속 launch는 접근성 identifier로 상태 항목의 cached menu를 열어 `설정…`을 선택하고, 설정 창을 닫은 뒤 같은 메뉴에서 다시 생성되는지 검증한다. 실제 Codex 설치나 인증을 요구하지 않는다.
 
 package build와 단위 테스트는 실제 Codex 설치, 사용자 계정 또는 애플리케이션 네트워크 요청에 의존하지 않는다. decoder 테스트는 합성 JSONL fixture를 사용한다. process session 통합 테스트는 `codex-gauge-tests` 실행 파일 자체를 test-only 합성 `app-server`로 다시 실행해 handshake, timeout, flood와 종료를 검증한다. production 환경 정책 테스트는 hostile parent PATH가 exact safe PATH로 교체되고 합성 `HOME`·secret 같은 나머지 parent environment가 보존되는지 child 안에서 확인한다. 별도 임시 fixture는 test executable 복사본을 custom interpreter로 사용한 `/usr/bin/env` wrapper로 handshake, account와 rate-limit 조회까지 수행한다. 이 mode는 합성 environment key로만 동작하며 account 이메일이나 원문 사용자 응답을 생성·기록하지 않는다.
 
@@ -74,7 +75,7 @@ Java 전용 코딩 규칙은 이 Swift 프로젝트에 적용하지 않는다. J
 
 ### 단위 테스트
 
-저장소의 `codex-gauge-tests` executable은 Apple 테스트 framework가 포함되지 않은 Command Line Tools에서도 실행되는 작은 zero-dependency runner다. 순수 도메인·protocol·refresh 테스트는 이 runner에서 항상 검증한다. Xcode wrapper의 unit·UI target은 XCTest를 사용하며, 프레임워크 차이 때문에 TDD를 미루지 않는다.
+SwiftPM의 `CodexGaugeStandardTests` test target은 Swift Testing의 `@Test`로 remaining 경계, duration·자동 선택, tolerant protocol·legacy fallback과 preference 정규화의 대표 계약을 `swift test`에서 검증한다. 저장소의 `codex-gauge-tests` executable은 Apple 테스트 framework가 포함되지 않은 Command Line Tools에서도 실행되는 작은 zero-dependency exhaustive runner이며 아래 전체 회귀 범위를 계속 담당한다. Xcode wrapper의 unit target은 XCTest smoke와 Swift Testing의 exact fixture argument 계약을 함께 실행한다. 프레임워크 차이 때문에 TDD를 미루지 않는다.
 
 - remaining percent의 0...100 경계, 100 미만 소수 사용률의 최소 1%와 100 이상에서만 0% 처리
 - duration badge와 unknown duration
@@ -183,6 +184,8 @@ Java 전용 코딩 규칙은 이 Swift 프로젝트에 적용하지 않는다. J
 - 설정 window/controller/view deallocation
 - 로그인 시 실행 adapter
 - Release CPU와 memory metric
+
+위 목록의 저장·동시성·deallocation 계약은 exhaustive runner의 AppKit 단위 테스트가 담당한다. XCUITest는 합성 상태 항목의 접근성 label, 최초 실행 창의 1회 표시와 cached menu의 `설정…`을 통한 창 열기·닫기·재생성 composition만 담당한다.
 
 UI 테스트에서 최초 실행 화면을 재현할 때는 정확한 `--codex-gauge-ui-test-reset-first-launch` argument를 사용한다. 이 seam은 namespaced defaults domain을 삭제하지 않고 `hasCompletedFirstLaunch`만 false로 바꾸므로 표시·갱신·로그인·선택 executable 설정을 보존한다. fixture 활성화 자체는 이 flag를 바꾸지 않는다. 일반 production 실행과 smoke test에서는 이 argument를 전달하지 않는다.
 
@@ -311,7 +314,7 @@ feat(menubar): render quota status frames
 
 - 현재 `.github/workflows/ci.yml`은 pull request, main push와 수동 실행에서 동일한 `build-test` job을 실행한다. branch ruleset의 필수 check 이름도 `build-test`로 고정한다.
 - runner는 floating `macos-latest`가 아닌 `macos-26`을 사용하고 `DEVELOPER_DIR=/Applications/Xcode_26.6.app/Contents/Developer`로 toolchain을 고정한다.
-- gate는 package describe, warnings-as-errors 및 explicit dependency import check를 적용한 SwiftPM Debug build, `swift run codex-gauge-tests`, 동일한 strict Release build와 Xcode unit smoke다. main push와 수동 실행에서는 최초 실행 UI smoke도 수행한다.
+- gate는 package describe, warnings-as-errors 및 explicit dependency import check를 적용한 SwiftPM Debug build, strict concurrency·warnings-as-errors를 적용한 `swift test`, `swift run codex-gauge-tests`, 동일한 strict Release build와 Xcode unit smoke다. main push와 수동 실행에서는 최초 실행과 설정 menu lifecycle UI smoke도 수행한다.
 - Xcode UI smoke는 별도 인증서나 secret 없이 ad-hoc signing으로 실행한다. Release는 signing을 비활성화하고 exact `arm64 x86_64`로 빌드한 뒤 `lipo`에서 두 architecture와 bundle의 `LSUIElement=true`를 검증한다. ad-hoc test signing과 unsigned build로 배포 서명·공증이나 실제 macOS 13 실행을 대신 주장하지 않는다.
 - job timeout은 30분이며 같은 workflow와 ref의 이전 실행은 취소한다.
 - workflow `GITHUB_TOKEN`은 `contents: read`만 허용하고 checkout credential을 작업 copy에 유지하지 않는다. checkout 이외의 action, cache, Codecov와 secret을 사용하지 않는다.

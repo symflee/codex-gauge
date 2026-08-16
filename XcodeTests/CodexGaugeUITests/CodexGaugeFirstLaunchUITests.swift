@@ -1,7 +1,10 @@
 import XCTest
 
 final class CodexGaugeFirstLaunchUITests: XCTestCase {
-    private let settingsWindowTitle = "Codex Gauge 설정"
+    private let statusItemIdentifier = "codex-gauge.status-item"
+    private let settingsMenuIdentifier = "codex-gauge.menu.action.settings"
+    private let settingsWindowIdentifier = "codex-gauge.settings.window"
+    private let settingsCloseIdentifier = "codex-gauge.settings.close"
     private let statusAccessibilityLabel =
         "Codex 5시간 한도 남은 사용량 83퍼센트"
 
@@ -15,7 +18,7 @@ final class CodexGaugeFirstLaunchUITests: XCTestCase {
 
         application.launch()
 
-        let settingsWindow = application.windows[settingsWindowTitle]
+        let settingsWindow = application.windows[settingsWindowIdentifier]
         XCTAssertTrue(
             settingsWindow.waitForExistence(timeout: 10),
             "Expected the first-launch settings window"
@@ -28,10 +31,11 @@ final class CodexGaugeFirstLaunchUITests: XCTestCase {
         assertSyntheticStatus(in: subsequentApplication)
 
         XCTAssertFalse(
-            subsequentApplication.windows[settingsWindowTitle]
+            subsequentApplication.windows[settingsWindowIdentifier]
                 .waitForExistence(timeout: 3),
             "Expected later launches to keep settings closed"
         )
+        assertSettingsMenuLifecycle(in: subsequentApplication)
     }
 
     @MainActor
@@ -53,17 +57,50 @@ final class CodexGaugeFirstLaunchUITests: XCTestCase {
 
     @MainActor
     private func assertSyntheticStatus(in application: XCUIApplication) {
-        let statusItem = application.statusItems
-            .matching(
-                NSPredicate(
-                    format: "label == %@",
-                    statusAccessibilityLabel
-                )
-            )
-            .firstMatch
+        let statusItem = application.statusItems[statusItemIdentifier]
         XCTAssertTrue(
             statusItem.waitForExistence(timeout: 10),
             "Expected the synthetic Codex status accessibility label"
         )
+        XCTAssertEqual(statusItem.label, statusAccessibilityLabel)
+    }
+
+    @MainActor
+    private func assertSettingsMenuLifecycle(in application: XCUIApplication) {
+        openSettingsFromStatusItem(in: application)
+        let settingsWindow = application.windows[settingsWindowIdentifier]
+        XCTAssertTrue(
+            settingsWindow.waitForExistence(timeout: 10),
+            "Expected the settings menu action to show the window"
+        )
+
+        let closeButton = settingsWindow.buttons[settingsCloseIdentifier]
+        XCTAssertTrue(closeButton.waitForExistence(timeout: 5))
+        closeButton.click()
+        XCTAssertTrue(
+            settingsWindow.waitForNonExistence(timeout: 5),
+            "Expected closing settings to remove the window"
+        )
+
+        openSettingsFromStatusItem(in: application)
+        XCTAssertTrue(
+            application.windows[settingsWindowIdentifier]
+                .waitForExistence(timeout: 10),
+            "Expected settings to be recreated from the menu"
+        )
+    }
+
+    @MainActor
+    private func openSettingsFromStatusItem(in application: XCUIApplication) {
+        let statusItem = application.statusItems[statusItemIdentifier]
+        XCTAssertTrue(statusItem.waitForExistence(timeout: 10))
+        statusItem.click()
+
+        let settingsMenuItem = application.menuItems[settingsMenuIdentifier]
+        XCTAssertTrue(
+            settingsMenuItem.waitForExistence(timeout: 5),
+            "Expected the cached menu to expose Settings"
+        )
+        settingsMenuItem.click()
     }
 }

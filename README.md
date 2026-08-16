@@ -42,9 +42,12 @@ v0.1을 개발 중입니다. 핵심 모듈과 AppKit 개발 호스트는 Swift P
 
 ```sh
 swift build
+swift test
 swift run codex-gauge-tests
 swift build -c release
 ```
+
+`swift test`는 Swift Testing으로 핵심 quota·선택·protocol·설정 계약을 표준 도구에서 검증하고, `codex-gauge-tests`는 Command Line Tools에서도 동작하는 zero-dependency exhaustive runner로 전체 회귀 범위를 유지합니다.
 
 실제 `.app`은 root package의 `CodexGaugeAppKit` product를 연결한 얇은 Xcode application target으로 빌드합니다. shared `CodexGauge` scheme에는 application, unit test와 UI test target이 포함됩니다.
 
@@ -64,7 +67,7 @@ xcodebuild -project CodexGauge.xcodeproj \
 
 공개 CI는 SwiftPM 전체 테스트와 Xcode unit smoke, main·수동 실행의 UI smoke 및 signing-disabled universal Release 빌드를 검증합니다. 사용자 인증이나 실제 Codex 설치에 의존하지 않으며 protocol 테스트는 합성 fixture만 사용합니다. 실제 App Server smoke test는 개발자가 명시적으로 실행하는 로컬 테스트로만 제공합니다.
 
-Debug 구성의 XCUITest에서 실제 메뉴 막대·메뉴·설정 창 composition을 검증할 때는 정확한 `--codex-gauge-ui-test-fixture-83` 실행 인자를 사용합니다. 이 opt-in 모드는 메모리에 합성 Codex 5시간 한도 `83%`를 게시하며 Codex 탐색·프로세스·인증·네트워크와 로그인 항목 변경을 수행하지 않습니다. 최초 실행 완료 상태는 별도의 `--codex-gauge-ui-test-reset-first-launch` 인자로만 초기화하므로 후속 fixture 실행에서도 한 번만 표시되는 설정 창을 검증할 수 있습니다. Release 빌드는 fixture 인자를 무시하고 항상 production 경계를 사용하며, 일반 실행에도 이 인자를 전달하지 않습니다.
+Debug 구성의 XCUITest에서 실제 메뉴 막대·메뉴·설정 창 composition을 검증할 때는 정확한 `--codex-gauge-ui-test-fixture-83` 실행 인자를 사용합니다. 이 opt-in 모드는 메모리에 합성 Codex 5시간 한도 `83%`를 게시하며 Codex 탐색·프로세스·인증·네트워크와 로그인 항목 변경을 수행하지 않습니다. 최초 실행 완료 상태는 별도의 `--codex-gauge-ui-test-reset-first-launch` 인자로만 초기화하므로 후속 fixture 실행에서도 한 번만 표시되는 설정 창과 상태 메뉴에서 설정을 열고 닫은 뒤 다시 만드는 생명주기를 검증할 수 있습니다. Release 빌드는 fixture 인자를 무시하고 항상 production 경계를 사용하며, 일반 실행에도 이 인자를 전달하지 않습니다.
 
 실제 설치와 로그인을 한 번 확인하려면 다음 명령을 직접 실행합니다.
 

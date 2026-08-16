@@ -65,6 +65,12 @@ public final class SettingsWindowController: NSWindowController, NSWindowDelegat
             defer: false
         )
         window.title = SettingsStrings.windowTitle
+        window.setAccessibilityIdentifier(
+            CodexGaugeAccessibilityIdentifier.settingsWindow
+        )
+        window.standardWindowButton(.closeButton)?.setAccessibilityIdentifier(
+            CodexGaugeAccessibilityIdentifier.settingsCloseButton
+        )
         window.contentViewController = contentViewController
         window.contentMinSize = NSSize(width: 440, height: 720)
         window.contentMaxSize = NSSize(width: 440, height: 720)

@@ -89,6 +89,14 @@ let package = Package(
         .executableTarget(
             name: "CodexGaugeSmokeExecutable",
             dependencies: ["CodexGaugeProtocol"]
+        ),
+        .testTarget(
+            name: "CodexGaugeStandardTests",
+            dependencies: [
+                "CodexGaugeCore",
+                "CodexGaugeProtocol",
+                "CodexGaugeSettings"
+            ]
         )
     ],
     swiftLanguageModes: [.v6]
