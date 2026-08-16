@@ -26,12 +26,14 @@ public struct RefreshPresentationAdapter: Sendable {
     public func makePresentation(
         publication: RefreshPublication,
         preference: DisplayPreference,
+        canOpenCodexApplication: Bool,
         now: Date
     ) -> RefreshPresentation {
         let states = productStates(from: publication)
         let menuInput = makeMenuInput(
             publication: publication,
-            productStates: states
+            productStates: states,
+            canOpenCodexApplication: canOpenCodexApplication
         )
         return RefreshPresentation(
             frames: frameBuilder.makeFrames(
@@ -54,13 +56,17 @@ public struct RefreshPresentationAdapter: Sendable {
 
     private func makeMenuInput(
         publication: RefreshPublication,
-        productStates: [UsageProduct: ProductUsageState]
+        productStates: [UsageProduct: ProductUsageState],
+        canOpenCodexApplication: Bool
     ) -> QuotaDetailsMenuInput {
         QuotaDetailsMenuInput(
             productStates: productStates,
             issuesByProduct: issues(from: publication),
             lastSuccessfulRefreshByProduct: successfulRefreshes(from: publication),
-            codexAvailability: availability(for: publication.failure)
+            codexAvailability: availability(
+                for: publication.failure,
+                canOpenCodexApplication: canOpenCodexApplication
+            )
         )
     }
 
@@ -111,16 +117,17 @@ public struct RefreshPresentationAdapter: Sendable {
     }
 
     private func availability(
-        for failure: RefreshFailure?
+        for failure: RefreshFailure?,
+        canOpenCodexApplication: Bool
     ) -> CodexMenuAvailability {
         guard let failure else {
-            return .available
+            return canOpenCodexApplication ? .available : .needsSelection
         }
         return switch failure {
         case .codexNotFound, .invalidCodexSelection:
             .needsSelection
         default:
-            .available
+            canOpenCodexApplication ? .available : .needsSelection
         }
     }
 

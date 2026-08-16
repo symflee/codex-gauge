@@ -9,6 +9,7 @@ func refreshPresentationAdapterTests() -> [TestCase] {
         refreshPresentationBuildsFramesAndMenuInputTest(),
         refreshPresentationKeepsProductIssuesIndependentTest(),
         refreshPresentationMapsGlobalFailuresTest(),
+        refreshPresentationUsesExecutableSelectionWithoutApplicationTest(),
         refreshPresentationPreservesLoadingStateTest(),
         refreshPresentationValuesAreSendableTest()
     ]
@@ -44,6 +45,7 @@ private func refreshPresentationBuildsFramesAndMenuInputTest() -> TestCase {
         let presentation = RefreshPresentationAdapter().makePresentation(
             publication: publication,
             preference: preference,
+            canOpenCodexApplication: true,
             now: capturedAt
         )
 
@@ -97,6 +99,7 @@ private func refreshPresentationKeepsProductIssuesIndependentTest() -> TestCase 
         let presentation = RefreshPresentationAdapter().makePresentation(
             publication: publication,
             preference: .default,
+            canOpenCodexApplication: true,
             now: capturedAt
         )
 
@@ -141,6 +144,7 @@ private func refreshPresentationMapsGlobalFailuresTest() -> TestCase {
                     isRefreshing: false
                 ),
                 preference: .default,
+                canOpenCodexApplication: true,
                 now: Date(timeIntervalSince1970: 1_900_000_000)
             )
 
@@ -159,11 +163,28 @@ private func refreshPresentationMapsGlobalFailuresTest() -> TestCase {
     }
 }
 
+private func refreshPresentationUsesExecutableSelectionWithoutApplicationTest() -> TestCase {
+    TestCase(name: "refresh presentation selects an executable when no application can open") {
+        let presentation = RefreshPresentationAdapter().makePresentation(
+            publication: .initial,
+            preference: .default,
+            canOpenCodexApplication: false,
+            now: Date(timeIntervalSince1970: 1_900_000_000)
+        )
+
+        try expect(
+            presentation.menuInput.codexAvailability == .needsSelection,
+            "Expected an actionable executable selection instead of a no-op open action"
+        )
+    }
+}
+
 private func refreshPresentationPreservesLoadingStateTest() -> TestCase {
     TestCase(name: "refresh presentation preserves initial loading without fake errors") {
         let presentation = RefreshPresentationAdapter().makePresentation(
             publication: .initial,
             preference: .default,
+            canOpenCodexApplication: true,
             now: Date(timeIntervalSince1970: 1_900_000_000)
         )
 
@@ -181,6 +202,7 @@ private func refreshPresentationValuesAreSendableTest() -> TestCase {
         let presentation = RefreshPresentationAdapter().makePresentation(
             publication: .initial,
             preference: .default,
+            canOpenCodexApplication: true,
             now: Date(timeIntervalSince1970: 1_900_000_000)
         )
         requireRefreshPresentationSendable(RefreshPresentationAdapter())
