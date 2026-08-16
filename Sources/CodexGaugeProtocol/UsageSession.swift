@@ -27,15 +27,29 @@ public struct CodexUsageProvider: CodexUsageProviding, Sendable {
 }
 
 public struct UsageSessionConfiguration: Equatable, Sendable {
-    public static let production = UsageSessionConfiguration(
-        initializeTimeout: .seconds(5),
-        requestTimeout: .seconds(15),
-        stopGracePeriod: .milliseconds(500)
-    )
+    public static var production: UsageSessionConfiguration {
+        production(inheriting: ProcessInfo.processInfo.environment)
+    }
+
+    package static func production(
+        inheriting environment: [String: String],
+        safeSearchPath: String = CodexProcessEnvironment.safeSearchPath
+    ) -> UsageSessionConfiguration {
+        UsageSessionConfiguration(
+            initializeTimeout: .seconds(5),
+            requestTimeout: .seconds(15),
+            stopGracePeriod: .milliseconds(500),
+            environment: CodexProcessEnvironment.appServer(
+                inheriting: environment,
+                safeSearchPath: safeSearchPath
+            )
+        )
+    }
 
     public let initializeTimeout: Duration
     public let requestTimeout: Duration
     public let stopGracePeriod: Duration
+    package let environment: [String: String]?
 
     public init(
         initializeTimeout: Duration,
@@ -45,6 +59,19 @@ public struct UsageSessionConfiguration: Equatable, Sendable {
         self.initializeTimeout = initializeTimeout
         self.requestTimeout = requestTimeout
         self.stopGracePeriod = stopGracePeriod
+        environment = nil
+    }
+
+    private init(
+        initializeTimeout: Duration,
+        requestTimeout: Duration,
+        stopGracePeriod: Duration,
+        environment: [String: String]
+    ) {
+        self.initializeTimeout = initializeTimeout
+        self.requestTimeout = requestTimeout
+        self.stopGracePeriod = stopGracePeriod
+        self.environment = environment
     }
 }
 
@@ -195,6 +222,9 @@ public actor UsageSession {
         child.standardInput = input
         child.standardOutput = output
         child.standardError = FileHandle.nullDevice
+        if let environment = configuration.environment {
+            child.environment = environment
+        }
     }
 
     private func installCallbacks(

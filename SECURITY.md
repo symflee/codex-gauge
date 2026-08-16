@@ -27,6 +27,7 @@ Codex Gauge는 다음 원칙을 지킵니다.
 
 - 설치된 Codex 실행 파일이 소유한 인증을 재사용하며 인증 파일을 직접 읽지 않음
 - shell을 거치지 않고 검증한 executable을 직접 실행
+- App Server child에는 인증에 필요한 부모 환경을 그대로 상속하되 `PATH`만 고정된 system·Homebrew 목록으로 교체하고, 환경값을 영속 저장·로그하지 않음
 - 공식 App Server JSONL method만 사용
 - token, 이메일, raw JSONL, stderr와 quota history를 저장하지 않음
 - telemetry와 외부 analytics·crash SDK를 사용하지 않음

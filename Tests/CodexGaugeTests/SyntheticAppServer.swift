@@ -20,25 +20,54 @@ enum SyntheticAppServerMode: String {
     case stderrFlood
     case stopDuringRequest
     case waitForStop
+    case environmentBoundary
+    case safeSearchPath
 }
 
 enum SyntheticAppServer {
     static let modeEnvironmentKey = "CODEX_GAUGE_SYNTHETIC_APP_SERVER_MODE"
     static let pidFileEnvironmentKey = "CODEX_GAUGE_SYNTHETIC_PID_FILE"
+    static let secretEnvironmentKey = "CODEX_GAUGE_SYNTHETIC_PARENT_SECRET"
+    static let expectedHomeDirectory = "/synthetic/authentication-home"
+    static let expectedSecretValue = "synthetic-sensitive-value"
+    static let productionSafeSearchPath =
+        "/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/bin"
 
     static func runIfRequested() -> Bool {
-        guard CommandLine.arguments.dropFirst().first == "app-server" else {
+        let mode = configuredMode()
+        guard hasAppServerArgument(mode: mode) else {
             return false
         }
-        guard CommandLine.arguments.count == 2 else {
+        guard isAppServerInvocation(mode: mode) else {
             Darwin.exit(64)
         }
-        guard let mode = configuredMode() else {
+        guard let mode else {
             Darwin.exit(65)
         }
         recordProcessIdentifier()
         run(mode)
         return true
+    }
+
+    private static func hasAppServerArgument(
+        mode: SyntheticAppServerMode?
+    ) -> Bool {
+        if CommandLine.arguments.dropFirst().first == "app-server" {
+            return true
+        }
+        return mode == .safeSearchPath
+            && CommandLine.arguments.last == "app-server"
+    }
+
+    private static func isAppServerInvocation(
+        mode: SyntheticAppServerMode?
+    ) -> Bool {
+        guard mode == .safeSearchPath else {
+            return CommandLine.arguments.count == 2
+                && CommandLine.arguments.dropFirst().first == "app-server"
+        }
+        return CommandLine.arguments.count >= 2
+            && CommandLine.arguments.last == "app-server"
     }
 
     private static func configuredMode() -> SyntheticAppServerMode? {
@@ -55,6 +84,7 @@ enum SyntheticAppServer {
     }
 
     private static func run(_ mode: SyntheticAppServerMode) {
+        verifyEnvironmentBoundaryIfNeeded(mode)
         guard let initialize = readRequest(method: "initialize", identifier: 1) else {
             Darwin.exit(65)
         }
@@ -74,6 +104,24 @@ enum SyntheticAppServer {
             return
         }
         runReadLoop(mode)
+    }
+
+    private static func verifyEnvironmentBoundaryIfNeeded(
+        _ mode: SyntheticAppServerMode
+    ) {
+        guard mode == .environmentBoundary else {
+            return
+        }
+        let environment = ProcessInfo.processInfo.environment
+        guard environment["PATH"] == productionSafeSearchPath else {
+            Darwin.exit(71)
+        }
+        guard environment["HOME"] == expectedHomeDirectory else {
+            Darwin.exit(72)
+        }
+        guard environment[secretEnvironmentKey] == expectedSecretValue else {
+            Darwin.exit(73)
+        }
     }
 
     private static var expectedInitializeParameters: JSONValue {

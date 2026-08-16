@@ -6,6 +6,8 @@ import Foundation
 func usageSessionTests() -> [TestCase] {
     [
         providerCreatesSessionFromLocatorTest(),
+        sessionUsesProductionEnvironmentBoundaryTest(),
+        sessionLaunchesEnvInterpreterWrapperTest(),
         sessionCompletesProtocolFlowTest(),
         sessionIgnoresUnrelatedMessagesTest(),
         sessionAllowsUnknownProviderTest(),
@@ -21,6 +23,72 @@ func usageSessionTests() -> [TestCase] {
         sessionCleansUpFailedChildWithoutExplicitStopTest(),
         sessionValuesAreSendableTest()
     ]
+}
+
+private func sessionUsesProductionEnvironmentBoundaryTest() -> TestCase {
+    TestCase(name: "usage session fixes PATH while preserving the authentication environment") {
+        let inheritedEnvironment = [
+            "PATH": "/synthetic/hostile/path",
+            "HOME": SyntheticAppServer.expectedHomeDirectory,
+            SyntheticAppServer.modeEnvironmentKey:
+                SyntheticAppServerMode.environmentBoundary.rawValue,
+            SyntheticAppServer.secretEnvironmentKey:
+                SyntheticAppServer.expectedSecretValue
+        ]
+        let configuration = UsageSessionConfiguration.production(
+            inheriting: inheritedEnvironment
+        )
+        try expect(
+            configuration.environment == [
+                "PATH": SyntheticAppServer.productionSafeSearchPath,
+                "HOME": SyntheticAppServer.expectedHomeDirectory,
+                SyntheticAppServer.modeEnvironmentKey:
+                    SyntheticAppServerMode.environmentBoundary.rawValue,
+                SyntheticAppServer.secretEnvironmentKey:
+                    SyntheticAppServer.expectedSecretValue
+            ],
+            "Expected only the inherited PATH to be replaced"
+        )
+        let session = UsageSession(
+            executableURL: syntheticExecutableURL,
+            configuration: configuration
+        )
+
+        try await session.start()
+        _ = try await session.readRateLimits(capturedAt: syntheticDate)
+        await session.stop()
+    }
+}
+
+private func sessionLaunchesEnvInterpreterWrapperTest() -> TestCase {
+    TestCase(name: "usage session resolves an env interpreter for the full App Server flow") {
+        let store = try SyntheticAppServerPathStore()
+        defer { store.cleanUp() }
+        let configuration = UsageSessionConfiguration.production(
+            inheriting: [
+                SyntheticAppServer.modeEnvironmentKey:
+                    SyntheticAppServerMode.safeSearchPath.rawValue
+            ],
+            safeSearchPath: store.directoryURL.path
+        )
+        let locator = CodexExecutableLocator(
+            selectedExecutableURL: store.wrapperURL,
+            homeDirectoryURL: store.directoryURL
+        )
+        let provider = CodexUsageProvider(
+            locator: locator,
+            configuration: configuration
+        )
+        let session = try provider.makeSession()
+
+        try await session.start()
+        let result = try await session.readRateLimits(capturedAt: syntheticDate)
+        try expect(
+            result.rateLimits(for: .codex).state == .available,
+            "Expected the wrapper-backed App Server response"
+        )
+        await session.stop()
+    }
 }
 
 private func providerCreatesSessionFromLocatorTest() -> TestCase {
@@ -225,6 +293,10 @@ private func sessionValuesAreSendableTest() -> TestCase {
 
 private let syntheticDate = Date(timeIntervalSince1970: 1_899_000_000)
 
+private var syntheticExecutableURL: URL {
+    URL(fileURLWithPath: CommandLine.arguments[0]).standardizedFileURL
+}
+
 private let testConfiguration = UsageSessionConfiguration(
     initializeTimeout: .milliseconds(180),
     requestTimeout: .seconds(1),
@@ -246,9 +318,8 @@ private let cleanupTestConfiguration = UsageSessionConfiguration(
 private func makeSession(
     configuration: UsageSessionConfiguration = testConfiguration
 ) throws -> UsageSession {
-    let executableURL = URL(fileURLWithPath: CommandLine.arguments[0]).standardizedFileURL
     let locator = CodexExecutableLocator(
-        selectedExecutableURL: executableURL,
+        selectedExecutableURL: syntheticExecutableURL,
         homeDirectoryURL: FileManager.default.temporaryDirectory
     )
     let provider = CodexUsageProvider(locator: locator, configuration: configuration)
@@ -396,4 +467,44 @@ private func expectProcessExit(_ processIdentifier: pid_t) async throws {
 
 private func requireSessionSendable<Value: Sendable>(_ value: Value) {
     _ = value
+}
+
+private struct SyntheticAppServerPathStore {
+    static let interpreterName = "codex-gauge-synthetic-app-server-interpreter"
+
+    let directoryURL: URL
+    let wrapperURL: URL
+
+    init() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("codex-gauge-session-path-\(UUID().uuidString)")
+        let interpreter = directory.appendingPathComponent(Self.interpreterName)
+        let wrapper = directory.appendingPathComponent("synthetic-codex")
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: false
+        )
+        try FileManager.default.copyItem(at: syntheticExecutableURL, to: interpreter)
+        try Self.makeExecutable(interpreter)
+        try Self.writeWrapper(to: wrapper)
+        directoryURL = directory
+        wrapperURL = wrapper
+    }
+
+    func cleanUp() {
+        try? FileManager.default.removeItem(at: directoryURL)
+    }
+
+    private static func writeWrapper(to url: URL) throws {
+        let contents = "#!/usr/bin/env \(interpreterName)\n"
+        try Data(contents.utf8).write(to: url, options: .atomic)
+        try makeExecutable(url)
+    }
+
+    private static func makeExecutable(_ url: URL) throws {
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o755],
+            ofItemAtPath: url.path
+        )
+    }
 }

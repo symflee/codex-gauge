@@ -146,10 +146,6 @@ public struct CodexCLIVersionParser: Sendable {
 }
 
 public struct CodexCLIVersionProbeConfiguration: Equatable, Sendable {
-    private static let productionEnvironmentKeys = ["LANG", "LC_ALL", "LC_CTYPE"]
-    private static let productionSafeSearchPath =
-        "/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/bin"
-
     public static var production: CodexCLIVersionProbeConfiguration {
         production(inheriting: ProcessInfo.processInfo.environment)
     }
@@ -159,7 +155,7 @@ public struct CodexCLIVersionProbeConfiguration: Equatable, Sendable {
     ) -> CodexCLIVersionProbeConfiguration {
         production(
             inheriting: environment,
-            safeSearchPath: productionSafeSearchPath
+            safeSearchPath: CodexProcessEnvironment.safeSearchPath
         )
     }
 
@@ -171,8 +167,8 @@ public struct CodexCLIVersionProbeConfiguration: Equatable, Sendable {
             timeout: .seconds(2),
             stopGracePeriod: .milliseconds(250),
             maximumOutputBytes: CodexCLIVersionParser.maximumInputBytes,
-            environment: allowlistedEnvironment(
-                from: environment,
+            environment: CodexProcessEnvironment.versionProbe(
+                inheriting: environment,
                 safeSearchPath: safeSearchPath
             )
         )
@@ -193,17 +189,6 @@ public struct CodexCLIVersionProbeConfiguration: Equatable, Sendable {
         self.stopGracePeriod = stopGracePeriod
         self.maximumOutputBytes = max(1, maximumOutputBytes)
         self.environment = environment
-    }
-
-    private static func allowlistedEnvironment(
-        from environment: [String: String],
-        safeSearchPath: String
-    ) -> [String: String] {
-        var allowed = ["PATH": safeSearchPath]
-        for key in productionEnvironmentKeys {
-            allowed[key] = environment[key]
-        }
-        return allowed
     }
 }
 
