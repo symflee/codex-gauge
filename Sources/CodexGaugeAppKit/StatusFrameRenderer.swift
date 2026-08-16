@@ -34,14 +34,17 @@ public protocol StatusFrameRendering: AnyObject {
 
 @MainActor
 public final class StatusFrameRenderer: StatusFrameRendering {
-    private let formatter: DisplayFrameFormatter
+    private let titleFormatter: DisplayFrameFormatter
+    private let accessibilityFormatter: StatusAccessibilityFormatter
     private let badgeCache: StatusBadgeImageCache
 
     public init(
-        formatter: DisplayFrameFormatter = DisplayFrameFormatter(),
+        titleFormatter: DisplayFrameFormatter = DisplayFrameFormatter(),
+        accessibilityFormatter: StatusAccessibilityFormatter = StatusAccessibilityFormatter(),
         badgeCache: StatusBadgeImageCache = StatusBadgeImageCache()
     ) {
-        self.formatter = formatter
+        self.titleFormatter = titleFormatter
+        self.accessibilityFormatter = accessibilityFormatter
         self.badgeCache = badgeCache
     }
 
@@ -49,12 +52,12 @@ public final class StatusFrameRenderer: StatusFrameRendering {
         _ frame: DisplayFrame,
         appearance: NSAppearance?
     ) -> RenderedStatusFrame {
-        let formatted = formatter.format(frame)
+        let formatted = titleFormatter.format(frame)
         let result = makeAttributedTitle(formatted.title, appearance: appearance)
         return RenderedStatusFrame(
             attributedTitle: result.title,
             semanticTitle: formatted.title,
-            accessibilityLabel: formatted.accessibilityLabel,
+            accessibilityLabel: accessibilityFormatter.format(frame),
             badgeLabels: result.badgeLabels,
             measuredWidth: ceil(result.title.size().width)
         )

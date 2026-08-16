@@ -80,7 +80,7 @@ Codex와 Spark를 나타낸다. App Server의 문자열 ID는 protocol adapter�
 
 ### `DisplayPreference`와 `DisplayFrame`
 
-Preference는 제품 모드와 자동·직접 한도 선택을 표현한다. Frame은 상태바 title, 배지 정보와 완전한 접근성 문자열로 구성된다. 여러 frame은 builder에서 미리 생성하고 rotation timer는 배열 index만 바꾼다.
+Preference는 제품 모드와 자동·직접 한도 선택을 표현한다. Frame은 상태바 title을 만들 제품·기간·상태 의미를 보존한다. Core formatter는 locale과 무관한 compact title만 만들고 AppKit의 `StatusAccessibilityFormatter`가 localization resource와 기간 단위 vocabulary로 완전한 접근성 문장을 구성한다. 여러 frame은 builder에서 미리 생성하고 rotation timer는 배열 index만 바꾼다.
 
 직접 선택 ID는 제품과 normalized raw duration의 값 조합이다. `ProductUsageState`는 제품마다 loading, fresh value, stale value와 unavailable을 독립적으로 유지한다. `DisplayFrameBuilder`는 주입받은 현재 시각을 기준으로 reset 도달 또는 24시간 경과 값을 폐기하며 AppKit이나 timer에 의존하지 않는다.
 

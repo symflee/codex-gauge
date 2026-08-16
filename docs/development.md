@@ -82,6 +82,7 @@ Java 전용 코딩 규칙은 이 Swift 프로젝트에 적용하지 않는다. J
 - 직접 선택 유지, 누락과 정렬
 - Codex·Spark 동일 기간 결합과 다른 기간 frame
 - fresh, stale, loading, unavailable 표현
+- 상태 접근성 문장의 한국어·영어 localization과 기간 단위 의미 보존
 - 기간 배지의 appearance별 재사용과 cache 상한
 - 상태 항목이 내부 생성한 `~100%` prototype 기반 고정 폭과 12pt 여백
 - 단일 frame의 무-timer 동작과 여러 frame의 5초 순서

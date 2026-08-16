@@ -1,4 +1,17 @@
 "status.loading" = "Codex 사용량 확인 중";
+"status.accessibility.quota.format" = "{product} {duration} 한도 {value}";
+"status.accessibility.value.fresh" = "남은 사용량 {percent}퍼센트";
+"status.accessibility.value.stale" = "남은 사용량 마지막 확인값 {percent}퍼센트";
+"status.accessibility.value.loading" = "사용량 확인 중";
+"status.accessibility.value.unavailable" = "사용량 확인 불가";
+"status.accessibility.comparison.separator" = ", ";
+"status.accessibility.duration.unknown" = "기간 미상";
+"status.accessibility.duration.one-hour" = "1시간";
+"status.accessibility.duration.hours" = "{count}시간";
+"status.accessibility.duration.one-day" = "1일";
+"status.accessibility.duration.days" = "{count}일";
+"status.accessibility.duration.one-week" = "1주";
+"status.accessibility.duration.weeks" = "{count}주";
 "menu.product.codex" = "Codex";
 "menu.product.spark" = "Spark";
 "menu.quota.with_reset" = "[{duration}] · {remaining}% 남음 · 재설정 {reset}";
