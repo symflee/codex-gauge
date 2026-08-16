@@ -122,7 +122,7 @@ extension RefreshPublication {
     ) -> RefreshProductResult {
         let limits = result.rateLimits(for: product)
         guard limits.windows.isEmpty == false else {
-            return unavailableResult(limits, prior: products[product])
+            return emptyResult(limits, prior: products[product])
         }
         let value = ProductQuotaValue(
             capturedAt: result.capturedAt,
@@ -136,15 +136,30 @@ extension RefreshPublication {
         )
     }
 
-    private func unavailableResult(
+    private func emptyResult(
         _ limits: ProductRateLimits,
         prior: RefreshProductResult?
     ) -> RefreshProductResult {
+        guard limits.state != .unavailable else {
+            return acceptedUnavailableResult(limits, prior: prior)
+        }
         let state = prior.map(Self.markStale)?.usageState ?? .unavailable
         return RefreshProductResult(
             usageState: state,
             rateLimits: limits,
             issue: Self.issue(for: limits.state) ?? .unavailable,
+            lastSuccessfulRefresh: prior?.lastSuccessfulRefresh
+        )
+    }
+
+    private func acceptedUnavailableResult(
+        _ limits: ProductRateLimits,
+        prior: RefreshProductResult?
+    ) -> RefreshProductResult {
+        RefreshProductResult(
+            usageState: .unavailable,
+            rateLimits: limits,
+            issue: .unavailable,
             lastSuccessfulRefresh: prior?.lastSuccessfulRefresh
         )
     }

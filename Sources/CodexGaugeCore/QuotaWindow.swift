@@ -22,7 +22,10 @@ public struct QuotaWindow: Equatable, Sendable {
     }
 
     public var remainingPercent: Int {
-        Int((100 - usedPercent).rounded(.down))
+        guard usedPercent < 100 else {
+            return 0
+        }
+        return max(1, Int((100 - usedPercent).rounded(.down)))
     }
 
     public var comparisonUsedPercent: Int {

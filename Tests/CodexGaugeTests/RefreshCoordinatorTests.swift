@@ -21,6 +21,7 @@ func refreshCoordinatorTests() -> [TestCase] {
         quotaResetUpgradesInFlightRequestTest(),
         lowPowerCoordinatorSchedulingTest(),
         incompatibleRateLimitResponseStopsPollingTest(),
+        refreshPublicationMalformedWithoutPriorTest(),
         refreshPublicationPartialProductTest(),
         refreshCoordinatorValuesAreSendableTest()
     ]
@@ -499,12 +500,14 @@ private func refreshPublicationPartialProductTest() -> TestCase {
         )
         let partial = coordinatorResult(
             codexWindows: [coordinatorWindow(.primary, used: 11, duration: 300, reset: 1_000)],
+            codexState: .partial,
             sparkState: .malformed,
             sparkWindows: [],
             capturedAt: partialDate
         )
         let empty = coordinatorResult(
             codexWindows: [],
+            codexState: .unavailable,
             sparkState: .malformed,
             sparkWindows: [],
             capturedAt: emptyDate
@@ -532,6 +535,7 @@ private func refreshPublicationPartialProductTest() -> TestCase {
         let publication = await coordinator.publication
         try expect(coordinatorFreshness(publication, product: .codex) == .fresh, "Expected fresh Codex")
         try expect(coordinatorFreshness(publication, product: .spark) == .stale, "Expected stale Spark")
+        try expect(publication.products[.codex]?.issue == .partial, "Expected Codex partial issue")
         try expect(publication.products[.spark]?.issue == .malformed, "Expected Spark issue")
         try expect(
             publication.products[.codex]?.lastSuccessfulRefresh == partialDate,
@@ -562,6 +566,61 @@ private func refreshPublicationPartialProductTest() -> TestCase {
         try expect(
             emptyPublication.products[.spark]?.lastSuccessfulRefresh == completeDate,
             "Expected empty Spark response to retain its success time"
+        )
+        try expect(
+            emptyPublication.products[.codex]?.usageState == .unavailable,
+            "Expected accepted unavailable Codex to clear its displayed value"
+        )
+        try expect(
+            emptyPublication.products[.codex]?.issue == .unavailable,
+            "Expected accepted unavailable issue"
+        )
+        try expect(
+            coordinatorFreshness(emptyPublication, product: .spark) == .stale,
+            "Expected malformed Spark to preserve its prior stale value"
+        )
+        try expect(
+            emptyPublication.products[.spark]?.issue == .malformed,
+            "Expected malformed issue beside the stale Spark value"
+        )
+        await coordinator.stop()
+    }
+}
+
+private func refreshPublicationMalformedWithoutPriorTest() -> TestCase {
+    TestCase(name: "refresh publication exposes malformed empty product without a prior value") {
+        let clock = TestRefreshClock()
+        let capturedAt = Date(timeIntervalSince1970: 1_900_000_300)
+        let result = coordinatorResult(
+            codexWindows: [],
+            codexState: .malformed,
+            sparkState: .unavailable,
+            sparkWindows: [],
+            capturedAt: capturedAt
+        )
+        let provider = TestRefreshSessionProvider(plans: [[.success(result)]])
+        let coordinator = makeCoordinator(clock: clock, provider: provider)
+
+        await coordinator.start()
+        try await expectMetrics(provider, starts: 1, reads: 1, stops: 1)
+        try await eventually { await coordinator.state.inFlightRequest == nil }
+
+        let publication = await coordinator.publication
+        try expect(
+            publication.products[.codex]?.usageState == .unavailable,
+            "Expected no invented stale value without a prior success"
+        )
+        try expect(
+            publication.products[.codex]?.issue == .malformed,
+            "Expected malformed issue to remain explicit"
+        )
+        try expect(
+            publication.products[.codex]?.lastSuccessfulRefresh == nil,
+            "Expected no product success time without a valid window"
+        )
+        try expect(
+            publication.lastAcceptedRateLimitResponse == capturedAt,
+            "Expected accepted outer response time"
         )
         await coordinator.stop()
     }
@@ -694,18 +753,20 @@ private func coordinatorResult(
 
 private func coordinatorResult(
     codexWindows: [QuotaWindow],
+    codexState: ProductRateLimitState? = nil,
     sparkState: ProductRateLimitState? = nil,
     sparkWindows: [QuotaWindow],
     capturedAt: Date = Date(timeIntervalSince1970: 1_900_000_000),
     responseStatus: RateLimitResponseStatus = .accepted
 ) -> RateLimitReadResult {
+    let inferredCodexState: ProductRateLimitState = codexWindows.isEmpty ? .unavailable : .available
     let inferredSparkState: ProductRateLimitState = sparkWindows.isEmpty ? .unavailable : .available
     return RateLimitReadResult(
         capturedAt: capturedAt,
         responseStatus: responseStatus,
         rateLimitsByProduct: [
             .codex: ProductRateLimits(
-                state: codexWindows.isEmpty ? .unavailable : .available,
+                state: codexState ?? inferredCodexState,
                 windows: codexWindows
             ),
             .spark: ProductRateLimits(
