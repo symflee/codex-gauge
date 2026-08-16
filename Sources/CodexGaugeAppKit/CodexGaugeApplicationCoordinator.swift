@@ -167,6 +167,7 @@ public final class CodexGaugeApplicationCoordinator {
         let task = Task { @MainActor [weak self] in
             await initialRefresh?.stop()
             await pendingOperation?.value
+            await initialRefresh?.stop()
             let lateRefresh = self?.refreshCoordinator
             self?.refreshCoordinator = nil
             await lateRefresh?.stop()
@@ -368,6 +369,7 @@ public final class CodexGaugeApplicationCoordinator {
         }
         let previous = refreshCoordinator
         refreshCoordinator = nil
+        let preservesPendingResume = await previous?.isAwaitingSystemResume() ?? false
         await previous?.stop()
         guard generation == refreshGeneration, !isShuttingDown else {
             return
@@ -376,17 +378,24 @@ public final class CodexGaugeApplicationCoordinator {
         refreshCoordinator = replacement
         await startReplacement(
             replacement,
-            activityRevision: activityRevision
+            activityRevision: activityRevision,
+            preservesPendingResume: preservesPendingResume
         )
         await finishStartupIfNeeded(generation: generation)
     }
 
     private func startReplacement(
         _ refresh: any ApplicationRefreshCoordinating,
-        activityRevision: UInt64
+        activityRevision: UInt64,
+        preservesPendingResume: Bool
     ) async {
         guard activityRevision == activityCommandRevision else {
             await refresh.suspend()
+            return
+        }
+        guard !preservesPendingResume else {
+            await refresh.suspend()
+            await refresh.resumeAfterSystemWake()
             return
         }
         await start(refresh)

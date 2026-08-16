@@ -183,6 +183,7 @@ public protocol ApplicationRefreshCoordinating: Sendable {
     func updateDisplayPreference(_ preference: DisplayPreference) async
     func suspend() async
     func resumeAfterSystemWake() async
+    func isAwaitingSystemResume() async -> Bool
     func stop() async
 }
 
@@ -223,6 +224,10 @@ public struct RefreshCoordinatorRuntimeAdapter: ApplicationRefreshCoordinating {
 
     public func resumeAfterSystemWake() async {
         await coordinator.resumeAfterSystemWake()
+    }
+
+    public func isAwaitingSystemResume() async -> Bool {
+        await coordinator.isAwaitingSystemResume()
     }
 
     public func stop() async {

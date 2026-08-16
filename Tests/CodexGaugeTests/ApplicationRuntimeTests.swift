@@ -15,11 +15,13 @@ func applicationRuntimeTests() -> [TestCase] {
         applicationRuntimePublishesOnePresentationTransactionTest(),
         applicationRuntimeRoutesMenuAndSettingsTest(),
         applicationRuntimeReplacesRefreshGenerationTest(),
+        applicationRuntimePreservesPendingWakeAcrossReplacementTest(),
         applicationRuntimeReplacesAcrossSystemTransitionTest(),
         applicationRuntimeOrdersOverlappingResumeTest(),
         applicationRuntimeHandlesPresentationOnlyDeadlinesTest(),
         applicationRuntimeRefreshesQuotaResetTest(),
         applicationRuntimeSharesShutdownDrainTest(),
+        applicationRuntimeStopsStartThatResumesDuringShutdownTest(),
         applicationRuntimeDrainsReplacementOnShutdownTest()
     ]
 }
@@ -235,6 +237,33 @@ private func applicationRuntimeReplacesRefreshGenerationTest() -> TestCase {
     }
 }
 
+private func applicationRuntimePreservesPendingWakeAcrossReplacementTest() -> TestCase {
+    TestCase(name: "application runtime preserves pending wake delay across replacement") {
+        try await applicationRuntimePreservesPendingWakeAcrossReplacementScenario()
+    }
+}
+
+@MainActor
+private func applicationRuntimePreservesPendingWakeAcrossReplacementScenario() async throws {
+    let harness = RuntimeHarness()
+    harness.coordinator.start()
+    await harness.coordinator.waitForPendingOperations()
+
+    harness.systemMonitor.emit(.sleep)
+    harness.systemMonitor.emit(.wake)
+    await harness.coordinator.waitForPendingOperations()
+    harness.coordinator.selectedExecutableDidChange(
+        URL(fileURLWithPath: "/Synthetic/replacement/codex")
+    )
+    await harness.coordinator.waitForPendingOperations()
+
+    let replacementEvents = await harness.refreshBuilder.coordinators[1].events
+    try expect(
+        replacementEvents == [.suspend, .resume],
+        "Expected replacement to inherit the pending five-second wake phase"
+    )
+}
+
 @MainActor
 private func applicationRuntimeReplacesRefreshGenerationScenario() async throws {
     let stopGate = RuntimeStopGate()
@@ -388,6 +417,34 @@ private func applicationRuntimeDrainsReplacementOnShutdownTest() -> TestCase {
     }
 }
 
+private func applicationRuntimeStopsStartThatResumesDuringShutdownTest() -> TestCase {
+    TestCase(name: "application runtime terminally stops startup resumed during shutdown") {
+        try await applicationRuntimeStopsStartThatResumesDuringShutdownScenario()
+    }
+}
+
+@MainActor
+private func applicationRuntimeStopsStartThatResumesDuringShutdownScenario() async throws {
+    let startGate = RuntimeStartGate()
+    let harness = RuntimeHarness(firstStartGate: startGate)
+    harness.coordinator.start()
+    try await waitForRuntimeCondition { await startGate.hasStarted }
+
+    let shutdown = Task { @MainActor in
+        await harness.coordinator.shutdown()
+    }
+    let refresh = harness.refreshBuilder.coordinators[0]
+    try await waitForRuntimeCondition {
+        await refresh.events.contains(.stop)
+    }
+    await startGate.resume()
+    await shutdown.value
+
+    let events = await refresh.events
+    try expect(events == [.stop, .start, .stop], "Expected a terminal stop after late start")
+    try expect(harness.settings.shutdownCount == 1, "Expected settings after refresh drain")
+}
+
 @MainActor
 private func applicationRuntimeDrainsReplacementOnShutdownScenario() async throws {
     let stopGate = RuntimeStopGate()
@@ -458,7 +515,10 @@ private func applicationRuntimeSharesShutdownDrainScenario() async throws {
     await second.value
 
     let events = await harness.refreshBuilder.coordinators[0].events
-    try expect(events.filter { $0 == .stop }.count == 1, "Expected one refresh stop")
+    try expect(
+        events.filter { $0 == .stop }.count == 2,
+        "Expected initial and terminal refresh stops in one shared drain"
+    )
     try expect(harness.settings.shutdownCount == 1, "Expected one settings shutdown")
     try expect(harness.systemMonitor.stopCount == 1, "Expected one monitor shutdown")
 }
@@ -480,12 +540,16 @@ private final class RuntimeHarness {
 
     init(
         preferencesLoader: any ApplicationPreferencesLoading = RuntimePreferencesLoader(),
+        firstStartGate: RuntimeStartGate? = nil,
         firstStopGate: RuntimeStopGate? = nil,
         afterStartupRecorded: @escaping CodexGaugeApplicationCoordinator.StartupHook = {
             _ in
         }
     ) {
-        refreshBuilder = RuntimeRefreshBuilderSpy(firstStopGate: firstStopGate)
+        refreshBuilder = RuntimeRefreshBuilderSpy(
+            firstStartGate: firstStartGate,
+            firstStopGate: firstStopGate
+        )
         let scheduler = deadlineScheduler
         let statusRuntime = status
         let refreshBuilder = refreshBuilder
@@ -544,6 +608,8 @@ private final class RuntimeApplicationSpy: CodexGaugeApplicationRunning {
     func start() {
         startCount += 1
     }
+
+    func shutdown() async {}
 }
 
 @MainActor
@@ -695,13 +761,18 @@ private actor RuntimeRefreshSpy: ApplicationRefreshCoordinating {
     }
 
     private(set) var events = [Event]()
+    private let startGate: RuntimeStartGate?
     private let stopGate: RuntimeStopGate?
+    private var awaitingSystemResume = false
 
-    init(stopGate: RuntimeStopGate?) {
+    init(startGate: RuntimeStartGate?, stopGate: RuntimeStopGate?) {
+        self.startGate = startGate
         self.stopGate = stopGate
     }
 
     func start() async {
+        await startGate?.wait()
+        awaitingSystemResume = false
         events.append(.start)
     }
 
@@ -726,14 +797,21 @@ private actor RuntimeRefreshSpy: ApplicationRefreshCoordinating {
     }
 
     func suspend() async {
+        awaitingSystemResume = false
         events.append(.suspend)
     }
 
     func resumeAfterSystemWake() async {
+        awaitingSystemResume = true
         events.append(.resume)
     }
 
+    func isAwaitingSystemResume() -> Bool {
+        awaitingSystemResume
+    }
+
     func stop() async {
+        awaitingSystemResume = false
         events.append(.stop)
         await stopGate?.wait()
     }
@@ -744,9 +822,14 @@ private final class RuntimeRefreshBuilderSpy: ApplicationRefreshCoordinatorBuild
     private(set) var configurations = [ApplicationRefreshConfiguration]()
     private(set) var coordinators = [RuntimeRefreshSpy]()
     private var handlers = [RefreshPublicationHandler]()
+    private let firstStartGate: RuntimeStartGate?
     private let firstStopGate: RuntimeStopGate?
 
-    init(firstStopGate: RuntimeStopGate?) {
+    init(
+        firstStartGate: RuntimeStartGate?,
+        firstStopGate: RuntimeStopGate?
+    ) {
+        self.firstStartGate = firstStartGate
         self.firstStopGate = firstStopGate
     }
 
@@ -755,6 +838,7 @@ private final class RuntimeRefreshBuilderSpy: ApplicationRefreshCoordinatorBuild
         publicationHandler: @escaping RefreshPublicationHandler
     ) -> any ApplicationRefreshCoordinating {
         let coordinator = RuntimeRefreshSpy(
+            startGate: coordinators.isEmpty ? firstStartGate : nil,
             stopGate: coordinators.isEmpty ? firstStopGate : nil
         )
         configurations.append(configuration)
@@ -803,6 +887,28 @@ private actor RuntimePreferencesGate: ApplicationPreferencesLoading {
 }
 
 private actor RuntimeStopGate {
+    private(set) var hasStarted = false
+    private var continuation: CheckedContinuation<Void, Never>?
+    private var isReleased = false
+
+    func wait() async {
+        hasStarted = true
+        guard !isReleased else {
+            return
+        }
+        await withCheckedContinuation { continuation in
+            self.continuation = continuation
+        }
+    }
+
+    func resume() {
+        isReleased = true
+        continuation?.resume()
+        continuation = nil
+    }
+}
+
+private actor RuntimeStartGate {
     private(set) var hasStarted = false
     private var continuation: CheckedContinuation<Void, Never>?
 
