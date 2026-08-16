@@ -118,6 +118,13 @@ public actor RefreshCoordinator {
         )
     }
 
+    public func isAwaitingSystemResume() -> Bool {
+        if case .systemResume = timerPurpose {
+            return true
+        }
+        return false
+    }
+
     public func stop() async {
         isSuspendedForSystem = false
         pendingSystemResumeReset = false

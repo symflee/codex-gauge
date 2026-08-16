@@ -6,6 +6,7 @@ import Foundation
 @MainActor
 public protocol CodexGaugeApplicationRunning: AnyObject {
     func start()
+    func shutdown() async
 }
 
 extension CodexGaugeApplicationCoordinator: CodexGaugeApplicationRunning {}

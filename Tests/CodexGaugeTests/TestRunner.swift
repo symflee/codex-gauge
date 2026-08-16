@@ -38,6 +38,7 @@ struct TestRunner {
             + refreshPresentationAdapterTests()
             + applicationActivityGateTests()
             + applicationRuntimeTests()
+            + applicationTerminationTests()
     }
 
     private static func run(_ tests: [TestCase]) async -> Int32 {

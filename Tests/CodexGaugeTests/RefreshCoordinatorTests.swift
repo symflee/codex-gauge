@@ -315,6 +315,11 @@ private func systemResumeDelayTest() -> TestCase {
         await coordinator.suspend()
         await coordinator.resumeAfterSystemWake()
         await coordinator.resumeAfterSystemWake()
+        let isAwaitingSystemResume = await coordinator.isAwaitingSystemResume()
+        try expect(
+            isAwaitingSystemResume,
+            "Expected observable pending resume phase"
+        )
         try await eventually { await clock.pendingSleeperCount() == 1 }
 
         await clock.advance(by: .seconds(4))
@@ -323,6 +328,11 @@ private func systemResumeDelayTest() -> TestCase {
 
         await clock.advance(by: .seconds(1))
         try await expectMetrics(provider, starts: 2, reads: 2, stops: 1)
+        let didClearSystemResume = await coordinator.isAwaitingSystemResume() == false
+        try expect(
+            didClearSystemResume,
+            "Expected fired resume phase to clear"
+        )
         let inFlight = await coordinator.state.inFlightRequest
         try expect(inFlight?.reason == .wakeBaseline, "Expected a wake-baseline request")
 

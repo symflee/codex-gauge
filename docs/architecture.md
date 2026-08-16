@@ -48,9 +48,11 @@ SwiftPM은 Core, Protocol, Refresh, Settings와 AppKit 모듈의 단일 source o
 
 하나의 `RefreshPublication` callback은 같은 main-actor transaction에서 상태 frame, menu model, discovered quota ID, 연결 상태와 deadline 후보를 모두 갱신한다. application-open capability는 root 생성 때 한 번 읽어 캐시하며, display 변경과 validity deadline은 메모리 publication을 다시 투영할 뿐 provider 또는 workspace I/O를 만들지 않는다. profile, 수동 조회, quota reset, power와 system resume 명령은 직렬 operation chain을 통해 현재 refresh generation에만 전달된다.
 
-사용자가 executable을 바꾸면 generation을 즉시 올리고 loading presentation으로 전환한 뒤 이전 coordinator의 `stop()` 완료를 기다린다. 그 후 최신 preferences로 provider를 새로 만들며 이전 generation의 늦은 publication은 버린다. 실제 application bundle 탐색과 열기는 `NSWorkspaceCodexApplicationAdapter`만 담당하고 shell을 사용하지 않는다.
+사용자가 executable을 바꾸면 generation을 즉시 올리고 loading presentation으로 전환한 뒤 이전 coordinator의 `stop()` 완료를 기다린다. 그 후 최신 preferences로 provider를 새로 만들며 이전 generation의 늦은 publication은 버린다. 이전 coordinator에 5초 system-resume timer가 대기 중이면 그 phase를 stop 전에 읽고 새 coordinator에 `suspend()`와 `resumeAfterSystemWake()`를 순서대로 적용한다. 따라서 executable 교체가 wake 지연을 즉시 startup 조회로 우회하지 않는다. 실제 application bundle 탐색과 열기는 `NSWorkspaceCodexApplicationAdapter`만 담당하고 shell을 사용하지 않는다.
 
-sleep·wake가 preferences load 또는 executable 교체의 `stop()`과 겹치면 새 coordinator를 request 없는 suspended 상태로 만든 뒤 동일한 직렬 chain의 resume만 적용한다. 따라서 교체 coordinator가 중간에 startup child를 만들지 않는다. 종료는 generation을 먼저 무효화하고 monitor·deadline을 멈춘 뒤 현재 refresh와 진행 중 교체를 drain하며, 중복 `shutdown()` 호출은 하나의 shared task 완료를 기다린다.
+sleep·wake가 preferences load 또는 executable 교체의 `stop()`과 겹치면 새 coordinator를 request 없는 suspended 상태로 만든 뒤 동일한 직렬 chain의 resume만 적용한다. 따라서 교체 coordinator가 중간에 startup child를 만들지 않는다. 종료는 generation을 먼저 무효화하고 monitor·deadline을 멈춘 뒤 현재 refresh를 한 번 중단하고 진행 중 operation chain을 drain한다. 그 뒤 같은 refresh를 terminal하게 다시 중단하고 chain이 만든 늦은 coordinator도 정리한 다음 settings shutdown을 기다린다. 첫 stop과 경쟁하던 `start()` 또는 갱신이 늦게 재개해 child를 되살려도 두 번째 stop 이후에는 남지 않는다. 중복 `shutdown()` 호출은 이 하나의 shared task 완료를 기다린다.
+
+`CodexGaugeApplicationDelegate`는 Quit 메뉴와 Cmd-Q가 도달하는 `applicationShouldTerminate(_:)`에서 runtime이 아직 없으면 `.terminateNow`를 반환한다. runtime이 있으면 `.terminateLater`를 반환하고 root의 shared async shutdown을 기다린 뒤 요청한 `NSApplication`에 `reply(toApplicationShouldTerminate: true)`를 정확히 한 번 보낸다. drain 중 중복 요청은 같은 task를 공유하고, 완료 뒤 재요청은 추가 shutdown이나 reply 없이 `.terminateNow`로 처리한다. 메뉴의 종료 action은 계속 `NSApplication.terminate(_:)`만 호출하므로 모든 종료 경로가 같은 delegate 경계를 통과한다.
 
 ## 3. 도메인 경계
 
@@ -263,6 +265,8 @@ production factory는 `FirstLaunchSettingsCoordinator`를 refresh 시작 뒤의 
 `ApplicationSettingsRuntime.showSettings()`는 window controller 생성 여부가 아니라 실제 `NSWindow.isVisible` 결과를 돌려준다. shutdown 또는 caller cancellation과 경쟁해 `nil`이 되거나 창이 visible 상태가 아니면 완료로 기록하지 않는다. 표시가 성공한 뒤에만 repository actor의 `markFirstLaunchCompleted()`를 호출한다. 이 read-modify-write는 저장 시점의 표시·refresh·로그인·선택 executable 값을 모두 보존하고 최초 실행 값만 true로 바꾸며, 이미 완료된 경우에는 다시 쓰지 않는다.
 
 UI 테스트용 `--codex-gauge-ui-test-reset-first-launch` argument는 production defaults에서도 안전한 field-only seam이다. defaults domain을 지우지 않고 최초 실행 완료 여부만 false로 되돌리며, 표시 설정·refresh profile·로그인 실행 의도·선택 executable을 그대로 둔다. reset, form save, executable save와 완료 기록은 같은 repository actor에서 직렬화해 서로의 field를 잃지 않는다. 비슷한 이름의 argument는 인식하지 않는다.
+
+Quit 또는 Command-Q가 들어오면 AppDelegate는 `.terminateLater`를 반환하고 같은 비동기 runtime shutdown을 공유한다. 설정 저장과 child 정리가 끝난 뒤 요청한 `NSApplication`에 성공 답변을 정확히 한 번 보내며, runtime 생성 전이나 drain 완료 뒤의 요청은 즉시 종료한다.
 
 ## 7. 설정 저장
 

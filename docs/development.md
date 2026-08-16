@@ -124,11 +124,14 @@ Java 전용 코딩 규칙은 이 Swift 프로젝트에 적용하지 않는다. J
 - 초기 조회 뒤 discovery row 갱신의 무저장·무-runtime-callback 동작
 - status-first 시작, publication 단일 투영과 저장된 로그인 실행 의도 reconcile
 - executable 변경 시 old-stop-before-new-start와 이전 generation publication 폐기
+- executable 교체 중 pending 5초 wake phase 보존과 즉시 startup 방지
 - validity expiry의 presentation-only 처리와 중복 shutdown의 단일 drain
 - 상태 항목 표시와 refresh 시작 이후에만 이루어지는 최초 실행 판단
 - visible 설정 창의 한 번만 자동 표시와 실패·취소 시 완료 미기록
 - 완료된 다음 실행의 자동 표시 생략과 test-only launch argument의 field-only reset
 - reset·form·선택 executable·완료 저장이 겹쳐도 sibling preference를 보존하는 actor merge
+- pending startup과 경쟁하는 shutdown의 drain 뒤 terminal second-stop
+- Quit·Cmd-Q의 terminate-later, runtime 없는 immediate 종료와 exactly-once reply
 
 ### XCTest와 UI 테스트
 
