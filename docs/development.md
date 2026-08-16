@@ -79,6 +79,7 @@ Java 전용 코딩 규칙은 이 Swift 프로젝트에 적용하지 않는다. J
 - terminal failure의 무한 재시도 방지와 수동 복구
 - stop 뒤 늦은 completion 폐기, 동시 trigger 병합과 suspend cleanup
 - 중복 system resume의 단일 5초 wake-baseline과 Low Power timer clamp
+- system suspension·resume 대기 중 quota reset latch와 단일 reset-baseline child
 - quota-reset 단발 trigger의 coalescing과 baseline-only 처리
 - 제품별 partial 성공 publication, 제품별 성공 시각과 stale 값 보존
 - refresh publication의 상태바 frame·상세 메뉴·discovered quota 단일 투영과 오류 격리
