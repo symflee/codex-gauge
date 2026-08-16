@@ -46,7 +46,14 @@ jobs:
           --explicit-target-dependency-import-check error
           -Xswiftc -warnings-as-errors
 
-      - name: Run tests
+      - name: Run Swift Testing contracts
+        run: >-
+          swift test
+          --explicit-target-dependency-import-check error
+          -Xswiftc -strict-concurrency=complete
+          -Xswiftc -warnings-as-errors
+
+      - name: Run exhaustive custom tests
         run: swift run codex-gauge-tests
 
       - name: Build Release

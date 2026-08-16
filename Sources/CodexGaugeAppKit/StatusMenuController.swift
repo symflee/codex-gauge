@@ -141,6 +141,9 @@ public final class StatusMenuController: NSObject, NSMenuDelegate {
         item.target = self
         item.representedObject = model.action.rawValue
         item.isEnabled = true
+        item.setAccessibilityIdentifier(
+            CodexGaugeAccessibilityIdentifier.menuAction(model.action.rawValue)
+        )
         return item
     }
 

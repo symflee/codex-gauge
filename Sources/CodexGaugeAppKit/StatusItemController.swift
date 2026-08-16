@@ -15,6 +15,9 @@ public final class SystemStatusItemPresenter: StatusItemPresenting, StatusMenuPr
 
     public init(statusItem: NSStatusItem) {
         self.statusItem = statusItem
+        statusItem.button?.setAccessibilityIdentifier(
+            CodexGaugeAccessibilityIdentifier.statusItem
+        )
     }
 
     public convenience init(statusBar: NSStatusBar = .system) {
