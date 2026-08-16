@@ -280,6 +280,10 @@ private final class FirstLaunchSettingsRuntimeSpy: ApplicationSettingsRuntime {
         _ = status
     }
 
+    func updateLaunchAtLoginState(_ state: LaunchAtLoginSettingsState) {
+        _ = state
+    }
+
     func shutdown() async {}
 }
 

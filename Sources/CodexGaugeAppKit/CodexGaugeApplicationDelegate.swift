@@ -36,6 +36,11 @@ public final class CodexGaugeApplicationDelegate: NSObject, NSApplicationDelegat
         runtime.start()
     }
 
+    public func applicationDidBecomeActive(_ notification: Notification) {
+        _ = notification
+        applicationRuntime?.refreshLaunchAtLoginStatus()
+    }
+
     public func applicationShouldTerminate(
         _ sender: NSApplication
     ) -> NSApplication.TerminateReply {

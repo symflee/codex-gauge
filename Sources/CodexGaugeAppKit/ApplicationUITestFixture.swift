@@ -204,12 +204,20 @@ public final class UITestFixtureCodexWorkspace: CodexApplicationWorkspacing {
 public final class UITestFixtureLaunchAtLoginController:
     ApplicationLaunchAtLoginControlling {
     public private(set) var requestedValues = [Bool]()
+    public private(set) var currentStatus = LaunchAtLoginStatus.disabled
 
     public init() {}
 
-    public func setEnabled(_ enabled: Bool) async throws -> LaunchAtLoginStatus {
+    public func setEnabled(
+        _ enabled: Bool
+    ) async throws(LaunchAtLoginError) -> LaunchAtLoginStatus {
         requestedValues.append(enabled)
-        return enabled ? .enabled : .disabled
+        currentStatus = enabled ? .enabled : .disabled
+        return currentStatus
+    }
+
+    public func openApprovalSettingsIfNeeded() -> Bool {
+        false
     }
 }
 

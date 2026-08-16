@@ -122,6 +122,11 @@ Java 전용 코딩 규칙은 이 Swift 프로젝트에 적용하지 않는다. J
 - manual selection 결정적 encoding, file URL 제한과 defaults suite 격리
 - 저장 payload에 quota, account, 오류와 원문 응답 field가 없는지 검증
 - 로그인 실행 등록·해제의 idempotence, 승인 필요 상태와 typed 오류 축약
+- 로그인 실행 actual status의 off·on·mixed UI, unavailable 비활성화와 System Settings recovery
+- 시작 reconcile·사용자 요청·앱 재활성화 결과의 열린 설정 live publication과 닫힌 창 재생성
+- 앱 재활성화 status가 같으면 typed failure 유지, 바뀌면 obsolete failure 제거
+- 저장 intent와 actual status mismatch에서 동일 enable·disable 요청 재시도
+- registration·unregistration 실패 문구의 raw `NSError` 비노출과 한국어·영어 key parity
 - 설정 form reducer의 제품 filter, 자동·직접 선택과 누락 식별자 유지
 - 설정 presenter의 checkbox 활성화와 빈 상태 도출
 - 제품 변경 후 off-product 직접 선택 제외와 빈 유효 선택의 자동 복구

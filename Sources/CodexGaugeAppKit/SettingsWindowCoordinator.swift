@@ -11,6 +11,7 @@ public final class SettingsWindowCoordinator {
 
     private let repository: AppPreferencesRepository
     private let discoveredQuotaProvider: @MainActor () -> Set<QuotaSelectionID>
+    private let launchAtLoginStateProvider: @MainActor () -> LaunchAtLoginSettingsState
     private let connectionDiagnosticsProvider: SettingsConnectionDiagnosticsProvider
     private let settingsFormValuesSaver: SettingsFormValuesSaver
     private let executableSelector: (any CodexExecutableSelecting)?
@@ -19,6 +20,8 @@ public final class SettingsWindowCoordinator {
     private let diagnosticEnvironment: DiagnosticEnvironment
     private let onSettingsFormValuesChanged: @MainActor (SettingsFormValues) -> Void
     private let onExecutableSelectionChanged: @MainActor (URL) -> Void
+    private let onOpenLaunchAtLoginSystemSettings: @MainActor () -> Void
+    private let onLaunchAtLoginIntentRequested: @MainActor (Bool) -> Void
     private let onSettingsWindowCreated: @MainActor (SettingsWindowController) -> Void
     private let reportBuilder = ConnectionDiagnosticReportBuilder()
     private var pendingSave: Task<Void, Never>?
@@ -34,6 +37,7 @@ public final class SettingsWindowCoordinator {
     private var selectedExecutableURL: URL?
     private var latestConnectionStatus: CodexConnectionStatus
     private var latestConnectionDiagnostics = ConnectionDiagnosticsSnapshot.checking
+    private var latestLaunchAtLoginState: LaunchAtLoginSettingsState
 
     public init(
         repository: AppPreferencesRepository,
@@ -51,6 +55,9 @@ public final class SettingsWindowCoordinator {
         connectionStatusProvider: @escaping @MainActor () -> CodexConnectionStatus = {
             .checking
         },
+        launchAtLoginStateProvider: @escaping @MainActor () -> LaunchAtLoginSettingsState = {
+            LaunchAtLoginSettingsState(status: .disabled)
+        },
         settingsFormValuesSaver: SettingsFormValuesSaver? = nil,
         executableSelector: (any CodexExecutableSelecting)? = nil,
         executableSelectionSaver: SettingsExecutableSelectionSaver? = nil,
@@ -60,12 +67,17 @@ public final class SettingsWindowCoordinator {
             _ in
         },
         onExecutableSelectionChanged: @escaping @MainActor (URL) -> Void = { _ in },
+        onOpenLaunchAtLoginSystemSettings: @escaping @MainActor () -> Void = {},
+        onLaunchAtLoginIntentRequested: @escaping @MainActor (Bool) -> Void = {
+            _ in
+        },
         onSettingsWindowCreated: @escaping @MainActor (SettingsWindowController) -> Void = {
             _ in
         }
     ) {
         self.repository = repository
         self.discoveredQuotaProvider = discoveredQuotaProvider
+        self.launchAtLoginStateProvider = launchAtLoginStateProvider
         self.connectionDiagnosticsProvider = connectionDiagnosticsProvider
         self.settingsFormValuesSaver = settingsFormValuesSaver ?? { [repository] values in
             try? await repository.saveSettingsForm(values)
@@ -78,6 +90,8 @@ public final class SettingsWindowCoordinator {
         self.diagnosticEnvironment = diagnosticEnvironment
         self.onSettingsFormValuesChanged = onSettingsFormValuesChanged
         self.onExecutableSelectionChanged = onExecutableSelectionChanged
+        self.onOpenLaunchAtLoginSystemSettings = onOpenLaunchAtLoginSystemSettings
+        self.onLaunchAtLoginIntentRequested = onLaunchAtLoginIntentRequested
         self.onSettingsWindowCreated = onSettingsWindowCreated
         let initialStatus = connectionStatusProvider()
         latestConnectionStatus = initialStatus
@@ -87,6 +101,7 @@ public final class SettingsWindowCoordinator {
             cliVersionIssue: nil,
             connectionStatus: initialStatus
         )
+        latestLaunchAtLoginState = launchAtLoginStateProvider()
     }
 
     @discardableResult
@@ -94,6 +109,7 @@ public final class SettingsWindowCoordinator {
         guard canShowSettings else {
             return nil
         }
+        refreshLaunchAtLoginState()
         if let controller = activeWindowController {
             controller.showWindow(nil)
             controller.window?.makeKeyAndOrderFront(nil)
@@ -166,6 +182,19 @@ public final class SettingsWindowCoordinator {
         )
     }
 
+    public func updateLaunchAtLoginState(
+        _ state: LaunchAtLoginSettingsState
+    ) {
+        latestLaunchAtLoginState = state
+        activeWindowController?.settingsViewController.applyLaunchAtLoginState(
+            state
+        )
+    }
+
+    private func refreshLaunchAtLoginState() {
+        updateLaunchAtLoginState(launchAtLoginStateProvider())
+    }
+
     private func makeWindowController(
         preferences: AppPreferences
     ) -> SettingsWindowController {
@@ -187,11 +216,18 @@ public final class SettingsWindowCoordinator {
         let controller = SettingsWindowController(
             formState: state,
             connectionDiagnostics: initialDiagnostics,
+            launchAtLoginState: latestLaunchAtLoginState,
             onSelectCodex: { [weak self] in
                 self?.requestExecutableSelection()
             },
             onCopyDiagnostics: { [weak self] in
                 self?.copyDiagnostics()
+            },
+            onOpenLaunchAtLoginSystemSettings: { [weak self] in
+                self?.onOpenLaunchAtLoginSystemSettings()
+            },
+            onLaunchAtLoginIntentRequested: { [weak self] enabled in
+                self?.onLaunchAtLoginIntentRequested(enabled)
             },
             onFormValuesChanged: { [weak self] values in
                 self?.settingsFormValuesChanged(values)

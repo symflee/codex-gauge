@@ -83,6 +83,8 @@ private final class TerminationRuntimeSpy: CodexGaugeApplicationRunning {
         startCount += 1
     }
 
+    func refreshLaunchAtLoginStatus() {}
+
     func shutdown() async {
         shutdownCount += 1
         await shutdownGate?.wait()

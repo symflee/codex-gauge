@@ -195,6 +195,10 @@ private func applicationUITestFixtureUsesIsolatedExternalBoundariesScenario() as
         launchAtLogin.requestedValues == [true],
         "Expected no system login item adapter"
     )
+    try expect(
+        !launchAtLogin.openApprovalSettingsIfNeeded(),
+        "Expected no System Settings recovery in the fixture"
+    )
     let selectedURL = await executableSelector.selectExecutable(attachedTo: nil)
     try expect(selectedURL == nil, "Expected no system executable panel result")
     try expect(

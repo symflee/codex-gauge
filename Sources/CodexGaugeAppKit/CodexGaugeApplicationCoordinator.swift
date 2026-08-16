@@ -9,6 +9,9 @@ public final class CodexGaugeApplicationCoordinator {
 
     public private(set) var publication = RefreshPublication.initial
     public private(set) var discoveredQuotaIDs = Set<QuotaSelectionID>()
+    public private(set) var launchAtLoginState = LaunchAtLoginSettingsState(
+        status: .disabled
+    )
 
     private let statusRuntime: any ApplicationStatusRuntime
     private let menuRuntime: any ApplicationMenuRuntime
@@ -72,6 +75,9 @@ public final class CodexGaugeApplicationCoordinator {
         self.assistiveDisplayMonitor = assistiveDisplayMonitor
         self.deadlineSchedulerBuilder = deadlineSchedulerBuilder
         self.launchAtLoginController = launchAtLoginController
+        launchAtLoginState = LaunchAtLoginSettingsState(
+            status: launchAtLoginController.currentStatus
+        )
         self.refreshCoordinatorBuilder = refreshCoordinatorBuilder
         self.preferencesLoader = preferencesLoader
         self.workspace = workspace
@@ -85,12 +91,21 @@ public final class CodexGaugeApplicationCoordinator {
         connectionStatusResolver.resolve(publication)
     }
 
+    public var currentLaunchAtLoginState: LaunchAtLoginSettingsState {
+        let currentStatus = launchAtLoginController.currentStatus
+        guard currentStatus == launchAtLoginState.status else {
+            return LaunchAtLoginSettingsState(status: currentStatus)
+        }
+        return launchAtLoginState
+    }
+
     public func start() {
         guard !isStarted, !isShuttingDown else {
             return
         }
         isStarted = true
         presentCurrentPublication(publishDeadlines: false)
+        publishLaunchAtLoginState()
         installDeadlineScheduler()
         startMonitors()
         enqueueOperation { coordinator in
@@ -139,6 +154,31 @@ public final class CodexGaugeApplicationCoordinator {
             return
         }
         replaceRefreshCoordinator()
+    }
+
+    public func openLaunchAtLoginApprovalSettings() {
+        let currentState = currentLaunchAtLoginState
+        guard currentState.showsSystemSettingsRecovery else {
+            updateLaunchAtLoginState(
+                status: currentState.status,
+                failure: currentState.failure
+            )
+            return
+        }
+        _ = launchAtLoginController.openApprovalSettingsIfNeeded()
+        refreshLaunchAtLoginStatus()
+    }
+
+    public func launchAtLoginIntentDidChange(_ enabled: Bool) {
+        enqueueLaunchAtLoginChange(enabled)
+    }
+
+    public func refreshLaunchAtLoginStatus() {
+        let currentState = currentLaunchAtLoginState
+        updateLaunchAtLoginState(
+            status: currentState.status,
+            failure: currentState.failure
+        )
     }
 
     public func waitForPendingOperations() async {
@@ -262,9 +302,7 @@ public final class CodexGaugeApplicationCoordinator {
             return
         }
         hasReconciledLaunchAtLogin = true
-        _ = try? await launchAtLoginController.setEnabled(
-            preferences.launchAtLoginIntent
-        )
+        await applyLaunchAtLoginIntent(preferences.launchAtLoginIntent)
     }
 
     private func makeRefreshCoordinator(
@@ -335,15 +373,39 @@ public final class CodexGaugeApplicationCoordinator {
                 await refresh.updateProfile(current.refreshProfile)
             }
         }
-        if previous.launchAtLoginIntent != current.launchAtLoginIntent {
-            enqueueLaunchAtLoginChange(current.launchAtLoginIntent)
-        }
     }
 
     private func enqueueLaunchAtLoginChange(_ enabled: Bool) {
         enqueueOperation { coordinator in
-            _ = try? await coordinator.launchAtLoginController.setEnabled(enabled)
+            await coordinator.applyLaunchAtLoginIntent(enabled)
         }
+    }
+
+    private func applyLaunchAtLoginIntent(_ enabled: Bool) async {
+        do {
+            let status = try await launchAtLoginController.setEnabled(enabled)
+            updateLaunchAtLoginState(status: status)
+        } catch {
+            updateLaunchAtLoginState(
+                status: launchAtLoginController.currentStatus,
+                failure: error
+            )
+        }
+    }
+
+    private func updateLaunchAtLoginState(
+        status: LaunchAtLoginStatus,
+        failure: LaunchAtLoginError? = nil
+    ) {
+        launchAtLoginState = LaunchAtLoginSettingsState(
+            status: status,
+            failure: failure
+        )
+        publishLaunchAtLoginState()
+    }
+
+    private func publishLaunchAtLoginState() {
+        settingsRuntime.updateLaunchAtLoginState(launchAtLoginState)
     }
 
     private func replaceRefreshCoordinator() {

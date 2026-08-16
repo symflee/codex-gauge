@@ -51,6 +51,13 @@
 "settings.refresh.fast" = "Fast";
 "settings.refresh.accessibility" = "Refresh profile";
 "settings.launch-at-login" = "Launch at login";
+"settings.launch-at-login.status.disabled" = "Current status: Off";
+"settings.launch-at-login.status.enabled" = "Current status: On";
+"settings.launch-at-login.status.requires-approval" = "Approval is required in System Settings.";
+"settings.launch-at-login.status.unavailable" = "Launch at login is unavailable on this Mac.";
+"settings.launch-at-login.failure.registration" = "Could not enable launch at login. Try again.";
+"settings.launch-at-login.failure.unregistration" = "Could not disable launch at login. Try again.";
+"settings.launch-at-login.open-system-settings" = "Open System Settings";
 "settings.section.connection" = "Codex connection";
 "settings.connection.path.format" = "Location: %@";
 "settings.connection.path.value.format" = "%@ · %@";

@@ -29,6 +29,7 @@ struct TestRunner {
             + connectionDiagnosticsTests()
             + statusItemRenderingTests()
             + launchAtLoginTests()
+            + launchAtLoginSettingsTests()
             + quotaDetailsMenuTests()
             + systemActivityMonitorTests()
             + quotaResetRefreshSchedulerTests()

@@ -14,6 +14,7 @@ func applicationRuntimeTests() -> [TestCase] {
         applicationRuntimeDefersInitialWakeBaselineTest(),
         applicationRuntimePublishesOnePresentationTransactionTest(),
         applicationRuntimeRoutesMenuAndSettingsTest(),
+        applicationRuntimePublishesLaunchAtLoginStateTest(),
         applicationRuntimeReplacesRefreshGenerationTest(),
         applicationRuntimePreservesPendingWakeAcrossReplacementTest(),
         applicationRuntimeReplacesAcrossSystemTransitionTest(),
@@ -24,6 +25,111 @@ func applicationRuntimeTests() -> [TestCase] {
         applicationRuntimeStopsStartThatResumesDuringShutdownTest(),
         applicationRuntimeDrainsReplacementOnShutdownTest()
     ]
+}
+
+private func applicationRuntimePublishesLaunchAtLoginStateTest() -> TestCase {
+    TestCase(name: "application runtime publishes login launch results and recovery") {
+        try await applicationRuntimePublishesLaunchAtLoginStateScenario()
+    }
+}
+
+@MainActor
+private func applicationRuntimePublishesLaunchAtLoginStateScenario() async throws {
+    let preferences = AppPreferences(launchAtLoginIntent: true)
+    let harness = RuntimeHarness(
+        preferencesLoader: RuntimePreferencesLoader(preferences: preferences)
+    )
+    harness.launch.nextStatus = .requiresApproval
+
+    harness.coordinator.start()
+    await harness.coordinator.waitForPendingOperations()
+
+    try expect(
+        harness.settings.launchAtLoginStates.last == LaunchAtLoginSettingsState(
+            status: .requiresApproval
+        ),
+        "Expected startup reconciliation result in settings"
+    )
+    harness.coordinator.openLaunchAtLoginApprovalSettings()
+    try expect(harness.launch.openSettingsCount == 1, "Expected routed recovery action")
+
+    harness.launch.nextFailure = .unregistrationFailed
+    harness.coordinator.settingsFormValuesDidChange(
+        SettingsFormValues(
+            displayPreference: preferences.displayPreference,
+            refreshProfile: preferences.refreshProfile,
+            launchAtLoginIntent: false
+        )
+    )
+    harness.coordinator.launchAtLoginIntentDidChange(false)
+    await harness.coordinator.waitForPendingOperations()
+    try expect(
+        harness.settings.launchAtLoginStates.last == LaunchAtLoginSettingsState(
+            status: .requiresApproval,
+            failure: .unregistrationFailed
+        ),
+        "Expected typed unregistration failure with actual system status"
+    )
+
+    harness.launch.nextStatus = .disabled
+    harness.coordinator.launchAtLoginIntentDidChange(false)
+    await harness.coordinator.waitForPendingOperations()
+    try expect(
+        harness.settings.launchAtLoginStates.last == LaunchAtLoginSettingsState(
+            status: .disabled
+        ),
+        "Expected retry of an unchanged disabled intent"
+    )
+
+    harness.launch.nextFailure = .registrationFailed
+    harness.coordinator.settingsFormValuesDidChange(
+        SettingsFormValues(
+            displayPreference: preferences.displayPreference,
+            refreshProfile: preferences.refreshProfile,
+            launchAtLoginIntent: true
+        )
+    )
+    harness.coordinator.launchAtLoginIntentDidChange(true)
+    await harness.coordinator.waitForPendingOperations()
+    try expect(
+        harness.settings.launchAtLoginStates.last == LaunchAtLoginSettingsState(
+            status: .disabled,
+            failure: .registrationFailed
+        ),
+        "Expected typed failure with the unchanged actual status"
+    )
+
+    harness.coordinator.refreshLaunchAtLoginStatus()
+    try expect(
+        harness.settings.launchAtLoginStates.last == LaunchAtLoginSettingsState(
+            status: .disabled,
+            failure: .registrationFailed
+        ),
+        "Expected unchanged activation sample to preserve the typed failure"
+    )
+    harness.launch.currentStatus = .enabled
+    harness.coordinator.refreshLaunchAtLoginStatus()
+    try expect(
+        harness.settings.launchAtLoginStates.last == LaunchAtLoginSettingsState(
+            status: .enabled
+        ),
+        "Expected changed activation sample to clear the obsolete failure"
+    )
+
+    harness.launch.currentStatus = .requiresApproval
+    harness.coordinator.openLaunchAtLoginApprovalSettings()
+    try expect(
+        harness.launch.openSettingsCount == 2,
+        "Expected recovery to follow a newly observed approval state"
+    )
+    harness.launch.currentStatus = .enabled
+    harness.coordinator.openLaunchAtLoginApprovalSettings()
+    try expect(
+        harness.settings.launchAtLoginStates.last == LaunchAtLoginSettingsState(
+            status: .enabled
+        ),
+        "Expected recovery action to publish a changed actual state"
+    )
 }
 
 private func applicationRuntimeStartsFirstLaunchAfterRefreshTest() -> TestCase {
@@ -106,8 +212,15 @@ private func applicationDelegateStartsOneRuntimeScenario() async throws {
 
     delegate.applicationDidFinishLaunching(notification)
     delegate.applicationDidFinishLaunching(notification)
+    delegate.applicationDidBecomeActive(
+        Notification(name: NSApplication.didBecomeActiveNotification)
+    )
 
     try expect(runtime.startCount == 1, "Expected one retained runtime start")
+    try expect(
+        runtime.launchAtLoginRefreshCount == 1,
+        "Expected app activation to refresh login launch status"
+    )
 }
 
 private func applicationRuntimeStartsStatusBeforePreferencesTest() -> TestCase {
@@ -217,6 +330,7 @@ private func applicationRuntimeRoutesMenuAndSettingsScenario() async throws {
     harness.coordinator.performMenuAction(.selectCodex)
     harness.coordinator.performMenuAction(.settings)
     harness.coordinator.settingsFormValuesDidChange(values)
+    harness.coordinator.launchAtLoginIntentDidChange(true)
     await harness.coordinator.waitForPendingOperations()
     harness.coordinator.performMenuAction(.quit)
 
@@ -604,9 +718,14 @@ private final class RuntimeStartupRecorder {
 @MainActor
 private final class RuntimeApplicationSpy: CodexGaugeApplicationRunning {
     private(set) var startCount = 0
+    private(set) var launchAtLoginRefreshCount = 0
 
     func start() {
         startCount += 1
+    }
+
+    func refreshLaunchAtLoginStatus() {
+        launchAtLoginRefreshCount += 1
     }
 
     func shutdown() async {}
@@ -639,6 +758,7 @@ private final class RuntimeMenuSpy: ApplicationMenuRuntime {
 private final class RuntimeSettingsSpy: ApplicationSettingsRuntime {
     private(set) var discoveredQuotaIDs = [Set<QuotaSelectionID>]()
     private(set) var connectionStatuses = [CodexConnectionStatus]()
+    private(set) var launchAtLoginStates = [LaunchAtLoginSettingsState]()
     private(set) var selectionRequestCount = 0
     private(set) var showCount = 0
     private(set) var shutdownCount = 0
@@ -658,6 +778,10 @@ private final class RuntimeSettingsSpy: ApplicationSettingsRuntime {
 
     func updateConnectionStatus(_ status: CodexConnectionStatus) {
         connectionStatuses.append(status)
+    }
+
+    func updateLaunchAtLoginState(_ state: LaunchAtLoginSettingsState) {
+        launchAtLoginStates.append(state)
     }
 
     func shutdown() async {
@@ -740,10 +864,30 @@ private final class RuntimeDeadlineSchedulerSpy: ApplicationUsageDeadlineSchedul
 @MainActor
 private final class RuntimeLaunchSpy: ApplicationLaunchAtLoginControlling {
     private(set) var enabledValues = [Bool]()
+    private(set) var openSettingsCount = 0
+    var currentStatus = LaunchAtLoginStatus.disabled
+    var nextStatus: LaunchAtLoginStatus?
+    var nextFailure: LaunchAtLoginError?
 
-    func setEnabled(_ enabled: Bool) async throws -> LaunchAtLoginStatus {
+    func setEnabled(
+        _ enabled: Bool
+    ) async throws(LaunchAtLoginError) -> LaunchAtLoginStatus {
         enabledValues.append(enabled)
-        return enabled ? .enabled : .disabled
+        if let nextFailure {
+            self.nextFailure = nil
+            throw nextFailure
+        }
+        currentStatus = nextStatus ?? (enabled ? .enabled : .disabled)
+        nextStatus = nil
+        return currentStatus
+    }
+
+    func openApprovalSettingsIfNeeded() -> Bool {
+        guard currentStatus == .requiresApproval else {
+            return false
+        }
+        openSettingsCount += 1
+        return true
     }
 }
 
@@ -853,8 +997,14 @@ private final class RuntimeRefreshBuilderSpy: ApplicationRefreshCoordinatorBuild
 }
 
 private actor RuntimePreferencesLoader: ApplicationPreferencesLoading {
+    private let preferences: AppPreferences
+
+    init(preferences: AppPreferences = .default) {
+        self.preferences = preferences
+    }
+
     func load() -> AppPreferences {
-        .default
+        preferences
     }
 }
 

@@ -10,16 +10,24 @@ public final class SettingsWindowController: NSWindowController, NSWindowDelegat
     public init(
         formState: SettingsFormState,
         connectionDiagnostics: ConnectionDiagnosticsSnapshot = .checking,
+        launchAtLoginState: LaunchAtLoginSettingsState = LaunchAtLoginSettingsState(
+            status: .disabled
+        ),
         onSelectCodex: @escaping () -> Void = {},
         onCopyDiagnostics: @escaping () -> Void = {},
+        onOpenLaunchAtLoginSystemSettings: @escaping () -> Void = {},
+        onLaunchAtLoginIntentRequested: @escaping (Bool) -> Void = { _ in },
         onFormValuesChanged: @escaping (SettingsFormValues) -> Void,
         onClose: @escaping (SettingsWindowController) -> Void
     ) {
         settingsViewController = SettingsFormViewController(
             formState: formState,
             connectionDiagnostics: connectionDiagnostics,
+            launchAtLoginState: launchAtLoginState,
             onSelectCodex: onSelectCodex,
             onCopyDiagnostics: onCopyDiagnostics,
+            onOpenLaunchAtLoginSystemSettings: onOpenLaunchAtLoginSystemSettings,
+            onLaunchAtLoginIntentRequested: onLaunchAtLoginIntentRequested,
             onFormValuesChanged: onFormValuesChanged
         )
         self.onClose = onClose
@@ -51,15 +59,15 @@ public final class SettingsWindowController: NSWindowController, NSWindowDelegat
         contentViewController: NSViewController
     ) -> NSWindow {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 440, height: 680),
+            contentRect: NSRect(x: 0, y: 0, width: 440, height: 720),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
         )
         window.title = SettingsStrings.windowTitle
         window.contentViewController = contentViewController
-        window.contentMinSize = NSSize(width: 440, height: 680)
-        window.contentMaxSize = NSSize(width: 440, height: 680)
+        window.contentMinSize = NSSize(width: 440, height: 720)
+        window.contentMaxSize = NSSize(width: 440, height: 720)
         window.isReleasedWhenClosed = false
         window.isRestorable = false
         window.tabbingMode = .disallowed

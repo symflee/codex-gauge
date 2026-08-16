@@ -242,6 +242,8 @@ frame이 하나면 scheduler에 timer 생성이나 취소 command를 보내지 �
 
 `SettingsWindowCoordinator`는 창을 요청할 때만 약 440pt 폭의 독립 `NSWindowController`를 만들고 한 번에 하나만 보유한다. 변경된 `SettingsFormValues`는 actor repository에 순서대로 전달하며 repository가 저장 시점의 최신 executable URL과 최초 실행 field에 원자적으로 merge한다. 따라서 창이 열린 동안 다른 owner가 갱신한 숨은 field를 오래된 form state가 덮어쓰지 않는다. 창을 닫은 뒤 다시 열 때는 진행 중인 저장을 먼저 마치고 `UserDefaults`를 새로 읽는다. window close callback은 coordinator의 강한 참조와 AppKit content graph를 제거한다. 로그인 실행 UI는 intent만 저장하며 `SMAppService` 호출은 launch adapter 경계에 남긴다. quota snapshot이나 오류 원문은 저장하지 않는다.
 
+로그인 실행 checkbox event는 generic form save와 `onLaunchAtLoginIntentRequested`로 분기한다. 전자는 저장된 의도만 merge하고 후자는 같은 boolean이 반복되어도 application root에 사용자 요청을 전달한다. 따라서 registration·unregistration 실패 뒤 저장 의도는 이미 원하는 값이어도 실제 상태와의 mismatch를 재시도할 수 있다. 결과는 반대 방향의 `LaunchAtLoginSettingsState` publication으로만 열린 창에 들어오며 view나 settings coordinator가 `SMAppService`를 직접 호출하지 않는다.
+
 각 form event는 저장 queue와 별도로 주입된 `onSettingsFormValuesChanged` callback에도 전달한다. composition root는 이 seam을 현재 display preference, refresh profile과 로그인 실행 intent에 적용하며 설정 UI가 runtime controller를 직접 알지 않게 한다. 연결 상태 publication과 종료 drain은 `ApplicationSettingsRuntime` 경계에 분리되고 adapter가 settings coordinator의 I/O 없는 상태 갱신과 terminal shutdown API에 직접 연결한다.
 
 초기 quota 조회가 열린 설정 창보다 늦게 끝나면 composition root는 `updateDiscoveredQuotaIDs(_:)`로 발견 목록만 교체한다. 이 system update는 remembered selection과 form value를 보존하고 UI row만 다시 만들며 저장 queue와 runtime preference callback을 호출하지 않는다. 창이 없을 때는 아무 객체도 만들지 않고 다음 `showSettings()`가 provider의 최신 목록을 읽는다.
@@ -268,7 +270,9 @@ window controller와 view controller가 실제로 해제되는지는 weak-refere
 
 `LaunchAtLoginController`는 main actor에서 `SMAppService.mainApp`을 감싸고 `disabled`, `enabled`, `requiresApproval`, `unavailable`의 비식별 상태만 UI에 제공한다. 이미 원하는 상태에서는 register 또는 unregister를 반복하지 않는다. 승인 대기 상태에서 enable 요청은 재등록하지 않고 로그인 항목 System Settings 동작을 별도로 제공하며, disable 요청은 등록을 해제한다.
 
-macOS 호출이 실패해도 호출 직후 시스템 상태가 이미 요청 결과가 되었다면 경쟁 상태의 성공으로 취급한다. 그 밖의 NSError domain, code와 description은 버리고 registration, unregistration, unavailable의 typed failure만 전달한다. 설정의 `launchAtLoginIntent`는 사용자가 마지막으로 요청한 값이며 실제 토글 상태와 복구 안내는 매번 `SMAppService` 상태를 기준으로 구성한다. composition은 시작 시 저장된 intent를 한 번 적용해 defaults와 실제 OS 상태의 drift를 복구하고, 이후 form 변경도 같은 adapter로 직렬 전달한다.
+macOS 호출이 실패해도 호출 직후 시스템 상태가 이미 요청 결과가 되었다면 경쟁 상태의 성공으로 취급한다. 그 밖의 NSError domain, code와 description은 버리고 registration, unregistration, unavailable의 typed failure만 전달한다. `LaunchAtLoginSettingsState`는 이 실제 status와 optional typed failure만 보존하고, checkbox의 off·on·mixed 상태, 활성 여부와 System Settings recovery 가시성을 순수하게 도출한다.
+
+설정의 `launchAtLoginIntent`는 사용자가 마지막으로 요청한 값일 뿐 실제 checkbox 상태가 아니다. composition은 시작 시 저장된 intent를 한 번 적용해 defaults와 실제 OS 상태의 drift를 복구하고, 사용자 요청도 같은 직렬 operation chain에서 adapter에 적용한다. 성공과 typed 실패는 application root가 `ApplicationSettingsRuntime`으로 즉시 publish하며, 설정 창이 닫혀 있으면 작은 최신 값만 보존한다. 창을 다시 표시하거나 `NSApplicationDelegate.applicationDidBecomeActive`가 전달될 때 semantic provider가 현재 system status를 읽는다. status가 그대로이면 마지막 typed 실패를 유지하고 바뀌었으면 obsolete failure를 제거해 열린 창에 publish한다. 이 재표본은 `SMAppService.status`만 읽고 등록·해제를 만들지 않는다. fixture는 메모리 adapter와 같은 흐름을 사용해 `SMAppService` 변경을 만들지 않는다.
 
 ### 최초 실행
 
