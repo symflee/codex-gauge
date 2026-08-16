@@ -9,6 +9,7 @@ func settingsFormTests() -> [TestCase] {
         settingsFormReducerEditsPreferencesTest(),
         settingsFormReducerFiltersProductsTest(),
         settingsFormPresenterTest(),
+        settingsFormReplacesDiscoveredQuotasTest(),
         settingsFormNormalizesEmptyManualPersistenceTest(),
         settingsFormValuesAreSendableTest()
     ]
@@ -171,6 +172,33 @@ private func settingsFormNormalizesEmptyManualPersistenceTest() -> TestCase {
         try expect(
             state.formValues.displayPreference.quotaSelection == .automatic,
             "Expected safe persisted normalization"
+        )
+    }
+}
+
+private func settingsFormReplacesDiscoveredQuotasTest() -> TestCase {
+    TestCase(name: "settings discovery update preserves every user preference") {
+        let selected = settingsQuotaID(product: .codex, duration: 300)
+        let discovered = settingsQuotaID(product: .codex, duration: 10_080)
+        let preferences = settingsPreferences(
+            productMode: .codex,
+            selection: .manual([selected])
+        )
+        let reducer = SettingsFormReducer()
+        let initial = SettingsFormState(
+            preferences: preferences,
+            discoveredQuotaIDs: []
+        )
+        let updated = reducer.reduce(
+            state: initial,
+            event: .discoveredQuotaIDsChanged([selected, discovered])
+        )
+
+        try expect(updated.formValues == initial.formValues, "Expected preferences unchanged")
+        try expect(updated.quotaOptions.count == 2, "Expected discovery rows replaced")
+        try expect(
+            updated.quotaOptions.first?.availability == .discovered,
+            "Expected selected row to become available"
         )
     }
 }

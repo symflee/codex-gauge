@@ -9,11 +9,17 @@ public final class SettingsWindowController: NSWindowController, NSWindowDelegat
 
     public init(
         formState: SettingsFormState,
+        connectionDiagnostics: ConnectionDiagnosticsSnapshot = .checking,
+        onSelectCodex: @escaping () -> Void = {},
+        onCopyDiagnostics: @escaping () -> Void = {},
         onFormValuesChanged: @escaping (SettingsFormValues) -> Void,
         onClose: @escaping (SettingsWindowController) -> Void
     ) {
         settingsViewController = SettingsFormViewController(
             formState: formState,
+            connectionDiagnostics: connectionDiagnostics,
+            onSelectCodex: onSelectCodex,
+            onCopyDiagnostics: onCopyDiagnostics,
             onFormValuesChanged: onFormValuesChanged
         )
         self.onClose = onClose
@@ -45,15 +51,15 @@ public final class SettingsWindowController: NSWindowController, NSWindowDelegat
         contentViewController: NSViewController
     ) -> NSWindow {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 440, height: 520),
+            contentRect: NSRect(x: 0, y: 0, width: 440, height: 680),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
         )
         window.title = SettingsStrings.windowTitle
         window.contentViewController = contentViewController
-        window.contentMinSize = NSSize(width: 440, height: 520)
-        window.contentMaxSize = NSSize(width: 440, height: 520)
+        window.contentMinSize = NSSize(width: 440, height: 680)
+        window.contentMaxSize = NSSize(width: 440, height: 680)
         window.isReleasedWhenClosed = false
         window.isRestorable = false
         window.tabbingMode = .disallowed

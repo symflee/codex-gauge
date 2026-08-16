@@ -32,4 +32,31 @@ public actor AppPreferencesRepository {
         )
         try save(merged)
     }
+
+    public func saveSelectedExecutableURL(_ url: URL?) throws {
+        let current = load()
+        let merged = AppPreferences(
+            displayPreference: current.displayPreference,
+            refreshProfile: current.refreshProfile,
+            launchAtLoginIntent: current.launchAtLoginIntent,
+            selectedExecutableURL: url,
+            hasCompletedFirstLaunch: current.hasCompletedFirstLaunch
+        )
+        try save(merged)
+    }
+
+    public func markFirstLaunchCompleted() throws {
+        let current = load()
+        guard current.hasCompletedFirstLaunch == false else {
+            return
+        }
+        let merged = AppPreferences(
+            displayPreference: current.displayPreference,
+            refreshProfile: current.refreshProfile,
+            launchAtLoginIntent: current.launchAtLoginIntent,
+            selectedExecutableURL: current.selectedExecutableURL,
+            hasCompletedFirstLaunch: true
+        )
+        try save(merged)
+    }
 }

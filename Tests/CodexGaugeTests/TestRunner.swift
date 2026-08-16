@@ -7,6 +7,9 @@ struct TestRunner {
         guard SyntheticAppServer.runIfRequested() == false else {
             return
         }
+        guard SyntheticCLIVersionCommand.runIfRequested() == false else {
+            return
+        }
         let failures = await run(allTests())
         guard failures == 0 else {
             exit(EXIT_FAILURE)
@@ -22,6 +25,7 @@ struct TestRunner {
             + usageSessionTests()
             + refreshTests()
             + appPreferencesTests()
+            + connectionDiagnosticsTests()
             + statusItemRenderingTests()
             + launchAtLoginTests()
             + quotaDetailsMenuTests()
