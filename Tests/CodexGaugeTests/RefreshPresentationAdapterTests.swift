@@ -207,6 +207,10 @@ private func refreshPresentationBuildsFramesAndMenuInputTest() -> TestCase {
             presentation.menuInput.codexAvailability == .available,
             "Expected Codex open action"
         )
+        try expect(
+            presentation.menuInput.currentDate == capturedAt,
+            "Expected toolbar and cached menu to share one presentation time"
+        )
     }
 }
 

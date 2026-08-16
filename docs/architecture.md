@@ -34,7 +34,7 @@ StatusItemController / menu / settings
 
 UI adapter는 provider를 직접 호출하지 않는다. 모든 조회는 `RefreshCoordinator`를 통해 직렬화하고, UI는 이미 해석된 snapshot과 상태만 소비한다.
 
-`RefreshPresentationAdapter`는 coordinator가 발행한 immutable 제품별 결과를 하나의 시각에 맞춰 상태바 frame, 상세 메뉴 input과 설정용 discovered quota ID로 투영한다. 전역 실패는 두 제품에 같은 복구 사유를 적용하되 partial·malformed 같은 제품별 issue와 마지막 성공 시각은 서로 오염시키지 않는다. protocol의 `SpendControlLimit`는 이 adapter 안에서 `도달`, `남은 비율`, `미도달·비율 미상`만 가진 semantic menu value로 변환해 wire type이 AppKit model로 새지 않게 한다. adapter는 AppKit, process, timer와 I/O를 알지 않으며 초기 loading 상태에서 임의의 오류나 quota를 만들지 않는다.
+`RefreshPresentationAdapter`는 coordinator가 발행한 immutable 제품별 결과를 하나의 시각에 맞춰 상태바 frame, 상세 메뉴 input과 설정용 discovered quota ID로 투영한다. 같은 `now`를 frame builder와 cached menu input에 전달하고 두 consumer는 Core의 `QuotaValueValidityPolicy`를 사용한다. 따라서 reset 또는 24시간 경계에서 상태바만 `—`로 바뀌고 메뉴에는 과거 퍼센트가 남는 이중 기준을 허용하지 않는다. 전역 실패는 두 제품에 같은 복구 사유를 적용하되 partial·malformed 같은 제품별 issue와 마지막 성공 시각은 서로 오염시키지 않는다. protocol의 `SpendControlLimit`는 이 adapter 안에서 `도달`, `남은 비율`, `미도달·비율 미상`만 가진 semantic menu value로 변환해 wire type이 AppKit model로 새지 않게 한다. adapter는 AppKit, process, timer와 I/O를 알지 않으며 초기 loading 상태에서 임의의 오류나 quota를 만들지 않는다.
 
 composition은 `NSWorkspace`에서 실제 application bundle을 찾았는지를 boolean capability로 presentation adapter에 전달한다. typed not-found·invalid-selection 오류 또는 열 application 부재는 `Codex 선택…` action을 만들고, bundle을 열 수 있을 때만 `Codex 열기`를 만든다. CLI 조회 성공을 application open 가능 상태로 추측하지 않는다.
 
@@ -82,7 +82,7 @@ Codex와 Spark를 나타낸다. App Server의 문자열 ID는 protocol adapter�
 
 Preference는 제품 모드와 자동·직접 한도 선택을 표현한다. Frame은 상태바 title을 만들 제품·기간·상태 의미를 보존한다. Core formatter는 locale과 무관한 compact title만 만들고 AppKit의 `StatusAccessibilityFormatter`가 localization resource와 기간 단위 vocabulary로 완전한 접근성 문장을 구성한다. 여러 frame은 builder에서 미리 생성하고 rotation timer는 배열 index만 바꾼다.
 
-직접 선택 ID는 제품과 normalized raw duration의 값 조합이다. `ProductUsageState`는 제품마다 loading, fresh value, stale value와 unavailable을 독립적으로 유지한다. `DisplayFrameBuilder`는 주입받은 현재 시각을 기준으로 reset 도달 또는 24시간 경과 값을 폐기하며 AppKit이나 timer에 의존하지 않는다. 정규화 경계를 우회한 직접 선택에 표시 제품 식별자가 하나도 없더라도 빈 frame 배열을 만들지 않고 해당 제품의 자동 frame으로 복구한다.
+직접 선택 ID는 제품과 normalized raw duration의 값 조합이다. `ProductUsageState`는 제품마다 loading, fresh value, stale value와 unavailable을 독립적으로 유지한다. Core의 `QuotaValueValidityPolicy`는 `now >= resetsAt` 또는 `now - capturedAt >= 24시간`인 window를 만료로 판정한다. `DisplayFrameBuilder`와 상세 메뉴 builder는 이 순수 정책을 공유하고 주입받은 같은 현재 시각으로 각 window를 독립 평가하며 AppKit이나 timer에 의존하지 않는다. 정규화 경계를 우회한 직접 선택에 표시 제품 식별자가 하나도 없더라도 빈 frame 배열을 만들지 않고 해당 제품의 자동 frame으로 복구한다.
 
 ### `UsageState`
 
@@ -233,7 +233,7 @@ frame이 하나면 scheduler에 timer 생성이나 취소 command를 보내지 �
 
 실제 `NSWorkspace` 접근은 주입 가능한 `AssistiveDisplayStateSourcing` 뒤에 둔다. monitor는 timer, status item, provider 또는 I/O를 소유하지 않으며 typed state callback만 composition root에 제공한다. composition은 두 boolean을 각각 `.voiceOver`와 `.reduceMotion` rotation pause reason으로 연결하되 monitor와 `StatusItemController`를 직접 결합하지 않는다.
 
-상세 메뉴는 `QuotaDetailsMenuInput → QuotaDetailsMenuModel → StatusMenuController`로 분리한다. 순수 builder는 메모리의 제품별 `ProductUsageState`, typed issue와 마지막 성공 시각만 받아 Codex·Spark section, 모든 quota window, 절대 reset 시각과 action group을 만든다. stale, partial과 unavailable은 제품별로 독립 유지하며 값을 알 수 없는 상태를 `0%`로 만들지 않는다. date formatter와 localization value를 주입해 합성 시각으로 검증할 수 있다.
+상세 메뉴는 `QuotaDetailsMenuInput → QuotaDetailsMenuModel → StatusMenuController`로 분리한다. 순수 builder는 메모리의 제품별 `ProductUsageState`, presentation 현재 시각, typed issue와 마지막 성공 시각을 받아 Codex·Spark section, 모든 quota window, 절대 reset 시각과 action group을 만든다. shared validity policy에서 만료된 window는 raw 객체를 버리지 않고 해당 행의 퍼센트만 `—`와 refresh 안내로 바꾸므로 한 제품의 sibling window, spend-control, 마지막 성공·오류 상태와 action은 그대로 유지된다. stale, partial과 unavailable은 제품별로 독립 유지하며 값을 알 수 없는 상태를 `0%`로 만들지 않는다. date formatter와 localization value를 주입해 합성 시각으로 검증할 수 있다.
 
 `StatusMenuController`는 상태 갱신 시 완성된 immutable model로 `NSMenu`를 미리 구성하고 `SystemStatusItemPresenter`에 연결한다. menu open callback에서는 model 생성, 날짜 formatting 또는 snapshot 조회를 하지 않고 `.menuOpen` rotation pause만 설정하며 close에서 해제한다. action은 refresh, Codex 열기·선택, 설정과 종료 closure로 주입하므로 UI adapter가 provider, process 또는 설정 창을 직접 알지 않는다. production composition은 이 action을 application coordinator의 현재 generation과 settings runtime에 연결한다.
 

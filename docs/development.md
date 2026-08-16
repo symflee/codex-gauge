@@ -90,6 +90,8 @@ SwiftPM의 `CodexGaugeStandardTests` test target은 Swift Testing의 `@Test`로 
 - 메뉴 열림, 화면 잠금, sleep, VoiceOver, Reduce Motion 중 순환 중단·재개
 - 순환 tick의 사전 렌더 frame 사용과 무-I/O 경계
 - 제품별 모든 quota·절대 reset·마지막 성공·typed 오류 menu model
+- 상태바와 상세 메뉴의 shared validity 정책, reset·24시간 exact boundary와 window별 부분 만료
+- quota 만료 뒤 spend-control·마지막 성공·fresh/stale 설명·refresh/recovery action 보존
 - 제품별 spend-control의 도달 우선순위·남은 비율·불완전 상태 별도 menu 행
 - missing·malformed spend-control의 quota 격리와 상태바 frame·순환·폭 입력 불변성
 - 메뉴 open/close의 rotation pause와 cached `NSMenu` 무-I/O 경계
