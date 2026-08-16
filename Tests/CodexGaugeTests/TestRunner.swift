@@ -21,6 +21,7 @@ struct TestRunner {
             + quotaDomainTests()
             + quotaDisplayTests()
             + protocolTests()
+            + appServerSmokeTests()
             + codexExecutableLocatorTests()
             + usageSessionTests()
             + refreshTests()

@@ -20,6 +20,10 @@ let package = Package(
         .executable(
             name: "codex-gauge-tests",
             targets: ["CodexGaugeTests"]
+        ),
+        .executable(
+            name: "codex-gauge-smoke",
+            targets: ["CodexGaugeSmokeExecutable"]
         )
     ],
     dependencies: [],
@@ -81,6 +85,10 @@ let package = Package(
                 "CodexGaugeAppKit"
             ],
             path: "Tests/CodexGaugeTests"
+        ),
+        .executableTarget(
+            name: "CodexGaugeSmokeExecutable",
+            dependencies: ["CodexGaugeProtocol"]
         )
     ],
     swiftLanguageModes: [.v6]
