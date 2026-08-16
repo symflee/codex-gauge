@@ -13,13 +13,21 @@ func settingsWindowTests() -> [TestCase] {
         settingsWindowRecreationReloadsPreferencesTest(),
         settingsWindowReleasesUIObjectsTest(),
         settingsWindowConnectionSectionTest(),
+        settingsWindowKeepsLatestConnectionStatusTest(),
+        settingsWindowProjectNoticeTest(),
         settingsWindowConnectionActionsTest(),
         settingsWindowExecutableSelectionSeamTest(),
+        settingsWindowPanelCancellationTest(),
         settingsWindowCommittedSelectionCallbackTest(),
+        settingsWindowCommittedSelectionUpdatesReopenedWindowTest(),
         settingsWindowSelectionIdentityTest(),
         settingsWindowDiscoveryUpdateTest(),
         settingsWindowSerializesDiagnosticsTest(),
         settingsWindowPendingDiagnosticsReleaseTest(),
+        settingsWindowShutdownDrainsPendingWorkTest(),
+        settingsWindowRejectsTerminalShowTest(),
+        settingsWindowShutdownClosesLateWindowTest(),
+        settingsWindowShutdownFinishesCommittedSelectionTest(),
         settingsDurationAccessibilityLocalizationTest()
     ]
 }
@@ -42,7 +50,7 @@ private func settingsWindowStructureScenario() async throws {
     )
 
     try expect(coordinator.activeWindowController == nil, "Expected lazy window creation")
-    let controller = await coordinator.showSettings()
+    let controller = try await showSettingsController(coordinator)
     guard let window = controller.window else {
         throw TestFailure(description: "Expected settings window")
     }
@@ -54,7 +62,7 @@ private func settingsWindowStructureScenario() async throws {
     try expect(abs(window.contentLayoutRect.width - 440) < 1, "Expected 440pt content width")
     try expect(controller.settingsViewController.isViewLoaded, "Expected programmatic view")
     try expect(!window.title.hasPrefix("settings."), "Expected localized window title")
-    let repeatedController = await coordinator.showSettings()
+    let repeatedController = try await showSettingsController(coordinator)
     try expect(repeatedController === controller, "Expected one settings window")
 
     controller.close()
@@ -91,7 +99,7 @@ private func settingsWindowPersistenceScenario() async throws {
         discoveredQuotaProvider: { [discovered] },
         onSettingsFormValuesChanged: { runtimeValues.append($0) }
     )
-    let controller = await coordinator.showSettings()
+    let controller = try await showSettingsController(coordinator)
     let viewController = controller.settingsViewController
 
     guard let missingOption = viewController.formState.quotaOptions.first(
@@ -271,6 +279,91 @@ private func settingsWindowConnectionSectionTest() -> TestCase {
     }
 }
 
+private func settingsWindowKeepsLatestConnectionStatusTest() -> TestCase {
+    TestCase(name: "settings keeps live status during an in-flight CLI probe") {
+        try await settingsWindowKeepsLatestConnectionStatusScenario()
+    }
+}
+
+@MainActor
+private func settingsWindowKeepsLatestConnectionStatusScenario() async throws {
+    _ = NSApplication.shared
+    let store = try SettingsUITestStore()
+    defer { store.cleanUp() }
+    let gate = try StaleStatusSettingsDiagnosticsGate()
+    let clipboard = SettingsDiagnosticClipboardStub()
+    let coordinator = SettingsWindowCoordinator(
+        repository: try store.repository(),
+        discoveredQuotaProvider: { [] },
+        connectionDiagnosticsProvider: { selectedURL, status in
+            await gate.snapshot(selectedURL: selectedURL, capturedStatus: status)
+        },
+        connectionStatusProvider: { .signedOut },
+        clipboardWriter: clipboard,
+        diagnosticEnvironment: DiagnosticEnvironment(
+            appVersion: "0.1.0",
+            macOSVersion: "15.4.1",
+            architecture: .arm64
+        )
+    )
+    let controller = try await showSettingsController(coordinator)
+    let viewController = controller.settingsViewController
+    viewController.performConnectionAction(.copyDiagnostics)
+
+    try expect(
+        clipboard.lastText?.contains("connection-status: signed-out") == true,
+        "Expected initial screen and copied snapshot to share the status"
+    )
+    try await waitForSettingsCondition { await gate.hasStarted }
+
+    coordinator.updateConnectionStatus(.connected)
+    viewController.performConnectionAction(.copyDiagnostics)
+
+    try expect(
+        viewController.connectionDiagnostics.connectionStatus == .connected,
+        "Expected an immediate live status update"
+    )
+    try expect(
+        clipboard.lastText?.contains("connection-status: connected") == true,
+        "Expected copied diagnostics to use the live status"
+    )
+
+    await gate.finish()
+    try await waitForSettingsCondition {
+        viewController.connectionDiagnostics.cliVersion?.value == "2.3.4"
+    }
+    try expect(
+        viewController.connectionDiagnostics.connectionStatus == .connected,
+        "Expected stale probe status not to replace the live status"
+    )
+    controller.close()
+}
+
+private func settingsWindowProjectNoticeTest() -> TestCase {
+    TestCase(name: "settings shows a localized unofficial project notice") {
+        try await settingsWindowProjectNoticeScenario()
+    }
+}
+
+@MainActor
+private func settingsWindowProjectNoticeScenario() async throws {
+    _ = NSApplication.shared
+    let store = try SettingsUITestStore()
+    defer { store.cleanUp() }
+    let coordinator = SettingsWindowCoordinator(
+        repository: try store.repository(),
+        discoveredQuotaProvider: { [] }
+    )
+
+    let controller = try await showSettingsController(coordinator)
+    let notice = controller.settingsViewController.renderedProjectNoticeText
+
+    try expect(!notice.hasPrefix("settings."), "Expected localized notice text")
+    try expect(notice.contains("OpenAI"), "Expected OpenAI non-affiliation notice")
+    try expect(notice.contains("Codex App Server"), "Expected experimental dependency notice")
+    controller.close()
+}
+
 @MainActor
 private func settingsWindowConnectionSectionScenario() async throws {
     _ = NSApplication.shared
@@ -285,7 +378,7 @@ private func settingsWindowConnectionSectionScenario() async throws {
         },
         connectionStatusProvider: { .connected }
     )
-    let controller = await coordinator.showSettings()
+    let controller = try await showSettingsController(coordinator)
     let viewController = controller.settingsViewController
     try await waitForSettingsCondition {
         viewController.connectionDiagnostics.cliVersion?.value == "1.2.3"
@@ -343,7 +436,7 @@ private func settingsWindowConnectionActionsScenario() async throws {
         ),
         onExecutableSelectionChanged: { callbackURL = $0 }
     )
-    let controller = await coordinator.showSettings()
+    let controller = try await showSettingsController(coordinator)
     let viewController = controller.settingsViewController
     try await waitForSettingsCondition {
         viewController.connectionDiagnostics.cliVersion != nil
@@ -379,6 +472,198 @@ private func settingsWindowPendingDiagnosticsReleaseTest() -> TestCase {
     }
 }
 
+private func settingsWindowShutdownDrainsPendingWorkTest() -> TestCase {
+    TestCase(name: "settings shutdown saves forms and drains diagnostics and panels") {
+        try await settingsWindowShutdownDrainsPendingWorkScenario()
+    }
+}
+
+@MainActor
+private func settingsWindowShutdownDrainsPendingWorkScenario() async throws {
+    _ = NSApplication.shared
+    let store = try SettingsUITestStore()
+    defer { store.cleanUp() }
+    let diagnostics = CancellationAwareSettingsDiagnosticsGate()
+    let panel = SettingsExecutablePanelStub(
+        selectedURL: URL(fileURLWithPath: "/Synthetic/Cancelled/codex")
+    )
+    let selector = NSOpenPanelCodexExecutableSelector(panelFactory: { panel })
+    let completion = SettingsShutdownCompletion()
+    let repository = try store.repository()
+    let coordinator = SettingsWindowCoordinator(
+        repository: repository,
+        discoveredQuotaProvider: { [] },
+        connectionDiagnosticsProvider: { _, _ in await diagnostics.snapshot() },
+        executableSelector: selector
+    )
+    let controller = try await showSettingsController(coordinator)
+    try await waitForSettingsCondition { await diagnostics.hasStarted }
+    controller.settingsViewController.apply(.refreshProfileChanged(.fast))
+    coordinator.requestExecutableSelection()
+    try await waitForSettingsCondition { panel.presentCount == 1 }
+
+    let shutdownTask = Task { @MainActor in
+        await coordinator.shutdown()
+        completion.didFinish = true
+    }
+    try await waitForSettingsCondition {
+        await diagnostics.hasObservedCancellation && panel.dismissCount == 1
+    }
+
+    try expect(!completion.didFinish, "Expected shutdown to await diagnostics cleanup")
+    await diagnostics.finishCleanup()
+    await shutdownTask.value
+
+    try expect(completion.didFinish, "Expected shutdown completion")
+    try expect(coordinator.activeWindowController == nil, "Expected shutdown window release")
+    try expect(panel.dismissCount == 1, "Expected pending panel cancelled once")
+    let saved = await repository.load()
+    try expect(saved.refreshProfile == .fast, "Expected pending form save preserved")
+}
+
+private func settingsWindowShutdownFinishesCommittedSelectionTest() -> TestCase {
+    TestCase(name: "settings shutdown finishes a committed executable selection") {
+        try await settingsWindowShutdownFinishesCommittedSelectionScenario()
+    }
+}
+
+private func settingsWindowRejectsTerminalShowTest() -> TestCase {
+    TestCase(name: "settings rejects pending and later shows after shutdown begins") {
+        try await settingsWindowRejectsTerminalShowScenario()
+    }
+}
+
+@MainActor
+private func settingsWindowRejectsTerminalShowScenario() async throws {
+    _ = NSApplication.shared
+    let store = try SettingsUITestStore()
+    defer { store.cleanUp() }
+    let formSaveGate = SettingsFormSaveGate()
+    let completion = SettingsShutdownCompletion()
+    let pendingShowResult = SettingsWindowResult()
+    var windowCreationCount = 0
+    let coordinator = SettingsWindowCoordinator(
+        repository: try store.repository(),
+        discoveredQuotaProvider: { [] },
+        settingsFormValuesSaver: { values in await formSaveGate.save(values) },
+        onSettingsWindowCreated: { _ in windowCreationCount += 1 }
+    )
+    var controller: SettingsWindowController? = await coordinator.showSettings()
+    controller?.settingsViewController.apply(.refreshProfileChanged(.fast))
+    try await waitForSettingsCondition { await formSaveGate.hasStarted }
+    controller?.close()
+    controller = nil
+
+    let pendingShow = Task { @MainActor in
+        pendingShowResult.controller = await coordinator.showSettings()
+    }
+    for _ in 0..<20 {
+        await Task.yield()
+    }
+    let shutdownTask = Task { @MainActor in
+        await coordinator.shutdown()
+        completion.didFinish = true
+    }
+    for _ in 0..<20 {
+        await Task.yield()
+    }
+    try expect(!completion.didFinish, "Expected shutdown to wait for the form save")
+
+    await formSaveGate.finish()
+    await pendingShow.value
+    await shutdownTask.value
+    let terminalResult: SettingsWindowController? = await coordinator.showSettings()
+
+    try expect(pendingShowResult.controller == nil, "Expected pending show rejected after shutdown")
+    try expect(terminalResult == nil, "Expected terminal show rejected")
+    try expect(coordinator.activeWindowController == nil, "Expected no terminal window")
+    try expect(windowCreationCount == 1, "Expected no window created after shutdown began")
+}
+
+private func settingsWindowShutdownClosesLateWindowTest() -> TestCase {
+    TestCase(name: "settings shutdown closes a window created after a gated save") {
+        try await settingsWindowShutdownClosesLateWindowScenario()
+    }
+}
+
+@MainActor
+private func settingsWindowShutdownClosesLateWindowScenario() async throws {
+    _ = NSApplication.shared
+    let store = try SettingsUITestStore()
+    defer { store.cleanUp() }
+    let formSaveGate = SettingsFormSaveGate()
+    let selector = SettingsExecutableSelectorStub(selectedURL: nil)
+    weak var weakLatestController: SettingsWindowController?
+    let coordinator = SettingsWindowCoordinator(
+        repository: try store.repository(),
+        discoveredQuotaProvider: { [] },
+        settingsFormValuesSaver: { values in await formSaveGate.save(values) },
+        executableSelector: selector,
+        onSettingsWindowCreated: { weakLatestController = $0 }
+    )
+    var controller: SettingsWindowController? = await coordinator.showSettings()
+    controller?.settingsViewController.apply(.refreshProfileChanged(.fast))
+    try await waitForSettingsCondition { await formSaveGate.hasStarted }
+    controller?.close()
+    controller = nil
+    await Task.yield()
+
+    coordinator.requestExecutableSelection()
+    for _ in 0..<20 {
+        await Task.yield()
+    }
+    let shutdownTask = Task { @MainActor in
+        await coordinator.shutdown()
+    }
+    for _ in 0..<20 {
+        await Task.yield()
+    }
+    await formSaveGate.finish()
+    await shutdownTask.value
+    await Task.yield()
+
+    try expect(coordinator.activeWindowController == nil, "Expected no late active window")
+    try expect(weakLatestController == nil, "Expected the late window graph released")
+    try expect(selector.callCount == 0, "Expected no panel after shutdown")
+}
+
+@MainActor
+private func settingsWindowShutdownFinishesCommittedSelectionScenario() async throws {
+    _ = NSApplication.shared
+    let store = try SettingsUITestStore()
+    defer { store.cleanUp() }
+    let selectedURL = URL(fileURLWithPath: "/Synthetic/Shutdown/codex")
+    let saveGate = SettingsSelectionSaveGate()
+    let completion = SettingsShutdownCompletion()
+    var callbackURL: URL?
+    let coordinator = SettingsWindowCoordinator(
+        repository: try store.repository(),
+        discoveredQuotaProvider: { [] },
+        executableSelector: SettingsExecutableSelectorStub(selectedURL: selectedURL),
+        executableSelectionSaver: { url in try await saveGate.save(url) },
+        onExecutableSelectionChanged: { callbackURL = $0 }
+    )
+    coordinator.requestExecutableSelection()
+    try await waitForSettingsCondition { await saveGate.hasStarted }
+
+    let shutdownTask = Task { @MainActor in
+        await coordinator.shutdown()
+        completion.didFinish = true
+    }
+    for _ in 0..<20 {
+        await Task.yield()
+    }
+    try expect(!completion.didFinish, "Expected committed save to drain before shutdown")
+    try expect(callbackURL == nil, "Expected runtime callback after the save")
+
+    await saveGate.finish()
+    await shutdownTask.value
+
+    try expect(callbackURL == selectedURL, "Expected committed runtime callback")
+    try expect(completion.didFinish, "Expected shutdown after committed selection")
+    try expect(coordinator.activeWindowController == nil, "Expected shutdown window release")
+}
+
 private func settingsWindowDiscoveryUpdateTest() -> TestCase {
     TestCase(name: "settings discovery refresh rerenders without save callbacks") {
         try await settingsWindowDiscoveryUpdateScenario()
@@ -397,7 +682,7 @@ private func settingsWindowDiscoveryUpdateScenario() async throws {
         discoveredQuotaProvider: { [] },
         onSettingsFormValuesChanged: { _ in runtimeChangeCount += 1 }
     )
-    let controller = await coordinator.showSettings()
+    let controller = try await showSettingsController(coordinator)
     let identifier = QuotaSelectionID(product: .codex, rawDurationMinutes: 300)
 
     coordinator.updateDiscoveredQuotaIDs([identifier])
@@ -423,10 +708,124 @@ private func settingsWindowExecutableSelectionSeamTest() -> TestCase {
     }
 }
 
+private func settingsWindowPanelCancellationTest() -> TestCase {
+    TestCase(name: "closing and reopening settings cancels each panel exactly once") {
+        try await settingsWindowPanelCancellationScenario()
+    }
+}
+
+@MainActor
+private func settingsWindowPanelCancellationScenario() async throws {
+    _ = NSApplication.shared
+    let store = try SettingsUITestStore()
+    defer { store.cleanUp() }
+    let staleURL = URL(fileURLWithPath: "/Synthetic/Stale/codex")
+    let currentURL = URL(fileURLWithPath: "/Synthetic/Current/codex")
+    let firstPanel = SettingsExecutablePanelStub(selectedURL: staleURL)
+    let secondPanel = SettingsExecutablePanelStub(selectedURL: currentURL)
+    let panelFactory = SettingsExecutablePanelFactoryStub(
+        panels: [firstPanel, secondPanel]
+    )
+    let selector = NSOpenPanelCodexExecutableSelector(
+        panelFactory: { panelFactory.makePanel() }
+    )
+    var callbackURLs = [URL]()
+    let coordinator = SettingsWindowCoordinator(
+        repository: try store.repository(),
+        discoveredQuotaProvider: { [] },
+        executableSelector: selector,
+        onExecutableSelectionChanged: { callbackURLs.append($0) }
+    )
+
+    coordinator.requestExecutableSelection()
+    try await waitForSettingsCondition { firstPanel.presentCount == 1 }
+    coordinator.activeWindowController?.close()
+    try await waitForSettingsCondition { firstPanel.dismissCount == 1 }
+    firstPanel.respond(.OK)
+
+    coordinator.requestExecutableSelection()
+    try await waitForSettingsCondition { secondPanel.presentCount == 1 }
+    secondPanel.respond(.OK)
+    try await waitForSettingsCondition { callbackURLs == [currentURL] }
+
+    try expect(firstPanel.dismissCount == 1, "Expected one cancellation dismissal")
+    try expect(panelFactory.makeCount == 2, "Expected a fresh panel after reopening")
+    try expect(callbackURLs == [currentURL], "Expected no stale panel selection")
+    coordinator.activeWindowController?.close()
+}
+
 private func settingsWindowCommittedSelectionCallbackTest() -> TestCase {
     TestCase(name: "committed executable selection updates runtime after window close") {
         try await settingsWindowCommittedSelectionCallbackScenario()
     }
+}
+
+private func settingsWindowCommittedSelectionUpdatesReopenedWindowTest() -> TestCase {
+    TestCase(name: "committed executable selection updates a reopened settings window") {
+        try await settingsWindowCommittedSelectionUpdatesReopenedWindowScenario()
+    }
+}
+
+@MainActor
+private func settingsWindowCommittedSelectionUpdatesReopenedWindowScenario() async throws {
+    _ = NSApplication.shared
+    let store = try SettingsUITestStore()
+    defer { store.cleanUp() }
+    let repository = try store.repository()
+    let previousURL = URL(fileURLWithPath: "/Synthetic/Previous/codex")
+    let selectedURL = URL(fileURLWithPath: "/Synthetic/Reopened/codex")
+    try await repository.save(
+        AppPreferences(selectedExecutableURL: previousURL)
+    )
+    let diagnostics = ReopenedSelectionDiagnosticsProbe(selectedURL: selectedURL)
+    let saveGate = SettingsSelectionSaveGate()
+    var callbackURL: URL?
+    let coordinator = SettingsWindowCoordinator(
+        repository: repository,
+        discoveredQuotaProvider: { [] },
+        connectionDiagnosticsProvider: { url, status in
+            await diagnostics.snapshot(selectedURL: url, status: status)
+        },
+        connectionStatusProvider: { .connected },
+        executableSelector: SettingsExecutableSelectorStub(selectedURL: selectedURL),
+        executableSelectionSaver: { url in try await saveGate.save(url) },
+        onExecutableSelectionChanged: { callbackURL = $0 }
+    )
+
+    var controller: SettingsWindowController? = await coordinator.showSettings()
+    coordinator.requestExecutableSelection()
+    try await waitForSettingsCondition { await saveGate.hasStarted }
+    controller?.close()
+    controller = nil
+
+    let reopenedCandidate: SettingsWindowController? = await coordinator.showSettings()
+    guard let reopenedController = reopenedCandidate else {
+        throw TestFailure(description: "Expected reopened settings window")
+    }
+    try await waitForSettingsCondition {
+        reopenedController.settingsViewController.connectionDiagnostics.path?.basename
+            == "previous-codex"
+    }
+
+    await saveGate.finish()
+    try await waitForSettingsCondition {
+        guard callbackURL == selectedURL else {
+            return false
+        }
+        return await diagnostics.hasStartedSelectedProbe
+    }
+    let checking = reopenedController.settingsViewController.connectionDiagnostics
+    try expect(checking.connectionStatus == .checking, "Expected checking selected path")
+    try expect(checking.path == nil, "Expected old executable details cleared")
+
+    await diagnostics.finishSelectedProbe()
+    try await waitForSettingsCondition {
+        reopenedController.settingsViewController.connectionDiagnostics.path?.basename
+            == "selected-codex"
+    }
+    let selectedURLs = await diagnostics.selectedURLs
+    try expect(selectedURLs.last == selectedURL, "Expected probe for committed executable")
+    reopenedController.close()
 }
 
 @MainActor
@@ -527,7 +926,7 @@ private func settingsWindowSerializesDiagnosticsScenario() async throws {
             await probe.snapshot()
         }
     )
-    let controller = await coordinator.showSettings()
+    let controller = try await showSettingsController(coordinator)
     try await waitForSettingsCondition { await probe.callCount == 1 }
 
     await coordinator.refreshConnectionDiagnostics()
@@ -598,6 +997,16 @@ private func settingsWindowPendingDiagnosticsReleaseScenario() async throws {
 }
 
 @MainActor
+private func showSettingsController(
+    _ coordinator: SettingsWindowCoordinator
+) async throws -> SettingsWindowController {
+    guard let controller = await coordinator.showSettings() else {
+        throw TestFailure(description: "Expected settings window")
+    }
+    return controller
+}
+
+@MainActor
 private func waitForSettingsCondition(
     _ condition: @escaping @MainActor () async -> Bool
 ) async throws {
@@ -635,9 +1044,140 @@ private actor SettingsDiagnosticsProviderStub {
     }
 }
 
+private actor StaleStatusSettingsDiagnosticsGate {
+    private let version: CodexCLIVersion
+    private(set) var hasStarted = false
+    private var continuation: CheckedContinuation<Void, Never>?
+
+    init() throws {
+        version = try CodexCLIVersionParser().parse(
+            Data("codex-cli 2.3.4\n".utf8)
+        )
+    }
+
+    func snapshot(
+        selectedURL: URL?,
+        capturedStatus: CodexConnectionStatus
+    ) async -> ConnectionDiagnosticsSnapshot {
+        hasStarted = true
+        await withCheckedContinuation { continuation in
+            self.continuation = continuation
+        }
+        return ConnectionDiagnosticsSnapshot(
+            path: CodexPathSummary(
+                source: selectedURL == nil ? .automatic : .userSelected,
+                category: .other,
+                basename: "codex"
+            ),
+            cliVersion: version,
+            cliVersionIssue: nil,
+            connectionStatus: capturedStatus
+        )
+    }
+
+    func finish() {
+        continuation?.resume()
+        continuation = nil
+    }
+}
+
+private actor CancellationAwareSettingsDiagnosticsGate {
+    private(set) var hasStarted = false
+    private(set) var hasObservedCancellation = false
+    private var cleanupContinuation: CheckedContinuation<Void, Never>?
+
+    func snapshot() async -> ConnectionDiagnosticsSnapshot {
+        hasStarted = true
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                cleanupContinuation = continuation
+            }
+        } onCancel: {
+            Task { await self.observeCancellation() }
+        }
+        return .checking
+    }
+
+    func finishCleanup() {
+        cleanupContinuation?.resume()
+        cleanupContinuation = nil
+    }
+
+    private func observeCancellation() {
+        hasObservedCancellation = true
+    }
+}
+
+private actor SettingsFormSaveGate {
+    private(set) var hasStarted = false
+    private var continuation: CheckedContinuation<Void, Never>?
+
+    func save(_ values: SettingsFormValues) async {
+        _ = values
+        hasStarted = true
+        await withCheckedContinuation { continuation in
+            self.continuation = continuation
+        }
+    }
+
+    func finish() {
+        continuation?.resume()
+        continuation = nil
+    }
+}
+
+private actor ReopenedSelectionDiagnosticsProbe {
+    private let selectedURL: URL
+    private(set) var selectedURLs = [URL?]()
+    private(set) var hasStartedSelectedProbe = false
+    private var selectedContinuation: CheckedContinuation<Void, Never>?
+
+    init(selectedURL: URL) {
+        self.selectedURL = selectedURL
+    }
+
+    func snapshot(
+        selectedURL: URL?,
+        status: CodexConnectionStatus
+    ) async -> ConnectionDiagnosticsSnapshot {
+        selectedURLs.append(selectedURL)
+        guard selectedURL == self.selectedURL else {
+            return makeSnapshot(basename: "previous-codex", status: status)
+        }
+        hasStartedSelectedProbe = true
+        await withCheckedContinuation { continuation in
+            selectedContinuation = continuation
+        }
+        return makeSnapshot(basename: "selected-codex", status: status)
+    }
+
+    func finishSelectedProbe() {
+        selectedContinuation?.resume()
+        selectedContinuation = nil
+    }
+
+    private func makeSnapshot(
+        basename: String,
+        status: CodexConnectionStatus
+    ) -> ConnectionDiagnosticsSnapshot {
+        ConnectionDiagnosticsSnapshot(
+            executableSource: .userSelected,
+            path: CodexPathSummary(
+                source: .userSelected,
+                category: .other,
+                basename: basename
+            ),
+            cliVersion: nil,
+            cliVersionIssue: nil,
+            connectionStatus: status
+        )
+    }
+}
+
 @MainActor
 private final class SettingsExecutableSelectorStub: CodexExecutableSelecting {
     private let selectedURL: URL?
+    private(set) var callCount = 0
 
     init(selectedURL: URL?) {
         self.selectedURL = selectedURL
@@ -645,8 +1185,68 @@ private final class SettingsExecutableSelectorStub: CodexExecutableSelecting {
 
     func selectExecutable(attachedTo window: NSWindow?) async -> URL? {
         _ = window
+        callCount += 1
         return selectedURL
     }
+}
+
+@MainActor
+private final class SettingsExecutablePanelStub: CodexExecutablePanelPresenting {
+    let selectedURL: URL?
+    private(set) var presentCount = 0
+    private(set) var dismissCount = 0
+    private var completion: (@MainActor (NSApplication.ModalResponse) -> Void)?
+
+    init(selectedURL: URL?) {
+        self.selectedURL = selectedURL
+    }
+
+    func present(
+        attachedTo window: NSWindow?,
+        completion: @escaping @MainActor (NSApplication.ModalResponse) -> Void
+    ) {
+        _ = window
+        presentCount += 1
+        self.completion = completion
+    }
+
+    func dismiss() {
+        dismissCount += 1
+        completion?(.cancel)
+    }
+
+    func respond(_ response: NSApplication.ModalResponse) {
+        completion?(response)
+    }
+}
+
+@MainActor
+private final class SettingsExecutablePanelFactoryStub {
+    private var panels: [SettingsExecutablePanelStub]
+    private(set) var makeCount = 0
+
+    init(panels: [SettingsExecutablePanelStub]) {
+        self.panels = panels
+    }
+
+    func makePanel() -> any CodexExecutablePanelPresenting {
+        makeCount += 1
+        guard let panel = panels.first else {
+            return SettingsExecutablePanelStub(selectedURL: nil)
+        }
+        panels.removeFirst()
+        return panel
+    }
+}
+
+@MainActor
+private final class SettingsShutdownCompletion {
+    var didFinish = false
+}
+
+@MainActor
+private final class SettingsWindowResult {
+    var controller: SettingsWindowController?
 }
 
 @MainActor

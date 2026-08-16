@@ -20,6 +20,10 @@ public final class SettingsFormViewController: NSViewController {
         [selectCodexButton.title, copyDiagnosticsButton.title]
     }
 
+    public var renderedProjectNoticeText: String {
+        projectNoticeLabel.stringValue
+    }
+
     private let reducer = SettingsFormReducer()
     private let presenter = SettingsFormPresenter()
     private let onFormValuesChanged: (SettingsFormValues) -> Void
@@ -46,6 +50,7 @@ public final class SettingsFormViewController: NSViewController {
         title: SettingsStrings.copyDiagnosticsAction,
         action: #selector(copyDiagnostics(_:))
     )
+    private lazy var projectNoticeLabel = makeProjectNoticeLabel()
 
     public init(
         formState: SettingsFormState,
@@ -133,7 +138,8 @@ public final class SettingsFormViewController: NSViewController {
             connectionPathLabel,
             connectionVersionLabel,
             connectionStatusLabel,
-            makeConnectionActionStack()
+            makeConnectionActionStack(),
+            projectNoticeLabel
         ])
         stack.orientation = .vertical
         stack.alignment = .leading
@@ -143,6 +149,7 @@ public final class SettingsFormViewController: NSViewController {
         selectionControl.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         refreshControl.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         launchAtLoginButton.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        projectNoticeLabel.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         return stack
     }
 
@@ -237,6 +244,14 @@ public final class SettingsFormViewController: NSViewController {
         stack.orientation = .horizontal
         stack.spacing = 8
         return stack
+    }
+
+    private func makeProjectNoticeLabel() -> NSTextField {
+        let label = NSTextField(wrappingLabelWithString: SettingsStrings.projectNotice)
+        label.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        label.textColor = .secondaryLabelColor
+        label.maximumNumberOfLines = 0
+        return label
     }
 
     private func makeSectionTitle(_ title: String) -> NSTextField {
@@ -378,6 +393,7 @@ enum SettingsStrings {
     static let connectionSection = localized("settings.section.connection")
     static let selectCodexAction = localized("settings.connection.select")
     static let copyDiagnosticsAction = localized("settings.connection.copy-diagnostics")
+    static let projectNotice = localized("settings.project-notice")
 
     private static let durationFormatter = SettingsDurationAccessibilityFormatter(
         vocabulary: SettingsDurationAccessibilityVocabulary(

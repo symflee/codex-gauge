@@ -71,3 +71,4 @@
 "settings.connection.unavailable" = "확인할 수 없음";
 "settings.connection.select" = "Codex 선택…";
 "settings.connection.copy-diagnostics" = "진단 정보 복사";
+"settings.project-notice" = "Codex Gauge는 비공식 커뮤니티 프로젝트이며 OpenAI와 제휴하거나 보증받지 않습니다. 실험적 Codex App Server에 의존합니다.";

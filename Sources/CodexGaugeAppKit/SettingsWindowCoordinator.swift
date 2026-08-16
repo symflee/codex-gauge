@@ -3,6 +3,7 @@ import CodexGaugeSettings
 import Foundation
 
 public typealias SettingsExecutableSelectionSaver = @Sendable (URL) async throws -> Void
+public typealias SettingsFormValuesSaver = @Sendable (SettingsFormValues) async -> Void
 
 @MainActor
 public final class SettingsWindowCoordinator {
@@ -11,21 +12,27 @@ public final class SettingsWindowCoordinator {
     private let repository: AppPreferencesRepository
     private let discoveredQuotaProvider: @MainActor () -> Set<QuotaSelectionID>
     private let connectionDiagnosticsProvider: SettingsConnectionDiagnosticsProvider
-    private let connectionStatusProvider: @MainActor () -> CodexConnectionStatus
+    private let settingsFormValuesSaver: SettingsFormValuesSaver
     private let executableSelector: (any CodexExecutableSelecting)?
     private let executableSelectionSaver: SettingsExecutableSelectionSaver
     private let clipboardWriter: (any DiagnosticClipboardWriting)?
     private let diagnosticEnvironment: DiagnosticEnvironment
     private let onSettingsFormValuesChanged: @MainActor (SettingsFormValues) -> Void
     private let onExecutableSelectionChanged: @MainActor (URL) -> Void
+    private let onSettingsWindowCreated: @MainActor (SettingsWindowController) -> Void
     private let reportBuilder = ConnectionDiagnosticReportBuilder()
     private var pendingSave: Task<Void, Never>?
     private var diagnosticsTask: Task<Void, Never>?
     private var selectionTask: Task<Void, Never>?
+    private var selectionCleanupTask: Task<Void, Never>?
+    private var shutdownTask: Task<Void, Never>?
     private var diagnosticsGeneration: UInt64 = 0
+    private var connectionStatusRevision: UInt64 = 0
     private var selectionGeneration: UInt64 = 0
+    private var selectionCleanupGeneration: UInt64 = 0
     private var committingSelectionGeneration: UInt64?
     private var selectedExecutableURL: URL?
+    private var latestConnectionStatus: CodexConnectionStatus
     private var latestConnectionDiagnostics = ConnectionDiagnosticsSnapshot.checking
 
     public init(
@@ -44,6 +51,7 @@ public final class SettingsWindowCoordinator {
         connectionStatusProvider: @escaping @MainActor () -> CodexConnectionStatus = {
             .checking
         },
+        settingsFormValuesSaver: SettingsFormValuesSaver? = nil,
         executableSelector: (any CodexExecutableSelecting)? = nil,
         executableSelectionSaver: SettingsExecutableSelectionSaver? = nil,
         clipboardWriter: (any DiagnosticClipboardWriting)? = nil,
@@ -51,12 +59,17 @@ public final class SettingsWindowCoordinator {
         onSettingsFormValuesChanged: @escaping @MainActor (SettingsFormValues) -> Void = {
             _ in
         },
-        onExecutableSelectionChanged: @escaping @MainActor (URL) -> Void = { _ in }
+        onExecutableSelectionChanged: @escaping @MainActor (URL) -> Void = { _ in },
+        onSettingsWindowCreated: @escaping @MainActor (SettingsWindowController) -> Void = {
+            _ in
+        }
     ) {
         self.repository = repository
         self.discoveredQuotaProvider = discoveredQuotaProvider
         self.connectionDiagnosticsProvider = connectionDiagnosticsProvider
-        self.connectionStatusProvider = connectionStatusProvider
+        self.settingsFormValuesSaver = settingsFormValuesSaver ?? { [repository] values in
+            try? await repository.saveSettingsForm(values)
+        }
         self.executableSelector = executableSelector
         self.executableSelectionSaver = executableSelectionSaver ?? { [repository] url in
             try await repository.saveSelectedExecutableURL(url)
@@ -65,29 +78,67 @@ public final class SettingsWindowCoordinator {
         self.diagnosticEnvironment = diagnosticEnvironment
         self.onSettingsFormValuesChanged = onSettingsFormValuesChanged
         self.onExecutableSelectionChanged = onExecutableSelectionChanged
+        self.onSettingsWindowCreated = onSettingsWindowCreated
+        let initialStatus = connectionStatusProvider()
+        latestConnectionStatus = initialStatus
+        latestConnectionDiagnostics = ConnectionDiagnosticsSnapshot(
+            path: nil,
+            cliVersion: nil,
+            cliVersionIssue: nil,
+            connectionStatus: initialStatus
+        )
     }
 
     @discardableResult
-    public func showSettings() async -> SettingsWindowController {
+    public func showSettings() async -> SettingsWindowController? {
+        guard canShowSettings else {
+            return nil
+        }
         if let controller = activeWindowController {
             controller.showWindow(nil)
             controller.window?.makeKeyAndOrderFront(nil)
             return controller
         }
         await pendingSave?.value
+        guard canShowSettings else {
+            return nil
+        }
         let preferences = await repository.load()
+        guard canShowSettings else {
+            return nil
+        }
         if let controller = activeWindowController {
             return controller
         }
-        return makeWindowController(preferences: preferences)
+        let controller = makeWindowController(preferences: preferences)
+        guard canShowSettings else {
+            controller.close()
+            return nil
+        }
+        return controller
     }
 
     public func flushPendingSave() async {
         await pendingSave?.value
     }
 
+    public func shutdown() async {
+        if let shutdownTask {
+            await shutdownTask.value
+            return
+        }
+        let task = Task { @MainActor [weak self] in
+            guard let self else {
+                return
+            }
+            await performShutdown()
+        }
+        shutdownTask = task
+        await task.value
+    }
+
     public func refreshConnectionDiagnostics() async {
-        guard let controller = activeWindowController else {
+        guard shutdownTask == nil, let controller = activeWindowController else {
             return
         }
         scheduleConnectionDiagnostics(
@@ -99,6 +150,19 @@ public final class SettingsWindowCoordinator {
     public func updateDiscoveredQuotaIDs(_ identifiers: Set<QuotaSelectionID>) {
         activeWindowController?.settingsViewController.updateDiscoveredQuotaIDs(
             identifiers
+        )
+    }
+
+    public func updateConnectionStatus(_ status: CodexConnectionStatus) {
+        connectionStatusRevision &+= 1
+        latestConnectionStatus = status
+        let diagnostics = replacingConnectionStatus(
+            in: latestConnectionDiagnostics,
+            with: status
+        )
+        latestConnectionDiagnostics = diagnostics
+        activeWindowController?.settingsViewController.applyConnectionDiagnostics(
+            diagnostics
         )
     }
 
@@ -117,8 +181,9 @@ public final class SettingsWindowCoordinator {
             path: nil,
             cliVersion: nil,
             cliVersionIssue: nil,
-            connectionStatus: connectionStatusProvider()
+            connectionStatus: latestConnectionStatus
         )
+        latestConnectionDiagnostics = initialDiagnostics
         let controller = SettingsWindowController(
             formState: state,
             connectionDiagnostics: initialDiagnostics,
@@ -136,6 +201,7 @@ public final class SettingsWindowCoordinator {
             }
         )
         activeWindowController = controller
+        onSettingsWindowCreated(controller)
         controller.showWindow(nil)
         controller.window?.makeKeyAndOrderFront(nil)
         scheduleConnectionDiagnostics(
@@ -149,12 +215,16 @@ public final class SettingsWindowCoordinator {
         selectedExecutableURL: URL?,
         controller: SettingsWindowController
     ) {
+        guard shutdownTask == nil else {
+            return
+        }
         let previousTask = diagnosticsTask
         previousTask?.cancel()
         diagnosticsGeneration &+= 1
         let generation = diagnosticsGeneration
         let provider = connectionDiagnosticsProvider
-        let connectionStatus = connectionStatusProvider()
+        let connectionStatus = latestConnectionStatus
+        let statusRevision = connectionStatusRevision
         diagnosticsTask = Task { [weak self, weak controller] in
             await previousTask?.value
             guard !Task.isCancelled else {
@@ -167,6 +237,7 @@ public final class SettingsWindowCoordinator {
             self?.applyConnectionDiagnostics(
                 snapshot,
                 generation: generation,
+                statusRevision: statusRevision,
                 controller: controller
             )
         }
@@ -175,6 +246,7 @@ public final class SettingsWindowCoordinator {
     private func applyConnectionDiagnostics(
         _ snapshot: ConnectionDiagnosticsSnapshot,
         generation: UInt64,
+        statusRevision: UInt64,
         controller: SettingsWindowController?
     ) {
         guard generation == diagnosticsGeneration else {
@@ -183,13 +255,45 @@ public final class SettingsWindowCoordinator {
         guard let controller, activeWindowController === controller else {
             return
         }
-        latestConnectionDiagnostics = snapshot
-        controller.settingsViewController.applyConnectionDiagnostics(snapshot)
+        let diagnostics = mergedDiagnostics(
+            snapshot,
+            scheduledStatusRevision: statusRevision
+        )
+        latestConnectionDiagnostics = diagnostics
+        controller.settingsViewController.applyConnectionDiagnostics(diagnostics)
         diagnosticsTask = nil
     }
 
+    private func mergedDiagnostics(
+        _ diagnostics: ConnectionDiagnosticsSnapshot,
+        scheduledStatusRevision: UInt64
+    ) -> ConnectionDiagnosticsSnapshot {
+        guard scheduledStatusRevision != connectionStatusRevision else {
+            return diagnostics
+        }
+        return replacingConnectionStatus(
+            in: diagnostics,
+            with: latestConnectionStatus
+        )
+    }
+
+    private func replacingConnectionStatus(
+        in diagnostics: ConnectionDiagnosticsSnapshot,
+        with status: CodexConnectionStatus
+    ) -> ConnectionDiagnosticsSnapshot {
+        ConnectionDiagnosticsSnapshot(
+            executableSource: diagnostics.executableSource,
+            path: diagnostics.path,
+            cliVersion: diagnostics.cliVersion,
+            cliVersionIssue: diagnostics.cliVersionIssue,
+            connectionStatus: status
+        )
+    }
+
     public func requestExecutableSelection() {
-        guard selectionTask == nil, executableSelector != nil else {
+        guard shutdownTask == nil,
+              selectionTask == nil,
+              executableSelector != nil else {
             return
         }
         selectionGeneration &+= 1
@@ -199,7 +303,19 @@ public final class SettingsWindowCoordinator {
                 return
             }
             if activeWindowController == nil {
-                _ = await showSettings()
+                guard let openedController = await showSettings() else {
+                    finishExecutableSelection(generation: generation)
+                    return
+                }
+                guard !Task.isCancelled, shutdownTask == nil else {
+                    openedController.close()
+                    finishExecutableSelection(generation: generation)
+                    return
+                }
+            }
+            guard !Task.isCancelled, shutdownTask == nil else {
+                finishExecutableSelection(generation: generation)
+                return
             }
             await runExecutableSelection(generation: generation)
         }
@@ -210,9 +326,9 @@ public final class SettingsWindowCoordinator {
             finishExecutableSelection(generation: generation)
             return
         }
-        weak let controller = activeWindowController
+        weak let presentingController = activeWindowController
         let selectedURL = await executableSelector.selectExecutable(
-            attachedTo: controller?.window
+            attachedTo: presentingController?.window
         )
         guard canCommitExecutableSelection(selectedURL, generation: generation) else {
             finishExecutableSelection(generation: generation)
@@ -230,25 +346,22 @@ public final class SettingsWindowCoordinator {
             return
         }
         self.selectedExecutableURL = selectedURL
+        let currentController = activeWindowController
+        beginCheckingSelectedExecutable(controller: currentController)
         onExecutableSelectionChanged(selectedURL)
-        guard generation == selectionGeneration,
-              let controller,
-              activeWindowController === controller else {
+        guard shutdownTask == nil else {
             finishExecutableSelection(generation: generation)
             return
         }
-        let checking = ConnectionDiagnosticsSnapshot(
-            executableSource: .userSelected,
-            path: nil,
-            cliVersion: nil,
-            cliVersionIssue: nil,
-            connectionStatus: .checking
-        )
-        controller.settingsViewController.applyConnectionDiagnostics(checking)
-        latestConnectionDiagnostics = checking
+        guard generation == selectionGeneration,
+              let currentController,
+              activeWindowController === currentController else {
+            finishExecutableSelection(generation: generation)
+            return
+        }
         scheduleConnectionDiagnostics(
             selectedExecutableURL: selectedURL,
-            controller: controller
+            controller: currentController
         )
         finishExecutableSelection(generation: generation)
     }
@@ -261,6 +374,25 @@ public final class SettingsWindowCoordinator {
             return false
         }
         return selectedURL?.isFileURL == true
+    }
+
+    private func beginCheckingSelectedExecutable(
+        controller: SettingsWindowController?
+    ) {
+        connectionStatusRevision &+= 1
+        latestConnectionStatus = .checking
+        let checking = ConnectionDiagnosticsSnapshot(
+            executableSource: .userSelected,
+            path: nil,
+            cliVersion: nil,
+            cliVersionIssue: nil,
+            connectionStatus: .checking
+        )
+        latestConnectionDiagnostics = checking
+        guard let controller, activeWindowController === controller else {
+            return
+        }
+        controller.settingsViewController.applyConnectionDiagnostics(checking)
     }
 
     private func finishExecutableSelection(generation: UInt64) {
@@ -282,12 +414,16 @@ public final class SettingsWindowCoordinator {
         clipboardWriter.writeDiagnosticText(report)
     }
 
+    private var canShowSettings: Bool {
+        shutdownTask == nil && !Task.isCancelled
+    }
+
     private func enqueueSave(_ values: SettingsFormValues) {
         let previousSave = pendingSave
-        let repository = repository
+        let settingsFormValuesSaver = settingsFormValuesSaver
         pendingSave = Task {
             await previousSave?.value
-            try? await repository.saveSettingsForm(values)
+            await settingsFormValuesSaver(values)
         }
     }
 
@@ -303,7 +439,13 @@ public final class SettingsWindowCoordinator {
         diagnosticsGeneration &+= 1
         diagnosticsTask?.cancel()
         cancelPendingExecutableSelection()
-        latestConnectionDiagnostics = .checking
+        latestConnectionDiagnostics = ConnectionDiagnosticsSnapshot(
+            executableSource: selectedExecutableURL == nil ? .automatic : .userSelected,
+            path: nil,
+            cliVersion: nil,
+            cliVersionIssue: nil,
+            connectionStatus: latestConnectionStatus
+        )
         activeWindowController = nil
     }
 
@@ -314,8 +456,56 @@ public final class SettingsWindowCoordinator {
         guard committingSelectionGeneration != selectionGeneration else {
             return
         }
+        let cancelledTask = selectionTask
         selectionGeneration &+= 1
-        selectionTask?.cancel()
+        cancelledTask?.cancel()
         selectionTask = nil
+        trackSelectionCleanup(cancelledTask)
+    }
+
+    private func trackSelectionCleanup(_ task: Task<Void, Never>?) {
+        guard let task else {
+            return
+        }
+        let previousCleanup = selectionCleanupTask
+        selectionCleanupGeneration &+= 1
+        let generation = selectionCleanupGeneration
+        selectionCleanupTask = Task { [weak self] in
+            await previousCleanup?.value
+            await task.value
+            self?.finishSelectionCleanup(generation: generation)
+        }
+    }
+
+    private func finishSelectionCleanup(generation: UInt64) {
+        guard generation == selectionCleanupGeneration else {
+            return
+        }
+        selectionCleanupTask = nil
+    }
+
+    private func performShutdown() async {
+        let diagnostics = diagnosticsTask
+        diagnosticsGeneration &+= 1
+        diagnostics?.cancel()
+        let activeSelection = selectionTask
+        let selectionIsCommitting = committingSelectionGeneration == selectionGeneration
+        if !selectionIsCommitting {
+            cancelPendingExecutableSelection()
+        }
+        activeWindowController?.close()
+        let pendingFormSave = pendingSave
+        let selectionCleanup = selectionCleanupTask
+
+        await pendingFormSave?.value
+        await diagnostics?.value
+        if selectionIsCommitting {
+            await activeSelection?.value
+        }
+        await selectionCleanup?.value
+        diagnosticsTask = nil
+        selectionTask = nil
+        selectionCleanupTask = nil
+        committingSelectionGeneration = nil
     }
 }
