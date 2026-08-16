@@ -220,7 +220,13 @@ frame이 하나면 scheduler에 timer 생성이나 취소 command를 보내지 �
 
 연결 영역은 `ConnectionDiagnosticsInspector`가 만든 immutable `ConnectionDiagnosticsSnapshot`만 소비한다. Inspector actor는 locator가 검증한 URL을 내부에서만 사용해 `CodexCLIVersionProbe`를 실행하고, UI에는 자동·사용자 선택 출처, 일반화된 위치 category, 제한된 basename, CLI version token과 typed 상태만 넘긴다. `ConnectionStatusResolver`는 메모리에 있는 `RefreshPublication`의 checking, 마지막 성공과 typed failure를 연결 상태로 바꾸므로 설정을 열기 위해 별도 App Server quota 조회를 만들지 않는다.
 
-`CodexCLIVersionProbe`는 shell 없이 검증된 executable을 `--version` 인자 하나로 실행하는 background actor다. stdout은 한 chunk씩 backpressure를 유지하며 최대 4 KiB까지만 받고, 2초 timeout과 제한된 terminate/SIGKILL grace를 적용한다. stderr는 null device로 버린다. Parser는 출력 전체가 아니라 최대 64자의 version 형태 token만 value로 만들며 원문 stdout, exit 설명과 경로는 보존하지 않는다.
+`CodexCLIVersionProbe`는 shell 없이 검증된 executable을 `--version` 인자 하나로 실행하는 background actor다. stdin과 stderr는 `/dev/null`에 연결하고 stdout은 한 chunk씩 backpressure를 유지하며 최대 4 KiB까지만 받는다. production child environment는 부모의 `LANG`, `LC_ALL`, `LC_CTYPE` 중 존재하는 값만 새 dictionary에 복사하고 `PATH=/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/bin`을 항상 설정한다. 이 고정 순서는 system interpreter를 Homebrew·Intel Homebrew 위치보다 먼저 찾으면서 `#!/usr/bin/env …` wrapper도 지원한다. 부모의 `PATH`, `HOME`과 그 밖의 environment는 전달하지 않는다.
+
+nvm, asdf와 Volta처럼 사용자 home 아래의 runtime manager path 탐색은 v0.1의 비목표다. 해당 runtime에만 의존하는 wrapper는 사용자가 executable로 선택해도 version probe가 `processFailed`가 될 수 있으며, 이를 해결하기 위해 interactive shell이나 부모 PATH를 실행 경계로 가져오지 않는다.
+
+Parser는 선택적인 마지막 LF 또는 CRLF를 제외한 전체 출력이 정확히 `codex-cli <version>` 또는 `codex <version>` 한 줄인지 확인한다. version은 숫자 세 component와 선택적인 점 구분 prerelease·build identifier로 구성되고 최대 64자다. 따라서 출력의 다른 위치에서 그럴듯한 숫자를 찾거나 account 문구, 추가 숫자, 빈 component와 여러 줄을 허용하지 않는다. 원문 stdout, exit 설명과 경로는 보존하지 않는다.
+
+Probe는 2초 timeout과 제한된 terminate/SIGKILL grace로 자신이 직접 시작한 child를 정리한다. Foundation `Process`가 direct child PID만 소유하는 경계에서 별도 process group을 만들거나 임의의 descendant tree를 추적·종료하는 것은 v0.1의 비목표다. version command가 descendant를 만드는 executable은 지원 대상으로 가정하지 않는다.
 
 `SettingsFormViewController`의 `Codex 선택…`과 `진단 정보 복사`는 closure로 주입된다. 실제 `NSOpenPanel`과 `NSPasteboard` 접근은 각각 `NSOpenPanelCodexExecutableSelector`, `SystemDiagnosticClipboardWriter`에만 있다. 메뉴의 선택 action도 public `requestExecutableSelection()`을 호출해 필요하면 설정 창을 먼저 열고 같은 panel·저장 경로를 재사용한다. 선택 URL 저장은 repository actor가 최신 form·최초 실행 값을 보존하며 merge하고 외부 executable-selection callback이 provider 재구성을 요청할 수 있다. 선택 task는 generation으로 식별해 닫힌 창의 늦은 결과가 새 panel task를 지우지 못하게 하며, 저장을 시작한 선택은 창이 닫혀도 runtime callback까지 완료한다. pending selection은 window controller를 강하게 보유하지 않는다. 창 close는 진행 중 diagnostics task를 generation과 cancellation로 무효화하고, 다음 진단은 이전 CLI process cleanup task의 완료를 기다린 뒤 시작한다.
 

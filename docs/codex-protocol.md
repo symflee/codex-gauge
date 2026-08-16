@@ -66,12 +66,19 @@ App Server session을 열기 전에 `CodexLocating`에서 검증된 executable U
 
 - timeout: 2초
 - stdout 상한: UTF-8 4 KiB
-- 표시 value: 최대 64자의 숫자로 시작하는 version token만 추출
+- 허용 출력: `codex-cli <version>` 또는 `codex <version>` 한 줄과 선택적인 마지막 LF·CRLF
+- 표시 value: 숫자 세 component와 선택적인 prerelease·build identifier로 이루어진 최대 64자 version
+- stdin: `/dev/null`
 - stderr: null device로 폐기
+- environment: 고정 safe PATH와 부모의 `LANG`, `LC_ALL`, `LC_CTYPE` 중 존재하는 값만 복사
 - 종료: 제한된 250ms grace 뒤 필요 시 SIGKILL
 - 공개 오류: launch, timeout, process, output-too-large, invalid-output, cancelled
 
-stdout 원문과 exit 설명은 value, UI, clipboard 또는 로그에 남기지 않는다. 설정의 연결 상태는 이 probe만으로 로그인 성공을 추측하지 않고 기존 refresh publication의 typed 상태를 우선 사용한다.
+production의 safe PATH는 `/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/bin`으로 고정하며 system directory가 먼저다. 이는 직접 선택한 executable 자체를 찾기 위한 PATH가 아니라 그 executable이 `#!/usr/bin/env node` 같은 wrapper일 때 알려진 system·Homebrew interpreter를 찾기 위한 것이다. 부모 `PATH`, `HOME`, 인증·token을 포함할 수 있는 다른 parent environment는 전달하지 않는다. nvm, asdf와 Volta의 사용자별 runtime directory 탐색은 비목표이며 이를 위해 shell profile을 읽지 않는다.
+
+Parser는 출력에서 첫 번째 version처럼 보이는 token을 검색하지 않으며 account 문구, 추가 숫자·공백, `1..2` 같은 빈 component와 여러 줄이 있으면 전체를 거부한다. 현재 알려진 `codex-cli 0.148.0-alpha.9` 형태는 허용한다.
+
+stdout 원문과 exit 설명은 value, UI, clipboard 또는 로그에 남기지 않는다. 설정의 연결 상태는 이 probe만으로 로그인 성공을 추측하지 않고 기존 refresh publication의 typed 상태를 우선 사용한다. timeout과 cancellation은 기존처럼 직접 child에 TERM을 보내고 grace 뒤에도 실행 중이면 해당 PID에 KILL을 보낸다. Foundation `Process`가 직접 child만 추적하므로 별도 process group 구성과 descendant tree 종료는 이 probe의 비목표이며, version command가 descendant를 만들지 않는다는 계약에 의존한다.
 
 ## 4. 합성 예제
 
@@ -251,6 +258,9 @@ Decoder fixture에는 다음을 포함한다.
 - 정확히 1 MiB인 line과 상한 초과 line
 - 실제 합성 child의 handshake, account 1회 cache와 연속 rate-limit request ID
 - 실제 합성 `--version` child의 정상·malformed·oversized·nonzero·timeout·stderr flood
+- version 전체 한 줄 shape, 실제 alpha version, 추가 account·숫자와 빈 component 거부
+- version child의 stdin EOF, 고정 safe PATH exact value와 그 밖의 parent environment 제거
+- 합성 `/usr/bin/env` wrapper의 주입 safe PATH interpreter lookup
 - notification·server request·mismatched ID, timeout·cancellation·EOF·nonzero exit
 - stderr flood와 stdout notification flood의 deadlock·unbounded-buffer 방지
 - stop과 failed-path cleanup 뒤 orphan process 부재

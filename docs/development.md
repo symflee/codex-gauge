@@ -33,7 +33,7 @@ swift build -c release --explicit-target-dependency-import-check error
 
 package build와 단위 테스트는 실제 Codex 설치, 사용자 계정 또는 애플리케이션 네트워크 요청에 의존하지 않는다. decoder 테스트는 합성 JSONL fixture를 사용한다. process session 통합 테스트는 `codex-gauge-tests` 실행 파일 자체를 test-only 합성 `app-server`로 다시 실행해 handshake, timeout, flood와 종료를 검증한다. 이 mode는 test environment key로만 동작하며 account 이메일이나 원문 사용자 응답을 생성·기록하지 않는다.
 
-CLI version 통합 테스트도 같은 test executable을 `--version`으로 직접 다시 실행한다. 합성 mode는 정상 version, malformed·oversized stdout, nonzero exit, timeout과 stderr flood를 제공하며 실제 설치 경로, shell, Codex 계정 또는 네트워크를 사용하지 않는다.
+CLI version 통합 테스트도 같은 test executable을 `--version`으로 직접 다시 실행한다. 합성 mode는 정상 version, malformed·oversized stdout, nonzero exit, timeout, stderr flood, stdin EOF와 environment 격리를 검증하며 실제 설치 경로, shell, Codex 계정 또는 네트워크를 사용하지 않는다. environment 검증은 합성 mode key만 test configuration에 추가하고 production과 같은 locale allowlist·고정 PATH에서 parent의 합성 secret, HOME과 PATH 값이 제거되었는지 child 내부에서 확인한다. 별도 `/tmp` fixture는 현재 test executable을 합성 interpreter로 복사하고 `#!/usr/bin/env <synthetic-name>` wrapper가 주입된 safe search path로 이를 찾는지 검증하므로 Node나 Homebrew 설치에 의존하지 않는다.
 
 refresh executor 단위 테스트는 `RefreshClock`, `RefreshSessionProviding`과 `RefreshUsageSession` fake를 사용한다. 시간 경과는 `ContinuousClock.Instant`를 보존한 가짜 clock의 명시적 `advance`로만 만들며 실제 sleep이나 실제 Codex process를 사용하지 않는다. 비동기 완료 대기는 `Task.yield()`로 actor queue만 비워 wall-clock timing에 의존하지 않는다.
 
@@ -102,8 +102,11 @@ Java 전용 코딩 규칙은 이 Swift 프로젝트에 적용하지 않는다. J
 - 설정 presenter의 checkbox 활성화와 빈 상태 도출
 - 제품 변경 후 off-product 직접 선택 제외와 빈 유효 선택의 자동 복구
 - 설정 기간 접근성 문구의 언어별 완전한 단위
-- CLI version parser의 token 제한, 4 KiB 상한과 typed 오류
-- shell 없는 `--version` process의 timeout·stderr 폐기·orphan cleanup
+- CLI version parser의 두 command prefix, 단일 전체 line, semver-ish component와 4 KiB·64자 상한
+- 추가 account·숫자 token, 여러 line, 빈 version component와 잘못된 prefix 거부
+- shell 없는 `--version` process의 stdin EOF, locale allowlist·고정 safe PATH와 parent secret 미전달
+- `/usr/bin/env` wrapper의 합성 interpreter lookup과 user runtime-manager path 비의존성
+- direct child timeout·cancellation의 stderr 폐기와 TERM/KILL cleanup
 - UI의 안전한 basename/category 일반화와 진단 복사의 basename·절대 경로 제거
 - refresh publication의 연결 상태 매핑과 sanitized 진단 report
 - 설정 연결 section의 선택·복사 callback과 선택 URL의 원자적 저장
