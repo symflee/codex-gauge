@@ -167,6 +167,12 @@ frame이 하나면 scheduler에 timer 생성이나 취소 command를 보내지 �
 
 window controller와 view controller가 실제로 해제되는지는 weak-reference 단위 테스트로 검증한다.
 
+### 로그인 시 실행
+
+`LaunchAtLoginController`는 main actor에서 `SMAppService.mainApp`을 감싸고 `disabled`, `enabled`, `requiresApproval`, `unavailable`의 비식별 상태만 UI에 제공한다. 이미 원하는 상태에서는 register 또는 unregister를 반복하지 않는다. 승인 대기 상태에서 enable 요청은 재등록하지 않고 로그인 항목 System Settings 동작을 별도로 제공하며, disable 요청은 등록을 해제한다.
+
+macOS 호출이 실패해도 호출 직후 시스템 상태가 이미 요청 결과가 되었다면 경쟁 상태의 성공으로 취급한다. 그 밖의 NSError domain, code와 description은 버리고 registration, unregistration, unavailable의 typed failure만 전달한다. 설정의 `launchAtLoginIntent`는 사용자가 마지막으로 요청한 값이며 실제 토글 상태와 복구 안내는 매번 `SMAppService` 상태를 기준으로 구성한다.
+
 ### 최초 실행
 
 상태 항목과 초기 조회를 먼저 시작한 뒤 `hasCompletedFirstLaunch`가 false이면 설정 창을 연다. 창 표시가 성공한 뒤 플래그를 기록한다. UI 테스트 launch argument는 테스트 전용 defaults domain을 사용한다.

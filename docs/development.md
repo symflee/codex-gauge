@@ -73,6 +73,7 @@ Java 전용 코딩 규칙은 이 Swift 프로젝트에 적용하지 않는다. J
 - versioned `UserDefaults` 기본값, round trip, field 복구와 v0 migration
 - manual selection 결정적 encoding, file URL 제한과 defaults suite 격리
 - 저장 payload에 quota, account, 오류와 원문 응답 field가 없는지 검증
+- 로그인 실행 등록·해제의 idempotence, 승인 필요 상태와 typed 오류 축약
 - 최초 실행 상태
 
 ### XCTest와 UI 테스트
