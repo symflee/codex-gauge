@@ -88,6 +88,8 @@ Java 전용 코딩 규칙은 이 Swift 프로젝트에 적용하지 않는다. J
 - 메뉴 열림, 화면 잠금, sleep, VoiceOver, Reduce Motion 중 순환 중단·재개
 - 순환 tick의 사전 렌더 frame 사용과 무-I/O 경계
 - 제품별 모든 quota·절대 reset·마지막 성공·typed 오류 menu model
+- 제품별 spend-control의 도달 우선순위·남은 비율·불완전 상태 별도 menu 행
+- missing·malformed spend-control의 quota 격리와 상태바 frame·순환·폭 입력 불변성
 - 메뉴 open/close의 rotation pause와 cached `NSMenu` 무-I/O 경계
 - `Codex 열기`·`Codex 선택…` 조건 및 주입 action dispatch
 - CLI-only 설치에서 무동작 open 대신 executable 선택 action 제공

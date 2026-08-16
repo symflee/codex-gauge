@@ -5,11 +5,80 @@ import CodexGaugeCore
 func quotaDetailsMenuTests() -> [TestCase] {
     [
         quotaMenuGroupsAllWindowsTest(),
+        quotaMenuShowsSpendControlDetailsTest(),
+        quotaMenuExplainsIncompleteSpendControlTest(),
         quotaMenuKeepsIndependentFailureStatesTest(),
         quotaMenuSelectsConnectionActionTest(),
         quotaMenuAdapterUsesCachedModelTest(),
         quotaMenuDispatchesInjectedActionsTest()
     ]
+}
+
+private func quotaMenuShowsSpendControlDetailsTest() -> TestCase {
+    TestCase(name: "quota menu shows product spend controls outside quota rows") {
+        let input = QuotaDetailsMenuInput(
+            productStates: [
+                .codex: .value(
+                    ProductQuotaValue(
+                        capturedAt: Date(timeIntervalSince1970: 1_900_000_000),
+                        quotaWindows: [try menuQuota(slot: .primary, used: 17, duration: 300)]
+                    ),
+                    freshness: .fresh
+                ),
+                .spark: .value(
+                    ProductQuotaValue(
+                        capturedAt: Date(timeIntervalSince1970: 1_900_000_000),
+                        quotaWindows: [try menuQuota(slot: .primary, used: 9, duration: 300)]
+                    ),
+                    freshness: .fresh
+                )
+            ],
+            spendControlsByProduct: [
+                .codex: .reached,
+                .spark: .remaining(percent: 72)
+            ],
+            codexAvailability: .available
+        )
+
+        let sections = menuBuilder().build(input).productSections
+
+        try expect(sections[0].quotaRows == [
+            "[5h] · 83% remaining · reset unavailable"
+        ], "Expected Codex quota row to remain unchanged")
+        try expect(
+            sections[0].spendControlRows == ["Spend limit reached"],
+            "Expected reached spend control in a separate row"
+        )
+        try expect(sections[1].quotaRows == [
+            "[5h] · 91% remaining · reset unavailable"
+        ], "Expected Spark quota row to remain independent")
+        try expect(
+            sections[1].spendControlRows == ["Spend limit · 72% remaining"],
+            "Expected Spark spend control to stay product-specific"
+        )
+    }
+}
+
+private func quotaMenuExplainsIncompleteSpendControlTest() -> TestCase {
+    TestCase(name: "quota menu does not invent a missing spend percent") {
+        let input = QuotaDetailsMenuInput(
+            productStates: [.codex: .unavailable, .spark: .unavailable],
+            spendControlsByProduct: [.codex: .notReachedWithoutRemainingPercent],
+            codexAvailability: .available
+        )
+
+        let sections = menuBuilder().build(input).productSections
+
+        try expect(
+            sections[0].spendControlRows
+                == ["Spend limit not reached · remaining percentage unavailable"],
+            "Expected explicit incomplete spend-control wording"
+        )
+        try expect(
+            sections[1].spendControlRows.isEmpty,
+            "Expected a missing sibling spend control to stay absent"
+        )
+    }
 }
 
 private func quotaMenuGroupsAllWindowsTest() -> TestCase {
@@ -170,6 +239,7 @@ private func quotaMenuAdapterUsesCachedModelTest() -> TestCase {
                         freshness: .fresh
                     )
                 ],
+                spendControlsByProduct: [.codex: .remaining(percent: 64)],
                 codexAvailability: .available
             ))
             let actionCalls = MenuCallRecorder()
@@ -184,6 +254,10 @@ private func quotaMenuAdapterUsesCachedModelTest() -> TestCase {
                 throw TestFailure(description: "Expected attached menu")
             }
             let titlesBeforeOpening = menu.items.map(\.title)
+            try expect(
+                titlesBeforeOpening.contains("Spend limit · 64% remaining"),
+                "Expected the cached AppKit menu to contain the separate spend row"
+            )
 
             menuController.menuWillOpen(menu)
             try expect(scheduler.cancelCount == 1, "Expected menu-open pause")
@@ -237,6 +311,10 @@ private func menuLocalization() -> QuotaMenuLocalization {
         "menu.product.spark": "Spark",
         "menu.quota.with_reset": "[{duration}] · {remaining}% remaining · resets {reset}",
         "menu.quota.without_reset": "[{duration}] · {remaining}% remaining · reset unavailable",
+        "menu.spend_control.reached": "Spend limit reached",
+        "menu.spend_control.remaining": "Spend limit · {remaining}% remaining",
+        "menu.spend_control.not_reached_without_remaining":
+            "Spend limit not reached · remaining percentage unavailable",
         "menu.last_success": "Last success: {date}",
         "menu.status.loading": "Checking connection",
         "menu.status.unavailable": "Usage unavailable",

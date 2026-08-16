@@ -100,6 +100,9 @@ public final class StatusMenuController: NSObject, NSMenuDelegate {
         section.quotaRows.forEach { title in
             menu.addItem(informationItem(title: title, indentation: 1))
         }
+        section.spendControlRows.forEach { title in
+            menu.addItem(informationItem(title: title, indentation: 1))
+        }
         section.statusRows.forEach { title in
             menu.addItem(informationItem(title: title, indentation: 1))
         }

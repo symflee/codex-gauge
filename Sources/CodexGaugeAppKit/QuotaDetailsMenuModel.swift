@@ -16,6 +16,12 @@ public enum CodexMenuAvailability: Equatable, Sendable {
     case needsSelection
 }
 
+public enum QuotaMenuSpendControl: Equatable, Sendable {
+    case reached
+    case remaining(percent: Int)
+    case notReachedWithoutRemainingPercent
+}
+
 public enum QuotaMenuAction: String, CaseIterable, Equatable, Sendable {
     case refresh
     case openCodex
@@ -26,17 +32,20 @@ public enum QuotaMenuAction: String, CaseIterable, Equatable, Sendable {
 
 public struct QuotaDetailsMenuInput: Equatable, Sendable {
     public let productStates: [UsageProduct: ProductUsageState]
+    public let spendControlsByProduct: [UsageProduct: QuotaMenuSpendControl]
     public let issuesByProduct: [UsageProduct: QuotaMenuIssue]
     public let lastSuccessfulRefreshByProduct: [UsageProduct: Date]
     public let codexAvailability: CodexMenuAvailability
 
     public init(
         productStates: [UsageProduct: ProductUsageState],
+        spendControlsByProduct: [UsageProduct: QuotaMenuSpendControl] = [:],
         issuesByProduct: [UsageProduct: QuotaMenuIssue] = [:],
         lastSuccessfulRefreshByProduct: [UsageProduct: Date] = [:],
         codexAvailability: CodexMenuAvailability
     ) {
         self.productStates = productStates
+        self.spendControlsByProduct = spendControlsByProduct
         self.issuesByProduct = issuesByProduct
         self.lastSuccessfulRefreshByProduct = lastSuccessfulRefreshByProduct
         self.codexAvailability = codexAvailability
@@ -47,17 +56,20 @@ public struct QuotaMenuProductSection: Equatable, Sendable {
     public let product: UsageProduct
     public let title: String
     public let quotaRows: [String]
+    public let spendControlRows: [String]
     public let statusRows: [String]
 
     public init(
         product: UsageProduct,
         title: String,
         quotaRows: [String],
+        spendControlRows: [String],
         statusRows: [String]
     ) {
         self.product = product
         self.title = title
         self.quotaRows = quotaRows
+        self.spendControlRows = spendControlRows
         self.statusRows = statusRows
     }
 }
@@ -151,11 +163,13 @@ public struct QuotaDetailsMenuModelBuilder {
         let state = input.productStates[product] ?? .unavailable
         let explicitSuccess = input.lastSuccessfulRefreshByProduct[product]
         let issue = input.issuesByProduct[product]
+        let spendControl = input.spendControlsByProduct[product]
         return section(
             product: product,
             state: state,
             explicitSuccess: explicitSuccess,
-            issue: issue
+            issue: issue,
+            spendControl: spendControl
         )
     }
 
@@ -163,21 +177,31 @@ public struct QuotaDetailsMenuModelBuilder {
         product: UsageProduct,
         state: ProductUsageState,
         explicitSuccess: Date?,
-        issue: QuotaMenuIssue?
+        issue: QuotaMenuIssue?,
+        spendControl: QuotaMenuSpendControl?
     ) -> QuotaMenuProductSection {
         switch state {
         case .loading:
-            return makeSection(product: product, statusRows: [text(.statusLoading)])
+            return makeSection(
+                product: product,
+                spendControl: spendControl,
+                statusRows: [text(.statusLoading)]
+            )
         case .unavailable:
             let status = successRows(explicitSuccess) + [issueText(issue)]
-            return makeSection(product: product, statusRows: status)
+            return makeSection(
+                product: product,
+                spendControl: spendControl,
+                statusRows: status
+            )
         case .value(let value, let freshness):
             return valueSection(
                 product: product,
                 value: value,
                 freshness: freshness,
                 explicitSuccess: explicitSuccess,
-                issue: issue
+                issue: issue,
+                spendControl: spendControl
             )
         }
     }
@@ -187,23 +211,31 @@ public struct QuotaDetailsMenuModelBuilder {
         value: ProductQuotaValue,
         freshness: ProductValueFreshness,
         explicitSuccess: Date?,
-        issue: QuotaMenuIssue?
+        issue: QuotaMenuIssue?,
+        spendControl: QuotaMenuSpendControl?
     ) -> QuotaMenuProductSection {
         let success = explicitSuccess ?? value.capturedAt
         let rows = value.quotaWindows.sorted(by: quotaAscending).map(quotaRow)
         let status = successRows(success) + freshnessRows(freshness, issue: issue)
-        return makeSection(product: product, quotaRows: rows, statusRows: status)
+        return makeSection(
+            product: product,
+            quotaRows: rows,
+            spendControl: spendControl,
+            statusRows: status
+        )
     }
 
     private func makeSection(
         product: UsageProduct,
         quotaRows: [String] = [],
+        spendControl: QuotaMenuSpendControl?,
         statusRows: [String]
     ) -> QuotaMenuProductSection {
         QuotaMenuProductSection(
             product: product,
             title: productTitle(product),
             quotaRows: quotaRows,
+            spendControlRows: spendControl.map { [spendControlRow($0)] } ?? [],
             statusRows: statusRows
         )
     }
@@ -238,6 +270,20 @@ public struct QuotaDetailsMenuModelBuilder {
             .quotaWithReset,
             values: values.merging(["reset": dateFormatter.string(from: reset)]) { _, new in new }
         )
+    }
+
+    private func spendControlRow(_ spendControl: QuotaMenuSpendControl) -> String {
+        switch spendControl {
+        case .reached:
+            text(.spendControlReached)
+        case .remaining(let percent):
+            template(
+                .spendControlRemaining,
+                values: ["remaining": String(percent)]
+            )
+        case .notReachedWithoutRemainingPercent:
+            text(.spendControlNotReachedWithoutRemaining)
+        }
     }
 
     private func successRows(_ date: Date?) -> [String] {
@@ -316,6 +362,10 @@ private enum QuotaMenuTextKey: String, CaseIterable {
     case productSpark = "menu.product.spark"
     case quotaWithReset = "menu.quota.with_reset"
     case quotaWithoutReset = "menu.quota.without_reset"
+    case spendControlReached = "menu.spend_control.reached"
+    case spendControlRemaining = "menu.spend_control.remaining"
+    case spendControlNotReachedWithoutRemaining =
+        "menu.spend_control.not_reached_without_remaining"
     case lastSuccess = "menu.last_success"
     case statusLoading = "menu.status.loading"
     case statusUnavailable = "menu.status.unavailable"

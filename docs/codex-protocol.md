@@ -222,6 +222,8 @@ Spend-control은 quota window와 별도로 최소 정보만 변환한다.
 - malformed spend-control은 제품의 quota `available/partial` 상태를 바꾸지 않는다.
 - `limit`, `used`, spend reset 시각, credits와 reset-credit 세부정보는 버린다.
 
+presentation adapter는 이 protocol value를 AppKit과 독립적인 메뉴 의미로 다시 축약한다. `spendControlReached == true`이면 `remainingPercent`가 함께 있어도 도달 상태가 우선한다. 도달 정보가 true가 아니고 remaining이 있으면 남은 퍼센트를 표시하며, `spendControlReached == false`만 해석된 경우에는 미도달이지만 남은 비율은 알 수 없다고 표시한다. 둘 다 없거나 해석할 수 없으면 메뉴 행을 만들지 않는다. 이 변환은 Codex와 Spark에 독립적으로 적용하고 quota window 상태, 상태바 frame, 순환과 폭 계산을 바꾸지 않는다.
+
 ## 7. 호환성과 오류 분류
 
 | protocol 결과 | 앱 상태 |

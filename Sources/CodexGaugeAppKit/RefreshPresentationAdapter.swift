@@ -1,4 +1,5 @@
 import CodexGaugeCore
+import CodexGaugeProtocol
 import CodexGaugeRefresh
 import Foundation
 
@@ -61,6 +62,7 @@ public struct RefreshPresentationAdapter: Sendable {
     ) -> QuotaDetailsMenuInput {
         QuotaDetailsMenuInput(
             productStates: productStates,
+            spendControlsByProduct: spendControls(from: publication),
             issuesByProduct: issues(from: publication),
             lastSuccessfulRefreshByProduct: successfulRefreshes(from: publication),
             codexAvailability: availability(
@@ -68,6 +70,29 @@ public struct RefreshPresentationAdapter: Sendable {
                 canOpenCodexApplication: canOpenCodexApplication
             )
         )
+    }
+
+    private func spendControls(
+        from publication: RefreshPublication
+    ) -> [UsageProduct: QuotaMenuSpendControl] {
+        publication.products.compactMapValues { product in
+            product.rateLimits?.spendControlLimit.flatMap(spendControl)
+        }
+    }
+
+    private func spendControl(
+        _ limit: SpendControlLimit
+    ) -> QuotaMenuSpendControl? {
+        if limit.reached == true {
+            return .reached
+        }
+        if let remainingPercent = limit.remainingPercent {
+            return .remaining(percent: remainingPercent)
+        }
+        guard limit.reached == false else {
+            return nil
+        }
+        return .notReachedWithoutRemainingPercent
     }
 
     private func issues(

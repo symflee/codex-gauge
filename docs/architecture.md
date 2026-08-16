@@ -34,7 +34,7 @@ StatusItemController / menu / settings
 
 UI adapter는 provider를 직접 호출하지 않는다. 모든 조회는 `RefreshCoordinator`를 통해 직렬화하고, UI는 이미 해석된 snapshot과 상태만 소비한다.
 
-`RefreshPresentationAdapter`는 coordinator가 발행한 immutable 제품별 결과를 하나의 시각에 맞춰 상태바 frame, 상세 메뉴 input과 설정용 discovered quota ID로 투영한다. 전역 실패는 두 제품에 같은 복구 사유를 적용하되 partial·malformed 같은 제품별 issue와 마지막 성공 시각은 서로 오염시키지 않는다. adapter는 AppKit, process, timer와 I/O를 알지 않으며 초기 loading 상태에서 임의의 오류나 quota를 만들지 않는다.
+`RefreshPresentationAdapter`는 coordinator가 발행한 immutable 제품별 결과를 하나의 시각에 맞춰 상태바 frame, 상세 메뉴 input과 설정용 discovered quota ID로 투영한다. 전역 실패는 두 제품에 같은 복구 사유를 적용하되 partial·malformed 같은 제품별 issue와 마지막 성공 시각은 서로 오염시키지 않는다. protocol의 `SpendControlLimit`는 이 adapter 안에서 `도달`, `남은 비율`, `미도달·비율 미상`만 가진 semantic menu value로 변환해 wire type이 AppKit model로 새지 않게 한다. adapter는 AppKit, process, timer와 I/O를 알지 않으며 초기 loading 상태에서 임의의 오류나 quota를 만들지 않는다.
 
 composition은 `NSWorkspace`에서 실제 application bundle을 찾았는지를 boolean capability로 presentation adapter에 전달한다. typed not-found·invalid-selection 오류 또는 열 application 부재는 `Codex 선택…` action을 만들고, bundle을 열 수 있을 때만 `Codex 열기`를 만든다. CLI 조회 성공을 application open 가능 상태로 추측하지 않는다.
 
@@ -232,7 +232,9 @@ frame이 하나면 scheduler에 timer 생성이나 취소 command를 보내지 �
 
 상세 메뉴는 `QuotaDetailsMenuInput → QuotaDetailsMenuModel → StatusMenuController`로 분리한다. 순수 builder는 메모리의 제품별 `ProductUsageState`, typed issue와 마지막 성공 시각만 받아 Codex·Spark section, 모든 quota window, 절대 reset 시각과 action group을 만든다. stale, partial과 unavailable은 제품별로 독립 유지하며 값을 알 수 없는 상태를 `0%`로 만들지 않는다. date formatter와 localization value를 주입해 합성 시각으로 검증할 수 있다.
 
-`StatusMenuController`는 상태 갱신 시 완성된 immutable model로 `NSMenu`를 미리 구성하고 `SystemStatusItemPresenter`에 연결한다. menu open callback에서는 model 생성, 날짜 formatting 또는 snapshot 조회를 하지 않고 `.menuOpen` rotation pause만 설정하며 close에서 해제한다. action은 refresh, Codex 열기·선택, 설정과 종료 closure로 주입하므로 UI adapter가 provider, process 또는 설정 창을 직접 알지 않는다. production composition은 이 action을 application coordinator의 현재 generation과 settings runtime에 연결한다. Spend-control은 현재 `UsageSnapshot`에 보존되지 않으므로 protocol result를 UI에 누출해 표시하지 않고, 별도 cached domain state가 추가되는 task까지 보류한다.
+`StatusMenuController`는 상태 갱신 시 완성된 immutable model로 `NSMenu`를 미리 구성하고 `SystemStatusItemPresenter`에 연결한다. menu open callback에서는 model 생성, 날짜 formatting 또는 snapshot 조회를 하지 않고 `.menuOpen` rotation pause만 설정하며 close에서 해제한다. action은 refresh, Codex 열기·선택, 설정과 종료 closure로 주입하므로 UI adapter가 provider, process 또는 설정 창을 직접 알지 않는다. production composition은 이 action을 application coordinator의 현재 generation과 settings runtime에 연결한다.
+
+제품별 `ProductRateLimits`에 보존된 spend-control은 presentation adapter가 dependency-free `QuotaMenuSpendControl`로 축약해 menu input에 넣는다. `reached == true`가 남은 비율보다 우선하고, 비율만 있으면 남은 정수 퍼센트로, 명시적 `reached == false`만 있으면 남은 비율을 알 수 없는 미도달 상태로 표현한다. 순수 menu builder가 이를 quota window 뒤의 별도 비활성 행으로 현지화하며, malformed·missing 값은 행을 만들지 않는다. 이 dictionary는 제품별로 독립적이고 `DisplayFrameBuilder`, status width prototype과 rotation controller에는 전달되지 않는다.
 
 ### 설정 창
 
