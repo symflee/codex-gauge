@@ -34,6 +34,7 @@ v0.1은 다음 흐름만 사용한다.
 ## 3. 전송 방식
 
 - executable을 shell 없이 직접 실행한다.
+- App Server child는 부모 environment를 보존하되 `PATH`만 고정 safe PATH로 교체한다.
 - request와 response는 UTF-8 JSON 한 개를 한 줄에 기록한다.
 - request ID는 session 내에서 단조 증가하며 matching ID 응답만 소비한다.
 - stdout의 알 수 없는 notification과 field는 무시한다.
@@ -43,6 +44,8 @@ v0.1은 다음 흐름만 사용한다.
 - stderr는 null device로 직접 버려 deadlock을 피하고 원문을 메모리 value나 사용자 로그로 옮기지 않는다.
 - EOF, timeout, JSON 파싱 실패와 method-not-found를 서로 다른 typed failure로 바꾼다.
 - JSON-RPC error에서는 정수 `code`만 보존하고 원문 `message`와 `data`는 앱의 value type으로 옮기지 않는다.
+
+production App Server의 safe PATH는 `/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/bin`이다. 이는 locator가 executable을 검색하는 경로가 아니라, 이미 검증한 executable이 `#!/usr/bin/env node` 같은 wrapper일 때 알려진 system·Homebrew interpreter를 찾는 child 환경이다. 부모의 `PATH` 값은 전달하지 않으며 순서도 바꾸지 않는다. 반면 Codex child가 자체 인증과 연결을 처리하는 데 필요한 `HOME`, locale, proxy와 그 밖의 parent environment는 기존 process 상속 의미를 유지한다. 앱은 이 environment를 디스크, 진단 정보나 로그에 남기지 않고 shell profile도 읽지 않는다.
 
 initialize timeout은 5초, account와 rate-limit request timeout은 각각 15초다. request마다 waiter는 하나이고 timeout, task cancellation, EOF, 명시적 stop 중 먼저 확정된 사건만 continuation을 완료한다. 늦게 도착한 사건과 mismatched response는 이미 완료된 결과를 바꾸지 않는다.
 
@@ -74,7 +77,7 @@ App Server session을 열기 전에 `CodexLocating`에서 검증된 executable U
 - 종료: 제한된 250ms grace 뒤 필요 시 SIGKILL
 - 공개 오류: launch, timeout, process, output-too-large, invalid-output, cancelled
 
-production의 safe PATH는 `/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/bin`으로 고정하며 system directory가 먼저다. 이는 직접 선택한 executable 자체를 찾기 위한 PATH가 아니라 그 executable이 `#!/usr/bin/env node` 같은 wrapper일 때 알려진 system·Homebrew interpreter를 찾기 위한 것이다. 부모 `PATH`, `HOME`, 인증·token을 포함할 수 있는 다른 parent environment는 전달하지 않는다. nvm, asdf와 Volta의 사용자별 runtime directory 탐색은 비목표이며 이를 위해 shell profile을 읽지 않는다.
+버전 진단은 App Server session과 같은 safe PATH 상수를 공유해 두 process 경계의 interpreter 지원 순서가 어긋나지 않게 한다. 다만 인증이 필요 없는 `--version` child에는 부모 `PATH`, `HOME`, 인증·token을 포함할 수 있는 다른 parent environment를 전달하지 않고 위 locale allowlist만 사용한다. App Server가 인증을 위해 부모 environment를 보존하는 정책과 의도적으로 다르다. nvm, asdf와 Volta의 사용자별 runtime directory 탐색은 두 경계 모두 비목표이며 이를 위해 shell profile을 읽지 않는다.
 
 Parser는 출력에서 첫 번째 version처럼 보이는 token을 검색하지 않으며 account 문구, 추가 숫자·공백, `1..2` 같은 빈 component와 여러 줄이 있으면 전체를 거부한다. 현재 알려진 `codex-cli 0.148.0-alpha.9` 형태는 허용한다.
 
@@ -270,6 +273,8 @@ Decoder fixture에는 다음을 포함한다.
 - notification·server request·mismatched ID, timeout·cancellation·EOF·nonzero exit
 - stderr flood와 stdout notification flood의 deadlock·unbounded-buffer 방지
 - stop과 failed-path cleanup 뒤 orphan process 부재
+- App Server child의 production safe PATH exact value, hostile parent PATH 교체와 인증용 parent environment 보존
+- 합성 custom interpreter를 사용하는 `/usr/bin/env` wrapper의 handshake·account·rate-limit 전체 흐름
 
 모든 fixture는 가상 값만 사용한다.
 

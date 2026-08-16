@@ -50,9 +50,9 @@ xcodebuild -project CodexGauge.xcodeproj \
 
 shared scheme의 UI smoke는 `CodexGaugeUITests`를 명시해 실행한다. 최초 실행 테스트의 두 launch는 모두 `--codex-gauge-ui-test-fixture-83`으로 외부 경계를 격리하고, 첫 launch에만 `--codex-gauge-ui-test-reset-first-launch`를 더해 완료 flag만 초기화한다. 실제 Codex 설치나 인증을 요구하지 않는다.
 
-package build와 단위 테스트는 실제 Codex 설치, 사용자 계정 또는 애플리케이션 네트워크 요청에 의존하지 않는다. decoder 테스트는 합성 JSONL fixture를 사용한다. process session 통합 테스트는 `codex-gauge-tests` 실행 파일 자체를 test-only 합성 `app-server`로 다시 실행해 handshake, timeout, flood와 종료를 검증한다. 이 mode는 test environment key로만 동작하며 account 이메일이나 원문 사용자 응답을 생성·기록하지 않는다.
+package build와 단위 테스트는 실제 Codex 설치, 사용자 계정 또는 애플리케이션 네트워크 요청에 의존하지 않는다. decoder 테스트는 합성 JSONL fixture를 사용한다. process session 통합 테스트는 `codex-gauge-tests` 실행 파일 자체를 test-only 합성 `app-server`로 다시 실행해 handshake, timeout, flood와 종료를 검증한다. production 환경 정책 테스트는 hostile parent PATH가 exact safe PATH로 교체되고 합성 `HOME`·secret 같은 나머지 parent environment가 보존되는지 child 안에서 확인한다. 별도 임시 fixture는 test executable 복사본을 custom interpreter로 사용한 `/usr/bin/env` wrapper로 handshake, account와 rate-limit 조회까지 수행한다. 이 mode는 합성 environment key로만 동작하며 account 이메일이나 원문 사용자 응답을 생성·기록하지 않는다.
 
-CLI version 통합 테스트도 같은 test executable을 `--version`으로 직접 다시 실행한다. 합성 mode는 정상 version, malformed·oversized stdout, nonzero exit, timeout, stderr flood, stdin EOF와 environment 격리를 검증하며 실제 설치 경로, shell, Codex 계정 또는 네트워크를 사용하지 않는다. environment 검증은 합성 mode key만 test configuration에 추가하고 production과 같은 locale allowlist·고정 PATH에서 parent의 합성 secret, HOME과 PATH 값이 제거되었는지 child 내부에서 확인한다. 별도 `/tmp` fixture는 현재 test executable을 합성 interpreter로 복사하고 `#!/usr/bin/env <synthetic-name>` wrapper가 주입된 safe search path로 이를 찾는지 검증하므로 Node나 Homebrew 설치에 의존하지 않는다.
+CLI version 통합 테스트도 같은 test executable을 `--version`으로 직접 다시 실행한다. 합성 mode는 정상 version, malformed·oversized stdout, nonzero exit, timeout, stderr flood, stdin EOF와 environment 격리를 검증하며 실제 설치 경로, shell, Codex 계정 또는 네트워크를 사용하지 않는다. environment 검증은 App Server와 같은 safe PATH 상수와 별도의 locale allowlist를 사용해 parent의 합성 secret, HOME과 PATH 값이 제거되었는지 child 내부에서 확인한다. 별도 `/tmp` fixture는 현재 test executable을 합성 interpreter로 복사하고 `#!/usr/bin/env <synthetic-name>` wrapper가 주입된 safe search path로 이를 찾는지 검증하므로 Node나 Homebrew 설치에 의존하지 않는다. 즉 인증을 수행하는 App Server child는 PATH 외 environment를 보존하고, 인증이 필요 없는 version child는 allowlist만 전달한다.
 
 refresh executor 단위 테스트는 `RefreshClock`, `RefreshSessionProviding`과 `RefreshUsageSession` fake를 사용한다. 시간 경과는 `ContinuousClock.Instant`를 보존한 가짜 clock의 명시적 `advance`로만 만들며 실제 sleep이나 실제 Codex process를 사용하지 않는다. 비동기 완료 대기는 `Task.yield()`로 actor queue만 비워 wall-clock timing에 의존하지 않는다.
 
@@ -139,6 +139,8 @@ Java 전용 코딩 규칙은 이 Swift 프로젝트에 적용하지 않는다. J
 - 추가 account·숫자 token, 여러 line, 빈 version component와 잘못된 prefix 거부
 - shell 없는 `--version` process의 stdin EOF, locale allowlist·고정 safe PATH와 parent secret 미전달
 - `/usr/bin/env` wrapper의 합성 interpreter lookup과 user runtime-manager path 비의존성
+- App Server process의 exact safe PATH, hostile parent PATH 교체와 인증용 environment 보존
+- custom env interpreter wrapper를 통한 App Server handshake·account·rate-limit 조회
 - direct child timeout·cancellation의 stderr 폐기와 TERM/KILL cleanup
 - UI의 안전한 basename/category 일반화와 진단 복사의 basename·절대 경로 제거
 - refresh publication의 연결 상태 매핑과 sanitized 진단 report

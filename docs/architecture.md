@@ -105,7 +105,7 @@ Preference는 제품 모드와 자동·직접 한도 선택을 표현한다. Fra
 
 모든 후보는 file URL, 존재하는 non-directory, 최종 regular file과 executable permission을 만족해야 한다. symlink는 상대·절대 target을 제한된 hop 수 안에서 표준화해 Homebrew link를 허용하고 broken link, directory target과 cycle은 거부한다. 성공 시 symlink 자체가 아니라 검증된 최종 target URL을 반환한다.
 
-Finder로 실행한 앱은 사용자의 interactive shell `PATH`를 신뢰할 수 없으므로 PATH 검색이나 shell 호출을 하지 않는다. home과 test용 system root는 constructor로 주입해 단위 테스트가 실제 사용자 directory나 설치 binary를 읽지 않게 한다. 공개 오류는 associated path가 없는 `notFound`와 `invalidSelection`뿐이며 CLI version 실행은 별도 task다.
+Finder로 실행한 앱은 사용자의 interactive shell `PATH`를 신뢰할 수 없으므로 locator 자체는 PATH 검색이나 shell 호출을 하지 않는다. home과 test용 system root는 constructor로 주입해 단위 테스트가 실제 사용자 directory나 설치 binary를 읽지 않게 한다. 공개 오류는 associated path가 없는 `notFound`와 `invalidSelection`뿐이며 CLI version 실행은 별도 task다. 검증된 파일이 `/usr/bin/env` shebang wrapper인 경우의 interpreter 탐색은 locator가 아니라 아래의 고정 child PATH 정책이 담당한다.
 
 ### `CodexUsageProviding`과 `UsageSession`
 
@@ -123,7 +123,9 @@ Provider는 `CodexLocating`이 검증한 URL로 session을 생성한다. `UsageS
 
 한 번에 matching response waiter 하나만 허용하고 ID는 1부터 단조 증가한다. notification, server request와 다른 ID의 response는 소비하지 않고 무시한다. stdout callback은 한 chunk를 읽는 즉시 handler를 해제하고 actor가 framing과 decoding을 끝낸 뒤에만 다시 연결한다. 따라서 noisy child에도 무한 queue나 chunk 유실 없이 pipe backpressure가 적용된다. stderr는 원문을 읽거나 기록하지 않고 null device로 직접 버려 pipe deadlock을 만들지 않는다.
 
-shell을 거치지 않고 실행 파일 URL을 `Process`에 직접 전달한다. callback은 복사된 `Data` 또는 exit status만 actor로 보내며 Foundation process 객체를 concurrency 경계 밖으로 옮기거나 `@unchecked Sendable`로 감싸지 않는다. timeout과 종료 grace는 `ContinuousClock`을 사용하고 `waitUntilExit`처럼 cooperative executor를 막는 API는 사용하지 않는다.
+shell을 거치지 않고 실행 파일 URL을 `Process`에 직접 전달한다. production App Server child는 Codex 자체가 인증과 연결을 해석하는 데 필요한 `HOME`, locale, proxy 등을 잃지 않도록 부모 environment를 복사하되 `PATH`만 `/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/bin`으로 항상 교체한다. 따라서 Finder의 짧은 PATH나 hostile parent PATH에 의존하지 않으면서 알려진 system·Homebrew 위치의 `#!/usr/bin/env node` wrapper를 지원한다. 다른 parent environment는 필터링하지 않고 신뢰된 Codex child에 기존 상속 의미 그대로 전달하며 디스크, 진단 정보나 로그로 옮기지 않는다.
+
+callback은 복사된 `Data` 또는 exit status만 actor로 보내며 Foundation process 객체를 concurrency 경계 밖으로 옮기거나 `@unchecked Sendable`로 감싸지 않는다. timeout과 종료 grace는 `ContinuousClock`을 사용하고 `waitUntilExit`처럼 cooperative executor를 막는 API는 사용하지 않는다.
 
 명시적 정상 종료 순서는 stdin close, stdout callback 해제, SIGTERM, 제한된 비동기 grace, 필요 시 SIGKILL, handle close다. `stop()`은 pending request를 `stopped`로 정확히 한 번 완료한다. timeout, cancellation, malformed output, 인증 실패처럼 session이 failed 상태가 된 경우에는 호출자가 `stop()`을 빠뜨려도 같은 bounded cleanup을 자동 실행한다. 성공한 재사용 session은 burst 소유자인 `RefreshCoordinator`가 반드시 `stop()`으로 닫는다.
 
@@ -253,7 +255,7 @@ frame이 하나면 scheduler에 timer 생성이나 취소 command를 보내지 �
 
 `ConnectionStatusResolver`는 메모리에 있는 `RefreshPublication`의 checking, quota 값 성공 시각, 정상 rate-limit 응답 시각과 typed failure를 연결 상태로 바꾸므로 설정을 열기 위해 별도 App Server quota 조회를 만들지 않는다. 정상 empty quota도 마지막 accepted 응답 시각으로 `연결됨`이 되지만 container 비호환과 typed failure가 이 상태보다 우선한다.
 
-`CodexCLIVersionProbe`는 shell 없이 검증된 executable을 `--version` 인자 하나로 실행하는 background actor다. stdin과 stderr는 `/dev/null`에 연결하고 stdout은 한 chunk씩 backpressure를 유지하며 최대 4 KiB까지만 받는다. production child environment는 부모의 `LANG`, `LC_ALL`, `LC_CTYPE` 중 존재하는 값만 새 dictionary에 복사하고 `PATH=/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/bin`을 항상 설정한다. 이 고정 순서는 system interpreter를 Homebrew·Intel Homebrew 위치보다 먼저 찾으면서 `#!/usr/bin/env …` wrapper도 지원한다. 부모의 `PATH`, `HOME`과 그 밖의 environment는 전달하지 않는다.
+`CodexCLIVersionProbe`는 shell 없이 검증된 executable을 `--version` 인자 하나로 실행하는 background actor다. stdin과 stderr는 `/dev/null`에 연결하고 stdout은 한 chunk씩 backpressure를 유지하며 최대 4 KiB까지만 받는다. production child environment는 App Server session과 같은 단일 safe PATH 상수를 사용하되, 인증이 필요 없는 진단 경계이므로 부모의 `LANG`, `LC_ALL`, `LC_CTYPE` 중 존재하는 값만 새 dictionary에 복사한다. 고정 순서는 system interpreter를 Homebrew·Intel Homebrew 위치보다 먼저 찾으면서 `#!/usr/bin/env …` wrapper도 지원한다. 부모의 `PATH`, `HOME`과 그 밖의 environment는 전달하지 않는다.
 
 nvm, asdf와 Volta처럼 사용자 home 아래의 runtime manager path 탐색은 v0.1의 비목표다. 해당 runtime에만 의존하는 wrapper는 사용자가 executable로 선택해도 version probe가 `processFailed`가 될 수 있으며, 이를 해결하기 위해 interactive shell이나 부모 PATH를 실행 경계로 가져오지 않는다.
 
