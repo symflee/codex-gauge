@@ -214,6 +214,16 @@ frame이 하나면 scheduler에 timer 생성이나 취소 command를 보내지 �
 
 `SettingsWindowCoordinator`는 창을 요청할 때만 약 440pt 폭의 독립 `NSWindowController`를 만들고 한 번에 하나만 보유한다. 변경된 `SettingsFormValues`는 actor repository에 순서대로 전달하며 repository가 저장 시점의 최신 executable URL과 최초 실행 field에 원자적으로 merge한다. 따라서 창이 열린 동안 다른 owner가 갱신한 숨은 field를 오래된 form state가 덮어쓰지 않는다. 창을 닫은 뒤 다시 열 때는 진행 중인 저장을 먼저 마치고 `UserDefaults`를 새로 읽는다. window close callback은 coordinator의 강한 참조와 AppKit content graph를 제거한다. 로그인 실행 UI는 intent만 저장하며 `SMAppService` 호출은 launch adapter 경계에 남긴다. quota snapshot이나 오류 원문은 저장하지 않는다.
 
+각 form event는 저장 queue와 별도로 주입된 `onSettingsFormValuesChanged` callback에도 전달한다. composition root는 이 seam을 현재 display preference, refresh profile과 로그인 실행 intent에 적용하며 설정 UI가 runtime controller를 직접 알지 않게 한다.
+
+초기 quota 조회가 열린 설정 창보다 늦게 끝나면 composition root는 `updateDiscoveredQuotaIDs(_:)`로 발견 목록만 교체한다. 이 system update는 remembered selection과 form value를 보존하고 UI row만 다시 만들며 저장 queue와 runtime preference callback을 호출하지 않는다. 창이 없을 때는 아무 객체도 만들지 않고 다음 `showSettings()`가 provider의 최신 목록을 읽는다.
+
+연결 영역은 `ConnectionDiagnosticsInspector`가 만든 immutable `ConnectionDiagnosticsSnapshot`만 소비한다. Inspector actor는 locator가 검증한 URL을 내부에서만 사용해 `CodexCLIVersionProbe`를 실행하고, UI에는 자동·사용자 선택 출처, 일반화된 위치 category, 제한된 basename, CLI version token과 typed 상태만 넘긴다. `ConnectionStatusResolver`는 메모리에 있는 `RefreshPublication`의 checking, 마지막 성공과 typed failure를 연결 상태로 바꾸므로 설정을 열기 위해 별도 App Server quota 조회를 만들지 않는다.
+
+`CodexCLIVersionProbe`는 shell 없이 검증된 executable을 `--version` 인자 하나로 실행하는 background actor다. stdout은 한 chunk씩 backpressure를 유지하며 최대 4 KiB까지만 받고, 2초 timeout과 제한된 terminate/SIGKILL grace를 적용한다. stderr는 null device로 버린다. Parser는 출력 전체가 아니라 최대 64자의 version 형태 token만 value로 만들며 원문 stdout, exit 설명과 경로는 보존하지 않는다.
+
+`SettingsFormViewController`의 `Codex 선택…`과 `진단 정보 복사`는 closure로 주입된다. 실제 `NSOpenPanel`과 `NSPasteboard` 접근은 각각 `NSOpenPanelCodexExecutableSelector`, `SystemDiagnosticClipboardWriter`에만 있다. 메뉴의 선택 action도 public `requestExecutableSelection()`을 호출해 필요하면 설정 창을 먼저 열고 같은 panel·저장 경로를 재사용한다. 선택 URL 저장은 repository actor가 최신 form·최초 실행 값을 보존하며 merge하고 외부 executable-selection callback이 provider 재구성을 요청할 수 있다. 선택 task는 generation으로 식별해 닫힌 창의 늦은 결과가 새 panel task를 지우지 못하게 하며, 저장을 시작한 선택은 창이 닫혀도 runtime callback까지 완료한다. pending selection은 window controller를 강하게 보유하지 않는다. 창 close는 진행 중 diagnostics task를 generation과 cancellation로 무효화하고, 다음 진단은 이전 CLI process cleanup task의 완료를 기다린 뒤 시작한다.
+
 window controller와 view controller가 실제로 해제되는지는 weak-reference 단위 테스트로 검증한다.
 
 ### 로그인 시 실행
@@ -224,7 +234,7 @@ macOS 호출이 실패해도 호출 직후 시스템 상태가 이미 요청 결
 
 ### 최초 실행
 
-상태 항목과 초기 조회를 먼저 시작한 뒤 `hasCompletedFirstLaunch`가 false이면 설정 창을 연다. 창 표시가 성공한 뒤 플래그를 기록한다. UI 테스트 launch argument는 테스트 전용 defaults domain을 사용한다.
+상태 항목과 초기 조회를 먼저 시작한 뒤 `hasCompletedFirstLaunch`가 false이면 설정 창을 연다. 창 표시가 성공한 뒤 `markFirstLaunchCompleted()`로 플래그를 기록한다. 이 actor 연산은 저장 시점의 표시·refresh·로그인·선택 executable 값을 모두 보존하고 최초 실행 값만 true로 바꾸며, 이미 완료된 경우에는 다시 쓰지 않는다. UI 테스트 launch argument는 테스트 전용 defaults domain을 사용한다.
 
 ## 7. 설정 저장
 
@@ -237,7 +247,7 @@ macOS 호출이 실패해도 호출 직후 시스템 상태가 이미 요청 결
 - 사용자가 선택한 Codex 실행 파일 경로
 - 최초 실행 완료 여부
 
-`AppPreferencesRepository` actor만 주입받은 `UserDefaults`에 접근한다. 전체 값을 `io.github.symflee.codex-gauge.preferences`라는 하나의 namespaced key에 versioned JSON `Data`로 저장해 같은 defaults domain의 다른 key를 건드리지 않는다. 일반적인 전체 `load`·`save` 외에 설정 form용 저장은 표시 설정, refresh와 로그인 의도만 받아 최신 전체 값에 actor 내부에서 merge한다.
+`AppPreferencesRepository` actor만 주입받은 `UserDefaults`에 접근한다. 전체 값을 `io.github.symflee.codex-gauge.preferences`라는 하나의 namespaced key에 versioned JSON `Data`로 저장해 같은 defaults domain의 다른 key를 건드리지 않는다. 일반적인 전체 `load`·`save` 외에 설정 form, 선택 executable과 최초 실행 완료 저장은 각각 담당 field만 받아 최신 전체 값에 actor 내부에서 read-modify-write한다. 세 연산에는 suspension point가 없어 동시 호출도 직렬화되며 서로의 최신 값을 잃지 않는다. 최초 실행 완료 저장은 true에서 no-op인 단방향·멱등 연산이다.
 
 저장 envelope에는 schema version을 별도로 포함한다. 현재 version 1은 display 설정을 중첩하고 나머지 허용 필드를 top-level에 둔다. version 0은 `displayProductMode`, `displayQuotaSelection`, `manualQuotaSelections`가 분리된 초기 flat schema이며 순수 decoder에서 현재 `AppPreferences`로 migration한다. manual selection은 제품 raw value 오름차순, 같은 제품 안에서는 양수 raw duration 오름차순과 기간 미상 마지막 순서로 정렬해 항상 같은 byte를 만든다. 빈 manual selection은 automatic으로 정규화한다.
 
@@ -249,7 +259,7 @@ version이나 root가 해석되지 않거나 미래 version이면 전체 기본�
 - token, 이메일, raw JSONL, 세션 로그와 quota history를 저장하지 않는다.
 - stderr는 pipe deadlock을 방지하기 위해 소비하되 민감정보가 제거되지 않은 채 `OSLog`에 쓰지 않는다.
 - 진단 정보에는 앱 버전, macOS 버전, 선택 경로의 유효 여부, CLI 버전, 마지막 typed error code만 포함한다.
-- 사용자 경로는 진단 복사 시 basename 또는 일반화된 위치로 축약한다.
+- 사용자 경로는 UI에서만 제한된 basename 또는 일반화된 위치로 축약한다. 진단 복사에는 basename 없이 출처와 일반화된 category만 포함한다.
 - telemetry, 외부 analytics와 crash SDK를 사용하지 않는다.
 
 ## 9. 자원 예산

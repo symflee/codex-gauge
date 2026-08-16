@@ -2,6 +2,7 @@ import CodexGaugeCore
 import CodexGaugeRefresh
 
 public enum SettingsFormEvent: Equatable, Sendable {
+    case discoveredQuotaIDsChanged(Set<QuotaSelectionID>)
     case productModeChanged(DisplayProductMode)
     case quotaSelectionModeChanged(SettingsQuotaSelectionMode)
     case quotaSelectionChanged(QuotaSelectionID, isSelected: Bool)
@@ -17,6 +18,8 @@ public struct SettingsFormReducer: Sendable {
         event: SettingsFormEvent
     ) -> SettingsFormState {
         switch event {
+        case .discoveredQuotaIDsChanged(let identifiers):
+            replacing(state, discoveredQuotaIDs: identifiers)
         case .productModeChanged(let productMode):
             replacing(state, productMode: productMode)
         case .quotaSelectionModeChanged(let selectionMode):
@@ -56,7 +59,8 @@ public struct SettingsFormReducer: Sendable {
         quotaSelectionMode: SettingsQuotaSelectionMode? = nil,
         rememberedQuotaIDs: Set<QuotaSelectionID>? = nil,
         refreshProfile: RefreshProfile? = nil,
-        launchAtLoginIntent: Bool? = nil
+        launchAtLoginIntent: Bool? = nil,
+        discoveredQuotaIDs: Set<QuotaSelectionID>? = nil
     ) -> SettingsFormState {
         SettingsFormState(
             productMode: productMode ?? state.productMode,
@@ -64,7 +68,7 @@ public struct SettingsFormReducer: Sendable {
             rememberedQuotaIDs: rememberedQuotaIDs ?? state.rememberedQuotaIDs,
             refreshProfile: refreshProfile ?? state.refreshProfile,
             launchAtLoginIntent: launchAtLoginIntent ?? state.launchAtLoginIntent,
-            discoveredQuotaIDs: state.discoveredQuotaIDs
+            discoveredQuotaIDs: discoveredQuotaIDs ?? state.discoveredQuotaIDs
         )
     }
 }

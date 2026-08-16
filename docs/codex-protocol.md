@@ -60,6 +60,19 @@ App Server session을 열기 전에 `CodexLocating`에서 검증된 executable U
 
 탐색은 Foundation filesystem API만 사용한다. file URL, 존재 여부, directory 여부, symlink 최종 target의 regular-file type과 executable permission을 검증한다. symlink cycle과 broken target은 거부하며 PATH, shell, CLI version 실행, 실제 process 시작은 이 단계에서 수행하지 않는다. 단위 테스트는 주입된 합성 home·system root만 사용하고 실제 machine 설치를 smoke test하지 않는다.
 
+### CLI 버전 진단
+
+실행 파일 탐색이 성공하면 설정 연결 영역의 별도 `CodexCLIVersionProbe` actor가 같은 검증 URL을 shell 없이 `--version` 인자 하나로 실행할 수 있다. 이는 App Server handshake나 quota 조회가 아니며 account, 인증 또는 raw JSON을 다루지 않는다.
+
+- timeout: 2초
+- stdout 상한: UTF-8 4 KiB
+- 표시 value: 최대 64자의 숫자로 시작하는 version token만 추출
+- stderr: null device로 폐기
+- 종료: 제한된 250ms grace 뒤 필요 시 SIGKILL
+- 공개 오류: launch, timeout, process, output-too-large, invalid-output, cancelled
+
+stdout 원문과 exit 설명은 value, UI, clipboard 또는 로그에 남기지 않는다. 설정의 연결 상태는 이 probe만으로 로그인 성공을 추측하지 않고 기존 refresh publication의 typed 상태를 우선 사용한다.
+
 ## 4. 합성 예제
 
 아래 값은 문서 설명을 위한 가상 데이터다. 실제 계정, 시각, 퍼센트 또는 응답을 복사한 것이 아니다. App Server 버전에 따라 initialize parameter와 응답의 부가 field가 달라질 수 있다.
@@ -237,6 +250,7 @@ Decoder fixture에는 다음을 포함한다.
 - split chunk, 여러 줄, CRLF, 빈 줄과 newline 없는 EOF
 - 정확히 1 MiB인 line과 상한 초과 line
 - 실제 합성 child의 handshake, account 1회 cache와 연속 rate-limit request ID
+- 실제 합성 `--version` child의 정상·malformed·oversized·nonzero·timeout·stderr flood
 - notification·server request·mismatched ID, timeout·cancellation·EOF·nonzero exit
 - stderr flood와 stdout notification flood의 deadlock·unbounded-buffer 방지
 - stop과 failed-path cleanup 뒤 orphan process 부재

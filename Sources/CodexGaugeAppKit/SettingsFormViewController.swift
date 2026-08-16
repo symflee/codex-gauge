@@ -6,14 +6,25 @@ import CodexGaugeSettings
 @MainActor
 public final class SettingsFormViewController: NSViewController {
     public private(set) var formState: SettingsFormState
+    public private(set) var connectionDiagnostics: ConnectionDiagnosticsSnapshot
 
     public var renderedQuotaOptionTitles: [String] {
         quotaButtons.map(\.title)
     }
 
+    public var renderedConnectionDetailTexts: [String] {
+        [connectionPathLabel, connectionVersionLabel, connectionStatusLabel].map(\.stringValue)
+    }
+
+    public var renderedConnectionActionTitles: [String] {
+        [selectCodexButton.title, copyDiagnosticsButton.title]
+    }
+
     private let reducer = SettingsFormReducer()
     private let presenter = SettingsFormPresenter()
     private let onFormValuesChanged: (SettingsFormValues) -> Void
+    private let onSelectCodex: () -> Void
+    private let onCopyDiagnostics: () -> Void
     private let productModes = DisplayProductMode.allCases
     private let selectionModes: [SettingsQuotaSelectionMode] = [.automatic, .manual]
     private let refreshProfiles = RefreshProfile.allCases
@@ -24,12 +35,29 @@ public final class SettingsFormViewController: NSViewController {
     private lazy var quotaStack = makeQuotaStack()
     private lazy var refreshControl = makeRefreshControl()
     private lazy var launchAtLoginButton = makeLaunchAtLoginButton()
+    private lazy var connectionPathLabel = makeConnectionDetailLabel()
+    private lazy var connectionVersionLabel = makeConnectionDetailLabel()
+    private lazy var connectionStatusLabel = makeConnectionDetailLabel()
+    private lazy var selectCodexButton = makeConnectionActionButton(
+        title: SettingsStrings.selectCodexAction,
+        action: #selector(selectCodex(_:))
+    )
+    private lazy var copyDiagnosticsButton = makeConnectionActionButton(
+        title: SettingsStrings.copyDiagnosticsAction,
+        action: #selector(copyDiagnostics(_:))
+    )
 
     public init(
         formState: SettingsFormState,
+        connectionDiagnostics: ConnectionDiagnosticsSnapshot = .checking,
+        onSelectCodex: @escaping () -> Void = {},
+        onCopyDiagnostics: @escaping () -> Void = {},
         onFormValuesChanged: @escaping (SettingsFormValues) -> Void
     ) {
         self.formState = formState
+        self.connectionDiagnostics = connectionDiagnostics
+        self.onSelectCodex = onSelectCodex
+        self.onCopyDiagnostics = onCopyDiagnostics
         self.onFormValuesChanged = onFormValuesChanged
         super.init(nibName: nil, bundle: nil)
     }
@@ -40,7 +68,7 @@ public final class SettingsFormViewController: NSViewController {
     }
 
     public override func loadView() {
-        let rootView = NSView(frame: NSRect(x: 0, y: 0, width: 440, height: 520))
+        let rootView = NSView(frame: NSRect(x: 0, y: 0, width: 440, height: 680))
         let contentStack = makeContentStack()
         rootView.addSubview(contentStack)
         NSLayoutConstraint.activate([
@@ -61,6 +89,36 @@ public final class SettingsFormViewController: NSViewController {
         onFormValuesChanged(formState.formValues)
     }
 
+    public func applyConnectionDiagnostics(
+        _ diagnostics: ConnectionDiagnosticsSnapshot
+    ) {
+        connectionDiagnostics = diagnostics
+        guard isViewLoaded else {
+            return
+        }
+        renderConnectionDiagnostics()
+    }
+
+    public func updateDiscoveredQuotaIDs(_ identifiers: Set<QuotaSelectionID>) {
+        formState = reducer.reduce(
+            state: formState,
+            event: .discoveredQuotaIDsChanged(identifiers)
+        )
+        guard isViewLoaded else {
+            return
+        }
+        renderQuotaRows(presenter.present(formState))
+    }
+
+    public func performConnectionAction(_ action: SettingsConnectionAction) {
+        switch action {
+        case .selectCodex:
+            onSelectCodex()
+        case .copyDiagnostics:
+            onCopyDiagnostics()
+        }
+    }
+
     private func makeContentStack() -> NSStackView {
         let stack = NSStackView(views: [
             makeSectionTitle(SettingsStrings.displaySection),
@@ -70,7 +128,12 @@ public final class SettingsFormViewController: NSViewController {
             makeQuotaScrollView(),
             makeSectionTitle(SettingsStrings.refreshSection),
             refreshControl,
-            launchAtLoginButton
+            launchAtLoginButton,
+            makeSectionTitle(SettingsStrings.connectionSection),
+            connectionPathLabel,
+            connectionVersionLabel,
+            connectionStatusLabel,
+            makeConnectionActionStack()
         ])
         stack.orientation = .vertical
         stack.alignment = .leading
@@ -156,6 +219,26 @@ public final class SettingsFormViewController: NSViewController {
         )
     }
 
+    private func makeConnectionDetailLabel() -> NSTextField {
+        let label = NSTextField(wrappingLabelWithString: "")
+        label.maximumNumberOfLines = 2
+        return label
+    }
+
+    private func makeConnectionActionButton(
+        title: String,
+        action: Selector
+    ) -> NSButton {
+        NSButton(title: title, target: self, action: action)
+    }
+
+    private func makeConnectionActionStack() -> NSStackView {
+        let stack = NSStackView(views: [selectCodexButton, copyDiagnosticsButton])
+        stack.orientation = .horizontal
+        stack.spacing = 8
+        return stack
+    }
+
     private func makeSectionTitle(_ title: String) -> NSTextField {
         let label = NSTextField(labelWithString: title)
         label.font = .systemFont(ofSize: NSFont.systemFontSize, weight: .semibold)
@@ -172,6 +255,17 @@ public final class SettingsFormViewController: NSViewController {
         )
         launchAtLoginButton.state = formState.launchAtLoginIntent ? .on : .off
         renderQuotaRows(presenter.present(formState))
+        renderConnectionDiagnostics()
+    }
+
+    private func renderConnectionDiagnostics() {
+        connectionPathLabel.stringValue = SettingsStrings.connectionPath(connectionDiagnostics)
+        connectionVersionLabel.stringValue = SettingsStrings.connectionVersion(
+            connectionDiagnostics.cliVersion?.value
+        )
+        connectionStatusLabel.stringValue = SettingsStrings.connectionStatus(
+            connectionDiagnostics.connectionStatus
+        )
     }
 
     private func renderQuotaRows(_ presentation: SettingsFormPresentation) {
@@ -254,6 +348,21 @@ public final class SettingsFormViewController: NSViewController {
     @objc private func launchAtLoginChanged(_ sender: NSButton) {
         apply(.launchAtLoginIntentChanged(sender.state == .on))
     }
+
+    @objc private func selectCodex(_ sender: NSButton) {
+        _ = sender
+        performConnectionAction(.selectCodex)
+    }
+
+    @objc private func copyDiagnostics(_ sender: NSButton) {
+        _ = sender
+        performConnectionAction(.copyDiagnostics)
+    }
+}
+
+public enum SettingsConnectionAction: Equatable, Sendable {
+    case selectCodex
+    case copyDiagnostics
 }
 
 enum SettingsStrings {
@@ -266,6 +375,9 @@ enum SettingsStrings {
     static let productAccessibilityLabel = localized("settings.product.accessibility")
     static let selectionAccessibilityLabel = localized("settings.selection.accessibility")
     static let refreshAccessibilityLabel = localized("settings.refresh.accessibility")
+    static let connectionSection = localized("settings.section.connection")
+    static let selectCodexAction = localized("settings.connection.select")
+    static let copyDiagnosticsAction = localized("settings.connection.copy-diagnostics")
 
     private static let durationFormatter = SettingsDurationAccessibilityFormatter(
         vocabulary: SettingsDurationAccessibilityVocabulary(
@@ -281,6 +393,46 @@ enum SettingsStrings {
 
     static func productName(_ mode: DisplayProductMode) -> String {
         localized("settings.product.\(mode.rawValue)")
+    }
+
+    static func connectionPath(
+        _ diagnostics: ConnectionDiagnosticsSnapshot
+    ) -> String {
+        guard let sourceValue = diagnostics.executableSource else {
+            return String(
+                format: localized("settings.connection.path.format"),
+                localized("settings.connection.unavailable")
+            )
+        }
+        let source = localized("settings.connection.source.\(sourceValue.rawValue)")
+        let location = connectionLocation(diagnostics.path)
+        let value = String(
+            format: localized("settings.connection.path.value.format"),
+            source,
+            location
+        )
+        return String(format: localized("settings.connection.path.format"), value)
+    }
+
+    private static func connectionLocation(_ path: CodexPathSummary?) -> String {
+        guard let path else {
+            return localized("settings.connection.unavailable")
+        }
+        return path.basename ?? localized(
+            "settings.connection.category.\(path.category.rawValue)"
+        )
+    }
+
+    static func connectionVersion(_ version: String?) -> String {
+        String(
+            format: localized("settings.connection.version.format"),
+            version ?? localized("settings.connection.unavailable")
+        )
+    }
+
+    static func connectionStatus(_ status: CodexConnectionStatus) -> String {
+        let value = localized("settings.connection.status.\(status.rawValue)")
+        return String(format: localized("settings.connection.status.format"), value)
     }
 
     static func selectionModeName(_ mode: SettingsQuotaSelectionMode) -> String {

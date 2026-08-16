@@ -33,6 +33,8 @@ swift build -c release --explicit-target-dependency-import-check error
 
 package build와 단위 테스트는 실제 Codex 설치, 사용자 계정 또는 애플리케이션 네트워크 요청에 의존하지 않는다. decoder 테스트는 합성 JSONL fixture를 사용한다. process session 통합 테스트는 `codex-gauge-tests` 실행 파일 자체를 test-only 합성 `app-server`로 다시 실행해 handshake, timeout, flood와 종료를 검증한다. 이 mode는 test environment key로만 동작하며 account 이메일이나 원문 사용자 응답을 생성·기록하지 않는다.
 
+CLI version 통합 테스트도 같은 test executable을 `--version`으로 직접 다시 실행한다. 합성 mode는 정상 version, malformed·oversized stdout, nonzero exit, timeout과 stderr flood를 제공하며 실제 설치 경로, shell, Codex 계정 또는 네트워크를 사용하지 않는다.
+
 refresh executor 단위 테스트는 `RefreshClock`, `RefreshSessionProviding`과 `RefreshUsageSession` fake를 사용한다. 시간 경과는 `ContinuousClock.Instant`를 보존한 가짜 clock의 명시적 `advance`로만 만들며 실제 sleep이나 실제 Codex process를 사용하지 않는다. 비동기 완료 대기는 `Task.yield()`로 actor queue만 비워 wall-clock timing에 의존하지 않는다.
 
 ## 3. 구현 원칙
@@ -100,6 +102,15 @@ Java 전용 코딩 규칙은 이 Swift 프로젝트에 적용하지 않는다. J
 - 설정 presenter의 checkbox 활성화와 빈 상태 도출
 - 제품 변경 후 off-product 직접 선택 제외와 빈 유효 선택의 자동 복구
 - 설정 기간 접근성 문구의 언어별 완전한 단위
+- CLI version parser의 token 제한, 4 KiB 상한과 typed 오류
+- shell 없는 `--version` process의 timeout·stderr 폐기·orphan cleanup
+- UI의 안전한 basename/category 일반화와 진단 복사의 basename·절대 경로 제거
+- refresh publication의 연결 상태 매핑과 sanitized 진단 report
+- 설정 연결 section의 선택·복사 callback과 선택 URL의 원자적 저장
+- close/reopen selection generation, commit 이후 callback과 stale task 격리
+- pending diagnostics 중 설정 window/controller/view deallocation과 직렬 cleanup
+- form 변경의 runtime 적용 callback과 repository 저장 동시 전달
+- 초기 조회 뒤 discovery row 갱신의 무저장·무-runtime-callback 동작
 - 최초 실행 상태
 
 ### XCTest와 UI 테스트
@@ -110,6 +121,7 @@ Java 전용 코딩 규칙은 이 Swift 프로젝트에 적용하지 않는다. J
 - 설정 저장 후 닫기·재생성
 - 설정 변경 시 숨은 executable URL·최초 실행 field 보존
 - 창이 열린 동안 외부에서 바뀐 숨은 field와 form 변경의 원자적 merge
+- form·선택 executable·최초 실행 완료의 동시 actor merge와 완료 표시의 멱등성
 - 설정 window/controller/view deallocation
 - 로그인 시 실행 adapter
 - Release CPU와 memory metric

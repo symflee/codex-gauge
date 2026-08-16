@@ -121,6 +121,10 @@ reset 상대 시간은 메뉴를 구성하는 시점에만 계산한다. 매초 
 
 창은 한 번에 하나만 연다. 닫으면 window controller, view controller와 관련 view의 강한 참조를 제거한다. 다음에 열 때 `UserDefaults`에서 설정을 읽어 화면을 다시 구성한다. allocator 특성상 프로세스 RSS가 즉시 줄지 않을 수 있지만 객체 graph는 해제되어야 한다.
 
+연결 영역의 경로는 절대 경로 대신 `자동 감지` 또는 `사용자 선택` 출처와 안전한 executable basename을 표시한다. basename을 안전하게 표현할 수 없으면 애플리케이션 내부, Homebrew, 사용자 로컬 CLI 또는 기타 위치처럼 일반화한다. 연결 상태는 연결됨, 확인 중, 찾을 수 없음, 잘못된 선택, 로그아웃, 지원하지 않는 인증, 비호환 버전, timeout과 process 실패를 구분한다.
+
+진단 복사에는 앱 버전, macOS 버전, architecture, CLI 버전, typed 연결·version 오류 code와 경로 출처·일반화 category만 포함한다. 절대 경로, 이메일, token, raw JSON과 원문 process 출력은 포함하지 않는다.
+
 ## 5. 최초 실행
 
 1. 상태 항목을 가장 먼저 만든다.

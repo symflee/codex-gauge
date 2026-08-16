@@ -13,6 +13,8 @@ func appPreferencesTests() -> [TestCase] {
         appPreferencesVersionZeroMigrationTest(),
         appPreferencesEmptyManualSelectionTest(),
         appPreferencesNonFileURLTest(),
+        appPreferencesExecutableSelectionMergeTest(),
+        appPreferencesFirstLaunchAtomicMergeTest(),
         appPreferencesSuiteIsolationTest(),
         appPreferencesSafePayloadTest(),
         appPreferencesSendabilityTest()
@@ -389,6 +391,67 @@ private func appPreferencesNonFileURLTest() -> TestCase {
                 == syntheticExecutableURL,
             "Expected file URL acceptance"
         )
+    }
+}
+
+private func appPreferencesExecutableSelectionMergeTest() -> TestCase {
+    TestCase(name: "executable selection preserves every unrelated preference") {
+        let store = try PreferencesTestStore()
+        defer { store.cleanUp() }
+        let repository = try store.repository()
+        let initial = manualPreferences([
+            QuotaSelectionID(product: .codex, rawDurationMinutes: 300)
+        ])
+        let selected = URL(fileURLWithPath: "/Synthetic/New/codex")
+        try await repository.save(initial)
+
+        try await repository.saveSelectedExecutableURL(selected)
+        let saved = await repository.load()
+
+        try expect(saved.displayPreference == initial.displayPreference, "Expected display preserved")
+        try expect(saved.refreshProfile == initial.refreshProfile, "Expected refresh preserved")
+        try expect(
+            saved.launchAtLoginIntent == initial.launchAtLoginIntent,
+            "Expected login intent preserved"
+        )
+        try expect(saved.hasCompletedFirstLaunch, "Expected first launch preserved")
+        try expect(saved.selectedExecutableURL == selected, "Expected selected executable saved")
+    }
+}
+
+private func appPreferencesFirstLaunchAtomicMergeTest() -> TestCase {
+    TestCase(name: "first launch completion atomically preserves concurrent settings updates") {
+        let store = try PreferencesTestStore()
+        defer { store.cleanUp() }
+        let repository = try store.repository()
+        try await repository.save(.default)
+        let identifier = QuotaSelectionID(product: .spark, rawDurationMinutes: 300)
+        let formValues = SettingsFormValues(
+            displayPreference: DisplayPreference(
+                productMode: .both,
+                quotaSelection: .manual([identifier])
+            ),
+            refreshProfile: .eco,
+            launchAtLoginIntent: true
+        )
+        let executableURL = URL(fileURLWithPath: "/Synthetic/Selected/codex")
+
+        async let formSave: Void = repository.saveSettingsForm(formValues)
+        async let executableSave: Void = repository.saveSelectedExecutableURL(executableURL)
+        async let firstLaunchSave: Void = repository.markFirstLaunchCompleted()
+        _ = try await (formSave, executableSave, firstLaunchSave)
+        let saved = await repository.load()
+
+        try expect(saved.displayPreference == formValues.displayPreference, "Expected display")
+        try expect(saved.refreshProfile == .eco, "Expected refresh profile")
+        try expect(saved.launchAtLoginIntent, "Expected login intent")
+        try expect(saved.selectedExecutableURL == executableURL, "Expected executable")
+        try expect(saved.hasCompletedFirstLaunch, "Expected first launch completion")
+
+        let firstData = try storedPreferencesData(in: store.userDefaults)
+        try await repository.markFirstLaunchCompleted()
+        let secondData = try storedPreferencesData(in: store.userDefaults)
+        try expect(firstData == secondData, "Expected idempotent completion bytes")
     }
 }
 
