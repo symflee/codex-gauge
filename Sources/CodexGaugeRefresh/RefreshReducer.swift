@@ -34,6 +34,10 @@ public struct RefreshReducer: Sendable {
             request(.manual, at: now, state: &state, commands: &commands)
         case .wakeBaseline(let now):
             wake(at: now, state: &state, commands: &commands)
+        case .quotaReset(let now):
+            quotaReset(at: now, state: &state, commands: &commands)
+        case .resumeAfterSystemWake(let now):
+            resumeAfterSystemWake(at: now, state: &state, commands: &commands)
         case .scheduledRefreshFired(let generation, let now):
             fireSchedule(generation, at: now, state: &state, commands: &commands)
         case .lowPowerModeChanged(let isEnabled, let now):
@@ -44,6 +48,8 @@ public struct RefreshReducer: Sendable {
             succeed(generation, samples: samples, at: now, state: &state, commands: &commands)
         case .transientFailure(let generation, let now):
             fail(generation, at: now, state: &state, commands: &commands)
+        case .terminalFailure(let generation):
+            failPermanently(generation, state: &state)
         case .stop:
             stop(state: &state, commands: &commands)
         }
@@ -131,6 +137,36 @@ public struct RefreshReducer: Sendable {
         request(.wakeBaseline, at: now, state: &state, commands: &commands)
     }
 
+    private func resumeAfterSystemWake(
+        at now: ContinuousClock.Instant,
+        state: inout RefreshState,
+        commands: inout [RefreshCommand]
+    ) {
+        guard !state.isRunning else {
+            wake(at: now, state: &state, commands: &commands)
+            return
+        }
+        state.isRunning = true
+        state.baseline = nil
+        state.burstDeadline = nil
+        state.consecutiveTransientFailures = 0
+        guard state.profile != .manual else {
+            return
+        }
+        beginRequest(.wakeBaseline, state: &state, commands: &commands)
+    }
+
+    private func quotaReset(
+        at now: ContinuousClock.Instant,
+        state: inout RefreshState,
+        commands: inout [RefreshCommand]
+    ) {
+        guard state.profile != .manual else {
+            return
+        }
+        request(.quotaReset, at: now, state: &state, commands: &commands)
+    }
+
     private func request(
         _ reason: RefreshRequestReason,
         at now: ContinuousClock.Instant,
@@ -167,13 +203,30 @@ public struct RefreshReducer: Sendable {
         _ reason: RefreshRequestReason,
         state: inout RefreshState
     ) {
-        guard reason == .wakeBaseline, let current = state.inFlightRequest else {
+        guard let current = state.inFlightRequest else {
+            return
+        }
+        let reason = coalescedReason(current: current.reason, incoming: reason)
+        guard reason != current.reason else {
             return
         }
         state.inFlightRequest = RefreshRequest(
             generation: current.generation,
-            reason: .wakeBaseline
+            reason: reason
         )
+    }
+
+    private func coalescedReason(
+        current: RefreshRequestReason,
+        incoming: RefreshRequestReason
+    ) -> RefreshRequestReason {
+        if current == .quotaReset || incoming == .quotaReset {
+            return .quotaReset
+        }
+        if current == .wakeBaseline || incoming == .wakeBaseline {
+            return .wakeBaseline
+        }
+        return current
     }
 
     private func fireSchedule(
@@ -323,6 +376,19 @@ public struct RefreshReducer: Sendable {
             state.consecutiveTransientFailures + 1,
             maximumCount
         )
+    }
+
+    private func failPermanently(
+        _ generation: UInt64,
+        state: inout RefreshState
+    ) {
+        guard state.isRunning, state.inFlightRequest?.generation == generation else {
+            return
+        }
+        state.inFlightRequest = nil
+        state.baseline = nil
+        state.burstDeadline = nil
+        state.consecutiveTransientFailures = 0
     }
 
     private func scheduleRetry(
