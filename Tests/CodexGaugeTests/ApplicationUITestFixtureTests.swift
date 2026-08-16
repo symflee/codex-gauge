@@ -30,8 +30,8 @@ private func applicationUITestFixtureRecognizesOnlyExactArgumentTest() -> TestCa
         #if DEBUG
         try expect(enabled.mode == .uiTestFixture83, "Expected exact fixture mode")
         try expect(
-            enabled.firstLaunchTestingOptions.shouldResetCompletion,
-            "Expected fixture to reset first-launch completion"
+            !enabled.firstLaunchTestingOptions.shouldResetCompletion,
+            "Expected fixture activation not to reset first-launch completion"
         )
         #else
         try expect(enabled.mode == .production, "Expected Release production mode")
@@ -50,6 +50,28 @@ private func applicationUITestFixtureRecognizesOnlyExactArgumentTest() -> TestCa
         try expect(
             resetOnly.firstLaunchTestingOptions.shouldResetCompletion,
             "Expected existing first-launch reset behavior"
+        )
+        let fixtureWithReset = CodexGaugeApplicationLaunchOptions(
+            arguments: [
+                "Codex Gauge",
+                argument,
+                FirstLaunchTestingOptions.resetCompletionArgument
+            ]
+        )
+        #if DEBUG
+        try expect(
+            fixtureWithReset.mode == .uiTestFixture83,
+            "Expected fixture mode with an independent reset"
+        )
+        #else
+        try expect(
+            fixtureWithReset.mode == .production,
+            "Expected Release to ignore fixture activation"
+        )
+        #endif
+        try expect(
+            fixtureWithReset.firstLaunchTestingOptions.shouldResetCompletion,
+            "Expected the explicit reset argument to remain effective"
         )
         for nearMatch in nearMatches {
             let options = CodexGaugeApplicationLaunchOptions(

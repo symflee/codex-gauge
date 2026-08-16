@@ -9,28 +9,58 @@ func firstLaunchSettingsTests() -> [TestCase] {
     [
         firstLaunchShowsOnceAndRecordsVisibleWindowTest(),
         firstLaunchFailedShowRemainsIncompleteTest(),
-        firstLaunchCancelledShowRemainsIncompleteTest(),
+        firstLaunchCancelledBeforeShowRemainsIncompleteTest(),
+        firstLaunchVisibleWindowCompletionSurvivesCancellationTest(),
         firstLaunchResetArgumentPreservesPreferencesTest(),
         firstLaunchConcurrentUpdatesArePreservedTest(),
         firstLaunchResetMergesConcurrentUpdatesTest()
     ]
 }
 
-private func firstLaunchCancelledShowRemainsIncompleteTest() -> TestCase {
-    TestCase(name: "cancelled first launch settings does not complete") {
-        try await firstLaunchCancelledShowRemainsIncompleteScenario()
+private func firstLaunchCancelledBeforeShowRemainsIncompleteTest() -> TestCase {
+    TestCase(name: "cancelled first launch before show does not complete") {
+        try await firstLaunchCancelledBeforeShowRemainsIncompleteScenario()
     }
 }
 
 @MainActor
-private func firstLaunchCancelledShowRemainsIncompleteScenario() async throws {
+private func firstLaunchCancelledBeforeShowRemainsIncompleteScenario() async throws {
     let store = try FirstLaunchPreferencesStore()
     defer { store.cleanUp() }
     let repository = try store.repository()
-    let showGate = FirstLaunchShowGate()
+    let settings = FirstLaunchSettingsRuntimeSpy(showResult: true)
+    let coordinator = FirstLaunchSettingsCoordinator(
+        repository: repository,
+        settingsRuntime: settings,
+        testingOptions: .production
+    )
+    let runTask = Task { @MainActor in
+        await coordinator.runAfterInitialRefreshStarted()
+    }
+    runTask.cancel()
+    await runTask.value
+
+    let preferences = await repository.load()
+    try expect(!preferences.hasCompletedFirstLaunch, "Expected cancellation not completed")
+    try expect(settings.showCount == 0, "Expected no show after prior cancellation")
+}
+
+private func firstLaunchVisibleWindowCompletionSurvivesCancellationTest() -> TestCase {
+    TestCase(name: "visible first launch completion drains after caller cancellation") {
+        try await firstLaunchVisibleWindowCompletionSurvivesCancellationScenario()
+    }
+}
+
+@MainActor
+private func firstLaunchVisibleWindowCompletionSurvivesCancellationScenario() async throws {
+    let store = try FirstLaunchPreferencesStore()
+    defer { store.cleanUp() }
+    let repository = try store.repository()
     let settings = FirstLaunchSettingsRuntimeSpy(showResult: true)
     settings.onShow = {
-        await showGate.wait()
+        withUnsafeCurrentTask { task in
+            task?.cancel()
+        }
     }
     let coordinator = FirstLaunchSettingsCoordinator(
         repository: repository,
@@ -40,15 +70,12 @@ private func firstLaunchCancelledShowRemainsIncompleteScenario() async throws {
     let runTask = Task { @MainActor in
         await coordinator.runAfterInitialRefreshStarted()
     }
-    try await waitForFirstLaunchCondition { await showGate.hasStarted }
 
-    runTask.cancel()
-    await showGate.finish()
     await runTask.value
 
     let preferences = await repository.load()
-    try expect(!preferences.hasCompletedFirstLaunch, "Expected cancellation not completed")
-    try expect(settings.showCount == 1, "Expected only the cancelled attempt")
+    try expect(preferences.hasCompletedFirstLaunch, "Expected visible window completed")
+    try expect(settings.showCount == 1, "Expected one visible presentation")
 }
 
 private func firstLaunchShowsOnceAndRecordsVisibleWindowTest() -> TestCase {
