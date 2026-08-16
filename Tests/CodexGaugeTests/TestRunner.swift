@@ -34,6 +34,7 @@ struct TestRunner {
             + systemActivityMonitorTests()
             + quotaResetRefreshSchedulerTests()
             + settingsFormTests()
+            + settingsWindowForegroundPresenterTests()
             + settingsWindowTests()
             + firstLaunchSettingsTests()
             + assistiveDisplayMonitorTests()

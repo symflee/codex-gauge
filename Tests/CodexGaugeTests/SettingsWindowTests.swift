@@ -10,6 +10,9 @@ func settingsWindowTests() -> [TestCase] {
     [
         settingsWindowStructureTest(),
         settingsWindowRuntimeReportsVisibilityTest(),
+        settingsWindowForegroundReactivationTest(),
+        settingsWindowCreationFailureSkipsActivationTest(),
+        settingsWindowLateCancellationSkipsActivationTest(),
         settingsWindowPersistsEditsTest(),
         settingsWindowRecreationReloadsPreferencesTest(),
         settingsWindowReleasesUIObjectsTest(),
@@ -31,6 +34,130 @@ func settingsWindowTests() -> [TestCase] {
         settingsWindowShutdownFinishesCommittedSelectionTest(),
         settingsDurationAccessibilityLocalizationTest()
     ]
+}
+
+private func settingsWindowLateCancellationSkipsActivationTest() -> TestCase {
+    TestCase(name: "cancelled settings creation does not activate the application") {
+        try await settingsWindowLateCancellationSkipsActivationScenario()
+    }
+}
+
+@MainActor
+private func settingsWindowLateCancellationSkipsActivationScenario() async throws {
+    _ = NSApplication.shared
+    let store = try SettingsUITestStore()
+    defer { store.cleanUp() }
+    let activation = SettingsWindowCoordinatorActivationSpy()
+    let coordinator = SettingsWindowCoordinator(
+        repository: try store.repository(),
+        discoveredQuotaProvider: { [] },
+        foregroundPresenter: SettingsWindowForegroundPresenter(
+            applicationActivator: activation
+        ),
+        onSettingsWindowCreated: { _ in
+            withUnsafeCurrentTask { task in
+                task?.cancel()
+            }
+        }
+    )
+    let showResult = SettingsWindowResult()
+    let showTask = Task { @MainActor in
+        showResult.controller = await coordinator.showSettings()
+    }
+
+    await showTask.value
+    await Task.yield()
+
+    try expect(showResult.controller == nil, "Expected cancelled late show rejection")
+    try expect(coordinator.activeWindowController == nil, "Expected cancelled graph released")
+    try expect(
+        activation.ignoringOtherAppsValues.isEmpty,
+        "Expected no activation after cancellation during creation"
+    )
+}
+
+private func settingsWindowForegroundReactivationTest() -> TestCase {
+    TestCase(name: "settings reactivates the application when brought forward") {
+        try await settingsWindowForegroundReactivationScenario()
+    }
+}
+
+@MainActor
+private func settingsWindowForegroundReactivationScenario() async throws {
+    _ = NSApplication.shared
+    let store = try SettingsUITestStore()
+    defer { store.cleanUp() }
+    let activation = SettingsWindowCoordinatorActivationSpy()
+    let coordinator = SettingsWindowCoordinator(
+        repository: try store.repository(),
+        discoveredQuotaProvider: { [] },
+        foregroundPresenter: SettingsWindowForegroundPresenter(
+            applicationActivator: activation
+        )
+    )
+
+    let firstController = try await showSettingsController(coordinator)
+    firstController.window?.orderOut(nil)
+    try expect(
+        firstController.window?.isVisible == false,
+        "Expected hidden existing settings window"
+    )
+    let repeatedController = try await showSettingsController(coordinator)
+
+    try expect(repeatedController === firstController, "Expected one reused controller")
+    try expect(
+        repeatedController.window?.isVisible == true,
+        "Expected existing settings window brought forward"
+    )
+    try expect(
+        activation.ignoringOtherAppsValues == [true, true],
+        "Expected one foreground activation for each show request"
+    )
+
+    await coordinator.shutdown()
+    let terminalResult = await coordinator.showSettings()
+    try expect(terminalResult == nil, "Expected terminal show rejection")
+    try expect(
+        activation.ignoringOtherAppsValues == [true, true],
+        "Expected shutdown show not to activate the application"
+    )
+}
+
+private func settingsWindowCreationFailureSkipsActivationTest() -> TestCase {
+    TestCase(name: "settings creation failure does not activate the application") {
+        try await settingsWindowCreationFailureSkipsActivationScenario()
+    }
+}
+
+@MainActor
+private func settingsWindowCreationFailureSkipsActivationScenario() async throws {
+    _ = NSApplication.shared
+    let store = try SettingsUITestStore()
+    defer { store.cleanUp() }
+    let activation = SettingsWindowCoordinatorActivationSpy()
+    weak var weakController: SettingsWindowController?
+    let coordinator = SettingsWindowCoordinator(
+        repository: try store.repository(),
+        discoveredQuotaProvider: { [] },
+        foregroundPresenter: SettingsWindowForegroundPresenter(
+            applicationActivator: activation
+        ),
+        onSettingsWindowCreated: { controller in
+            weakController = controller
+            controller.window = nil
+        }
+    )
+
+    let result = await coordinator.showSettings()
+    await Task.yield()
+
+    try expect(result == nil, "Expected a missing settings window to fail")
+    try expect(coordinator.activeWindowController == nil, "Expected failed graph released")
+    try expect(weakController == nil, "Expected failed controller deallocation")
+    try expect(
+        activation.ignoringOtherAppsValues.isEmpty,
+        "Expected no activation when window creation did not produce a window"
+    )
 }
 
 private func settingsWindowRuntimeReportsVisibilityTest() -> TestCase {
@@ -566,10 +693,14 @@ private func settingsWindowRejectsTerminalShowScenario() async throws {
     let formSaveGate = SettingsFormSaveGate()
     let completion = SettingsShutdownCompletion()
     let pendingShowResult = SettingsWindowResult()
+    let activation = SettingsWindowCoordinatorActivationSpy()
     var windowCreationCount = 0
     let coordinator = SettingsWindowCoordinator(
         repository: try store.repository(),
         discoveredQuotaProvider: { [] },
+        foregroundPresenter: SettingsWindowForegroundPresenter(
+            applicationActivator: activation
+        ),
         settingsFormValuesSaver: { values in await formSaveGate.save(values) },
         onSettingsWindowCreated: { _ in windowCreationCount += 1 }
     )
@@ -603,6 +734,10 @@ private func settingsWindowRejectsTerminalShowScenario() async throws {
     try expect(terminalResult == nil, "Expected terminal show rejected")
     try expect(coordinator.activeWindowController == nil, "Expected no terminal window")
     try expect(windowCreationCount == 1, "Expected no window created after shutdown began")
+    try expect(
+        activation.ignoringOtherAppsValues == [true],
+        "Expected pending and terminal shows not to reactivate the application"
+    )
 }
 
 private func settingsWindowShutdownClosesLateWindowTest() -> TestCase {
@@ -1042,6 +1177,16 @@ private func waitForSettingsCondition(
         await Task.yield()
     }
     throw TestFailure(description: "Timed out waiting for settings condition")
+}
+
+@MainActor
+private final class SettingsWindowCoordinatorActivationSpy:
+    SettingsWindowApplicationActivating {
+    private(set) var ignoringOtherAppsValues = [Bool]()
+
+    func activate(ignoringOtherApps: Bool) {
+        ignoringOtherAppsValues.append(ignoringOtherApps)
+    }
 }
 
 private actor SettingsDiagnosticsProviderStub {
