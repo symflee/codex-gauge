@@ -51,6 +51,13 @@
 "settings.refresh.fast" = "빠름";
 "settings.refresh.accessibility" = "갱신 주기";
 "settings.launch-at-login" = "로그인 시 실행";
+"settings.launch-at-login.status.disabled" = "현재 상태: 꺼짐";
+"settings.launch-at-login.status.enabled" = "현재 상태: 켜짐";
+"settings.launch-at-login.status.requires-approval" = "시스템 승인이 필요합니다.";
+"settings.launch-at-login.status.unavailable" = "이 Mac에서는 로그인 시 실행을 사용할 수 없습니다.";
+"settings.launch-at-login.failure.registration" = "로그인 시 실행을 켜지 못했습니다. 다시 시도해 주세요.";
+"settings.launch-at-login.failure.unregistration" = "로그인 시 실행을 끄지 못했습니다. 다시 시도해 주세요.";
+"settings.launch-at-login.open-system-settings" = "시스템 설정 열기";
 "settings.section.connection" = "Codex 연결";
 "settings.connection.path.format" = "위치: %@";
 "settings.connection.path.value.format" = "%@ · %@";

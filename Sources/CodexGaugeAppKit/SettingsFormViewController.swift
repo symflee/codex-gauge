@@ -7,6 +7,7 @@ import CodexGaugeSettings
 public final class SettingsFormViewController: NSViewController {
     public private(set) var formState: SettingsFormState
     public private(set) var connectionDiagnostics: ConnectionDiagnosticsSnapshot
+    public private(set) var launchAtLoginState: LaunchAtLoginSettingsState
 
     public var renderedQuotaOptionTitles: [String] {
         quotaButtons.map(\.title)
@@ -24,11 +25,38 @@ public final class SettingsFormViewController: NSViewController {
         projectNoticeLabel.stringValue
     }
 
+    public var renderedLaunchAtLoginToggleValue: LaunchAtLoginToggleValue {
+        switch launchAtLoginButton.state {
+        case .on:
+            .on
+        case .mixed:
+            .mixed
+        default:
+            .off
+        }
+    }
+
+    public var isLaunchAtLoginToggleEnabled: Bool {
+        launchAtLoginButton.isEnabled
+    }
+
+    public var renderedLaunchAtLoginDetailText: String {
+        launchAtLoginDetailLabel.stringValue
+    }
+
+    public var renderedLaunchAtLoginRecoveryActionTitle: String? {
+        launchAtLoginRecoveryButton.isHidden
+            ? nil
+            : launchAtLoginRecoveryButton.title
+    }
+
     private let reducer = SettingsFormReducer()
     private let presenter = SettingsFormPresenter()
     private let onFormValuesChanged: (SettingsFormValues) -> Void
     private let onSelectCodex: () -> Void
     private let onCopyDiagnostics: () -> Void
+    private let onOpenLaunchAtLoginSystemSettings: () -> Void
+    private let onLaunchAtLoginIntentRequested: (Bool) -> Void
     private let productModes = DisplayProductMode.allCases
     private let selectionModes: [SettingsQuotaSelectionMode] = [.automatic, .manual]
     private let refreshProfiles = RefreshProfile.allCases
@@ -39,6 +67,12 @@ public final class SettingsFormViewController: NSViewController {
     private lazy var quotaStack = makeQuotaStack()
     private lazy var refreshControl = makeRefreshControl()
     private lazy var launchAtLoginButton = makeLaunchAtLoginButton()
+    private lazy var launchAtLoginDetailLabel = makeLaunchAtLoginDetailLabel()
+    private lazy var launchAtLoginRecoveryButton = makeConnectionActionButton(
+        title: SettingsStrings.openLaunchAtLoginSystemSettings,
+        action: #selector(openLaunchAtLoginSystemSettings(_:))
+    )
+    private lazy var launchAtLoginStack = makeLaunchAtLoginStack()
     private lazy var connectionPathLabel = makeConnectionDetailLabel()
     private lazy var connectionVersionLabel = makeConnectionDetailLabel()
     private lazy var connectionStatusLabel = makeConnectionDetailLabel()
@@ -55,14 +89,22 @@ public final class SettingsFormViewController: NSViewController {
     public init(
         formState: SettingsFormState,
         connectionDiagnostics: ConnectionDiagnosticsSnapshot = .checking,
+        launchAtLoginState: LaunchAtLoginSettingsState = LaunchAtLoginSettingsState(
+            status: .disabled
+        ),
         onSelectCodex: @escaping () -> Void = {},
         onCopyDiagnostics: @escaping () -> Void = {},
+        onOpenLaunchAtLoginSystemSettings: @escaping () -> Void = {},
+        onLaunchAtLoginIntentRequested: @escaping (Bool) -> Void = { _ in },
         onFormValuesChanged: @escaping (SettingsFormValues) -> Void
     ) {
         self.formState = formState
         self.connectionDiagnostics = connectionDiagnostics
+        self.launchAtLoginState = launchAtLoginState
         self.onSelectCodex = onSelectCodex
         self.onCopyDiagnostics = onCopyDiagnostics
+        self.onOpenLaunchAtLoginSystemSettings = onOpenLaunchAtLoginSystemSettings
+        self.onLaunchAtLoginIntentRequested = onLaunchAtLoginIntentRequested
         self.onFormValuesChanged = onFormValuesChanged
         super.init(nibName: nil, bundle: nil)
     }
@@ -73,7 +115,7 @@ public final class SettingsFormViewController: NSViewController {
     }
 
     public override func loadView() {
-        let rootView = NSView(frame: NSRect(x: 0, y: 0, width: 440, height: 680))
+        let rootView = NSView(frame: NSRect(x: 0, y: 0, width: 440, height: 720))
         let contentStack = makeContentStack()
         rootView.addSubview(contentStack)
         NSLayoutConstraint.activate([
@@ -92,6 +134,7 @@ public final class SettingsFormViewController: NSViewController {
             render()
         }
         onFormValuesChanged(formState.formValues)
+        forwardLaunchAtLoginRequest(event)
     }
 
     public func applyConnectionDiagnostics(
@@ -102,6 +145,16 @@ public final class SettingsFormViewController: NSViewController {
             return
         }
         renderConnectionDiagnostics()
+    }
+
+    public func applyLaunchAtLoginState(
+        _ state: LaunchAtLoginSettingsState
+    ) {
+        launchAtLoginState = state
+        guard isViewLoaded else {
+            return
+        }
+        renderLaunchAtLogin()
     }
 
     public func updateDiscoveredQuotaIDs(_ identifiers: Set<QuotaSelectionID>) {
@@ -124,6 +177,24 @@ public final class SettingsFormViewController: NSViewController {
         }
     }
 
+    public func performLaunchAtLoginRecoveryAction() {
+        guard launchAtLoginState.showsSystemSettingsRecovery else {
+            return
+        }
+        onOpenLaunchAtLoginSystemSettings()
+    }
+
+    public func performLaunchAtLoginToggleClick() {
+        launchAtLoginButton.performClick(nil)
+    }
+
+    private func forwardLaunchAtLoginRequest(_ event: SettingsFormEvent) {
+        guard case .launchAtLoginIntentChanged(let enabled) = event else {
+            return
+        }
+        onLaunchAtLoginIntentRequested(enabled)
+    }
+
     private func makeContentStack() -> NSStackView {
         let stack = NSStackView(views: [
             makeSectionTitle(SettingsStrings.displaySection),
@@ -133,7 +204,7 @@ public final class SettingsFormViewController: NSViewController {
             makeQuotaScrollView(),
             makeSectionTitle(SettingsStrings.refreshSection),
             refreshControl,
-            launchAtLoginButton,
+            launchAtLoginStack,
             makeSectionTitle(SettingsStrings.connectionSection),
             connectionPathLabel,
             connectionVersionLabel,
@@ -148,7 +219,7 @@ public final class SettingsFormViewController: NSViewController {
         productControl.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         selectionControl.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         refreshControl.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
-        launchAtLoginButton.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        launchAtLoginStack.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         projectNoticeLabel.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         return stack
     }
@@ -219,11 +290,33 @@ public final class SettingsFormViewController: NSViewController {
     }
 
     private func makeLaunchAtLoginButton() -> NSButton {
-        NSButton(
+        let button = NSButton(
             checkboxWithTitle: SettingsStrings.launchAtLogin,
             target: self,
             action: #selector(launchAtLoginChanged(_:))
         )
+        button.allowsMixedState = true
+        return button
+    }
+
+    private func makeLaunchAtLoginStack() -> NSStackView {
+        let stack = NSStackView(views: [
+            launchAtLoginButton,
+            launchAtLoginDetailLabel,
+            launchAtLoginRecoveryButton
+        ])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 4
+        return stack
+    }
+
+    private func makeLaunchAtLoginDetailLabel() -> NSTextField {
+        let label = NSTextField(wrappingLabelWithString: "")
+        label.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        label.textColor = .secondaryLabelColor
+        label.maximumNumberOfLines = 2
+        return label
     }
 
     private func makeConnectionDetailLabel() -> NSTextField {
@@ -268,9 +361,30 @@ public final class SettingsFormViewController: NSViewController {
         refreshControl.selectItem(
             at: refreshProfiles.firstIndex(of: formState.refreshProfile) ?? 0
         )
-        launchAtLoginButton.state = formState.launchAtLoginIntent ? .on : .off
+        renderLaunchAtLogin()
         renderQuotaRows(presenter.present(formState))
         renderConnectionDiagnostics()
+    }
+
+    private func renderLaunchAtLogin() {
+        launchAtLoginButton.state = launchAtLoginButtonState
+        launchAtLoginButton.isEnabled = launchAtLoginState.allowsChanges
+        launchAtLoginDetailLabel.stringValue = SettingsStrings.launchAtLoginDetail(
+            launchAtLoginState
+        )
+        launchAtLoginRecoveryButton.isHidden = !launchAtLoginState
+            .showsSystemSettingsRecovery
+    }
+
+    private var launchAtLoginButtonState: NSControl.StateValue {
+        switch launchAtLoginState.toggleValue {
+        case .off:
+            .off
+        case .on:
+            .on
+        case .mixed:
+            .mixed
+        }
     }
 
     private func renderConnectionDiagnostics() {
@@ -361,7 +475,17 @@ public final class SettingsFormViewController: NSViewController {
     }
 
     @objc private func launchAtLoginChanged(_ sender: NSButton) {
-        apply(.launchAtLoginIntentChanged(sender.state == .on))
+        _ = sender
+        apply(.launchAtLoginIntentChanged(requestedLaunchAtLoginValue))
+    }
+
+    private var requestedLaunchAtLoginValue: Bool {
+        launchAtLoginState.toggleValue == .off
+    }
+
+    @objc private func openLaunchAtLoginSystemSettings(_ sender: NSButton) {
+        _ = sender
+        performLaunchAtLoginRecoveryAction()
     }
 
     @objc private func selectCodex(_ sender: NSButton) {
@@ -386,6 +510,9 @@ enum SettingsStrings {
     static let quotaSection = localized("settings.section.quotas")
     static let refreshSection = localized("settings.section.refresh")
     static let launchAtLogin = localized("settings.launch-at-login")
+    static let openLaunchAtLoginSystemSettings = localized(
+        "settings.launch-at-login.open-system-settings"
+    )
     static let noQuotas = localized("settings.quota.empty")
     static let productAccessibilityLabel = localized("settings.product.accessibility")
     static let selectionAccessibilityLabel = localized("settings.selection.accessibility")
@@ -464,6 +591,28 @@ enum SettingsStrings {
         localized("settings.refresh.\(profile.rawValue)")
     }
 
+    static func launchAtLoginDetail(
+        _ state: LaunchAtLoginSettingsState
+    ) -> String {
+        if let failure = state.failure {
+            return launchAtLoginFailure(failure)
+        }
+        return localized("settings.launch-at-login.status.\(state.status.localizationKey)")
+    }
+
+    private static func launchAtLoginFailure(
+        _ failure: LaunchAtLoginError
+    ) -> String {
+        switch failure {
+        case .serviceUnavailable:
+            localized("settings.launch-at-login.status.unavailable")
+        case .registrationFailed:
+            localized("settings.launch-at-login.failure.registration")
+        case .unregistrationFailed:
+            localized("settings.launch-at-login.failure.unregistration")
+        }
+    }
+
     static func quotaTitle(_ option: SettingsQuotaOption) -> String {
         let base = String(
             format: localized("settings.quota.format"),
@@ -497,5 +646,20 @@ enum SettingsStrings {
 
     private static func localized(_ key: String) -> String {
         NSLocalizedString(key, bundle: .module, comment: "")
+    }
+}
+
+private extension LaunchAtLoginStatus {
+    var localizationKey: String {
+        switch self {
+        case .disabled:
+            "disabled"
+        case .enabled:
+            "enabled"
+        case .requiresApproval:
+            "requires-approval"
+        case .unavailable:
+            "unavailable"
+        }
     }
 }

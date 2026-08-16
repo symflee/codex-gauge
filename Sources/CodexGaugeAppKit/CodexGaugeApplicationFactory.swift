@@ -6,6 +6,7 @@ import Foundation
 @MainActor
 public protocol CodexGaugeApplicationRunning: AnyObject {
     func start()
+    func refreshLaunchAtLoginStatus()
     func shutdown() async
 }
 
@@ -190,6 +191,7 @@ public enum CodexGaugeApplicationFactory {
             discoveredQuotaProvider: { eventRelay.discoveredQuotaIDs },
             connectionDiagnosticsProvider: diagnosticsProvider,
             connectionStatusProvider: { eventRelay.connectionStatus },
+            launchAtLoginStateProvider: { eventRelay.launchAtLoginState },
             executableSelector: executableSelector,
             clipboardWriter: SystemDiagnosticClipboardWriter(),
             onSettingsFormValuesChanged: { values in
@@ -197,6 +199,12 @@ public enum CodexGaugeApplicationFactory {
             },
             onExecutableSelectionChanged: { url in
                 eventRelay.selectedExecutableDidChange(url)
+            },
+            onOpenLaunchAtLoginSystemSettings: {
+                eventRelay.openLaunchAtLoginApprovalSettings()
+            },
+            onLaunchAtLoginIntentRequested: { enabled in
+                eventRelay.launchAtLoginIntentDidChange(enabled)
             }
         )
         return SettingsWindowRuntimeAdapter(coordinator: coordinator)
@@ -215,6 +223,12 @@ private final class CodexGaugeApplicationEventRelay {
         coordinator?.connectionStatus ?? .checking
     }
 
+    var launchAtLoginState: LaunchAtLoginSettingsState {
+        coordinator?.currentLaunchAtLoginState ?? LaunchAtLoginSettingsState(
+            status: .disabled
+        )
+    }
+
     func perform(_ action: QuotaMenuAction) {
         coordinator?.performMenuAction(action)
     }
@@ -225,5 +239,13 @@ private final class CodexGaugeApplicationEventRelay {
 
     func selectedExecutableDidChange(_ url: URL) {
         coordinator?.selectedExecutableDidChange(url)
+    }
+
+    func openLaunchAtLoginApprovalSettings() {
+        coordinator?.openLaunchAtLoginApprovalSettings()
+    }
+
+    func launchAtLoginIntentDidChange(_ enabled: Bool) {
+        coordinator?.launchAtLoginIntentDidChange(enabled)
     }
 }

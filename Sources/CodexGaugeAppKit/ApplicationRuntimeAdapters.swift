@@ -59,6 +59,7 @@ public protocol ApplicationSettingsRuntime: AnyObject {
     func requestExecutableSelection()
     func updateDiscoveredQuotaIDs(_ identifiers: Set<QuotaSelectionID>)
     func updateConnectionStatus(_ status: CodexConnectionStatus)
+    func updateLaunchAtLoginState(_ state: LaunchAtLoginSettingsState)
     func shutdown() async
 }
 
@@ -87,6 +88,10 @@ public final class SettingsWindowRuntimeAdapter: ApplicationSettingsRuntime {
 
     public func updateConnectionStatus(_ status: CodexConnectionStatus) {
         coordinator.updateConnectionStatus(status)
+    }
+
+    public func updateLaunchAtLoginState(_ state: LaunchAtLoginSettingsState) {
+        coordinator.updateLaunchAtLoginState(state)
     }
 
     public func shutdown() async {
@@ -169,7 +174,14 @@ public final class ApplicationUsageDeadlineEmitter {
 
 @MainActor
 public protocol ApplicationLaunchAtLoginControlling: AnyObject {
-    func setEnabled(_ enabled: Bool) async throws -> LaunchAtLoginStatus
+    var currentStatus: LaunchAtLoginStatus { get }
+
+    func setEnabled(
+        _ enabled: Bool
+    ) async throws(LaunchAtLoginError) -> LaunchAtLoginStatus
+
+    @discardableResult
+    func openApprovalSettingsIfNeeded() -> Bool
 }
 
 extension LaunchAtLoginController: ApplicationLaunchAtLoginControlling {}
