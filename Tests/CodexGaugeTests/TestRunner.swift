@@ -23,6 +23,7 @@ struct TestRunner {
             + refreshTests()
             + appPreferencesTests()
             + statusItemRenderingTests()
+            + launchAtLoginTests()
     }
 
     private static func run(_ tests: [TestCase]) async -> Int32 {
