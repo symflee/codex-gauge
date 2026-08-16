@@ -75,7 +75,7 @@ Java 전용 코딩 규칙은 이 Swift 프로젝트에 적용하지 않는다. J
 
 ### 단위 테스트
 
-SwiftPM의 `CodexGaugeStandardTests` test target은 Swift Testing의 `@Test`로 remaining 경계, duration·자동 선택, tolerant protocol·legacy fallback과 preference 정규화의 대표 계약을 `swift test`에서 검증한다. 저장소의 `codex-gauge-tests` executable은 Apple 테스트 framework가 포함되지 않은 Command Line Tools에서도 실행되는 작은 zero-dependency exhaustive runner이며 아래 전체 회귀 범위를 계속 담당한다. Xcode wrapper의 unit target은 XCTest smoke와 Swift Testing의 exact fixture argument 계약을 함께 실행한다. 프레임워크 차이 때문에 TDD를 미루지 않는다.
+SwiftPM의 `CodexGaugeStandardTests` test target은 Swift Testing의 `@Test`로 remaining 경계, duration·자동 선택, tolerant protocol·legacy fallback, refresh profile·reducer와 versioned preference migration의 대표 계약을 `swift test`에서 검증한다. 저장소의 `codex-gauge-tests` executable은 Apple 테스트 framework가 포함되지 않은 Command Line Tools에서도 실행되는 작은 zero-dependency exhaustive runner이며 아래 전체 회귀 범위를 계속 담당한다. Xcode wrapper의 unit target은 XCTest smoke와 Swift Testing의 exact fixture argument 계약을 함께 실행한다. 프레임워크 차이 때문에 TDD를 미루지 않는다.
 
 - remaining percent의 0...100 경계, 100 미만 소수 사용률의 최소 1%와 100 이상에서만 0% 처리
 - duration badge와 unknown duration
