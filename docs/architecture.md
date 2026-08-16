@@ -44,7 +44,7 @@ SwiftPM은 Core, Protocol, Refresh, Settings와 AppKit 모듈의 단일 source o
 
 `CodexGaugeApplicationCoordinator`는 앱 수명 동안 하나만 존재하는 `@MainActor` composition root다. 동일한 `SystemStatusItemPresenter`를 사용하는 status controller와 menu controller, lazy settings coordinator, system·assistive monitor, wall-clock deadline scheduler, 로그인 실행 adapter와 현재 refresh coordinator를 소유한다. `CodexGaugeApplicationDelegate`는 이 root를 생성·보유하고 한 번만 시작한다.
 
-시작 순서는 상태 항목의 loading frame과 cached menu 표시, deadline scheduler·monitor 연결, preferences load, provider 구성, refresh 시작 순이다. 따라서 `UserDefaults` actor hop 전에 상태 항목이 먼저 보인다. 저장된 로그인 실행 의도는 refresh 시작 뒤 `SMAppService` 상태와 한 번 reconcile하고, 최초 실행 후속 동작은 이 시점의 startup hook에서만 이어진다.
+시작 순서는 상태 항목의 loading frame과 cached menu 표시, deadline scheduler·monitor 연결, preferences load, provider 구성, refresh 시작 순이다. 따라서 `UserDefaults` actor hop 전에 상태 항목이 먼저 보인다. 저장된 로그인 실행 의도는 refresh 시작 뒤 `SMAppService` 상태와 한 번 reconcile한다. 최초 실행 판단은 refresh coordinator에 `start()`를 전달한 뒤의 startup hook에서만 이어진다.
 
 하나의 `RefreshPublication` callback은 같은 main-actor transaction에서 상태 frame, menu model, discovered quota ID, 연결 상태와 deadline 후보를 모두 갱신한다. application-open capability는 root 생성 때 한 번 읽어 캐시하며, display 변경과 validity deadline은 메모리 publication을 다시 투영할 뿐 provider 또는 workspace I/O를 만들지 않는다. profile, 수동 조회, quota reset, power와 system resume 명령은 직렬 operation chain을 통해 현재 refresh generation에만 전달된다.
 
@@ -258,7 +258,11 @@ macOS 호출이 실패해도 호출 직후 시스템 상태가 이미 요청 결
 
 ### 최초 실행
 
-상태 항목과 초기 조회를 먼저 시작한 뒤 `hasCompletedFirstLaunch`가 false이면 설정 창을 연다. 창 표시가 성공한 뒤 `markFirstLaunchCompleted()`로 플래그를 기록한다. 이 actor 연산은 저장 시점의 표시·refresh·로그인·선택 executable 값을 모두 보존하고 최초 실행 값만 true로 바꾸며, 이미 완료된 경우에는 다시 쓰지 않는다. UI 테스트 launch argument는 테스트 전용 defaults domain을 사용한다. 현재 composition root는 refresh 시작 뒤의 주입 가능한 startup hook까지만 제공하며, 자동 창 표시·완료 기록과 종료 시 비동기 drain을 AppDelegate 수명에 맞추는 작업은 별도 후속 task다.
+production factory는 `FirstLaunchSettingsCoordinator`를 refresh 시작 뒤의 startup hook에 연결한다. coordinator는 process 수명 동안 자동 표시를 한 번만 시도하며, repository의 최신 `hasCompletedFirstLaunch`가 false일 때만 기존 설정 창 runtime을 호출한다. 별도 onboarding controller는 만들지 않는다.
+
+`ApplicationSettingsRuntime.showSettings()`는 window controller 생성 여부가 아니라 실제 `NSWindow.isVisible` 결과를 돌려준다. shutdown 또는 caller cancellation과 경쟁해 `nil`이 되거나 창이 visible 상태가 아니면 완료로 기록하지 않는다. 표시가 성공한 뒤에만 repository actor의 `markFirstLaunchCompleted()`를 호출한다. 이 read-modify-write는 저장 시점의 표시·refresh·로그인·선택 executable 값을 모두 보존하고 최초 실행 값만 true로 바꾸며, 이미 완료된 경우에는 다시 쓰지 않는다.
+
+UI 테스트용 `--codex-gauge-ui-test-reset-first-launch` argument는 production defaults에서도 안전한 field-only seam이다. defaults domain을 지우지 않고 최초 실행 완료 여부만 false로 되돌리며, 표시 설정·refresh profile·로그인 실행 의도·선택 executable을 그대로 둔다. reset, form save, executable save와 완료 기록은 같은 repository actor에서 직렬화해 서로의 field를 잃지 않는다. 비슷한 이름의 argument는 인식하지 않는다.
 
 ## 7. 설정 저장
 

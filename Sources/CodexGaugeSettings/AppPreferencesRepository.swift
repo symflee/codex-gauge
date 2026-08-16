@@ -50,13 +50,27 @@ public actor AppPreferencesRepository {
         guard current.hasCompletedFirstLaunch == false else {
             return
         }
+        try save(current.replacingFirstLaunchCompletion(true))
+    }
+
+    public func resetFirstLaunchCompletionForUITesting() throws {
+        let current = load()
+        guard current.hasCompletedFirstLaunch else {
+            return
+        }
+        try save(current.replacingFirstLaunchCompletion(false))
+    }
+}
+
+private extension AppPreferences {
+    func replacingFirstLaunchCompletion(_ isCompleted: Bool) -> AppPreferences {
         let merged = AppPreferences(
-            displayPreference: current.displayPreference,
-            refreshProfile: current.refreshProfile,
-            launchAtLoginIntent: current.launchAtLoginIntent,
-            selectedExecutableURL: current.selectedExecutableURL,
-            hasCompletedFirstLaunch: true
+            displayPreference: displayPreference,
+            refreshProfile: refreshProfile,
+            launchAtLoginIntent: launchAtLoginIntent,
+            selectedExecutableURL: selectedExecutableURL,
+            hasCompletedFirstLaunch: isCompleted
         )
-        try save(merged)
+        return merged
     }
 }

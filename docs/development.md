@@ -125,7 +125,10 @@ Java 전용 코딩 규칙은 이 Swift 프로젝트에 적용하지 않는다. J
 - status-first 시작, publication 단일 투영과 저장된 로그인 실행 의도 reconcile
 - executable 변경 시 old-stop-before-new-start와 이전 generation publication 폐기
 - validity expiry의 presentation-only 처리와 중복 shutdown의 단일 drain
-- 최초 실행 상태
+- 상태 항목 표시와 refresh 시작 이후에만 이루어지는 최초 실행 판단
+- visible 설정 창의 한 번만 자동 표시와 실패·취소 시 완료 미기록
+- 완료된 다음 실행의 자동 표시 생략과 test-only launch argument의 field-only reset
+- reset·form·선택 executable·완료 저장이 겹쳐도 sibling preference를 보존하는 actor merge
 
 ### XCTest와 UI 테스트
 
@@ -139,6 +142,8 @@ Java 전용 코딩 규칙은 이 Swift 프로젝트에 적용하지 않는다. J
 - 설정 window/controller/view deallocation
 - 로그인 시 실행 adapter
 - Release CPU와 memory metric
+
+UI 테스트에서 최초 실행 화면을 재현할 때는 정확한 `--codex-gauge-ui-test-reset-first-launch` argument를 사용한다. 이 seam은 namespaced defaults domain을 삭제하지 않고 `hasCompletedFirstLaunch`만 false로 바꾸므로 표시·갱신·로그인·선택 executable 설정을 보존한다. 일반 production 실행과 smoke test에서는 이 argument를 전달하지 않는다.
 
 ### 로컬 smoke test
 

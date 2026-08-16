@@ -110,7 +110,7 @@ public final class CodexGaugeApplicationCoordinator {
             settingsRuntime.requestExecutableSelection()
         case .settings:
             enqueueOperation { coordinator in
-                await coordinator.settingsRuntime.showSettings()
+                _ = await coordinator.settingsRuntime.showSettings()
             }
         case .quit:
             terminator.terminate()

@@ -9,6 +9,7 @@ import Foundation
 func settingsWindowTests() -> [TestCase] {
     [
         settingsWindowStructureTest(),
+        settingsWindowRuntimeReportsVisibilityTest(),
         settingsWindowPersistsEditsTest(),
         settingsWindowRecreationReloadsPreferencesTest(),
         settingsWindowReleasesUIObjectsTest(),
@@ -30,6 +31,30 @@ func settingsWindowTests() -> [TestCase] {
         settingsWindowShutdownFinishesCommittedSelectionTest(),
         settingsDurationAccessibilityLocalizationTest()
     ]
+}
+
+private func settingsWindowRuntimeReportsVisibilityTest() -> TestCase {
+    TestCase(name: "settings runtime reports only a visible settings window") {
+        try await settingsWindowRuntimeReportsVisibilityScenario()
+    }
+}
+
+@MainActor
+private func settingsWindowRuntimeReportsVisibilityScenario() async throws {
+    _ = NSApplication.shared
+    let store = try SettingsUITestStore()
+    defer { store.cleanUp() }
+    let coordinator = SettingsWindowCoordinator(
+        repository: try store.repository(),
+        discoveredQuotaProvider: { [] }
+    )
+    let runtime = SettingsWindowRuntimeAdapter(coordinator: coordinator)
+
+    let visibleResult = await runtime.showSettings()
+    try expect(visibleResult, "Expected visible settings result")
+    await runtime.shutdown()
+    let terminalResult = await runtime.showSettings()
+    try expect(!terminalResult, "Expected terminal settings failure")
 }
 
 private func settingsWindowStructureTest() -> TestCase {
