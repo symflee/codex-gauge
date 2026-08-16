@@ -101,24 +101,38 @@ shell을 거치지 않고 실행 파일 URL을 `Process`에 직접 전달한다.
 
 ## 5. 갱신 상태 머신
 
-`RefreshCoordinator`는 timer, 수동 요청, reset 요청, 시스템 상태를 하나의 actor에서 직렬화한다.
+`RefreshCoordinator`는 timer, 수동 요청, reset 요청, 시스템 상태를 하나의 actor에서 직렬화한다. 정책 자체는 현재 시각이 포함된 event와 immutable state를 받아 command를 반환하는 순수 reducer다. reducer는 `Task`, timer, process 또는 system notification을 직접 소유하지 않으며 coordinator의 executor가 command를 실행한다.
+
+polling, burst와 backoff deadline은 wall clock 변경의 영향을 받지 않도록 `ContinuousClock.Instant`와 `Duration`으로 계산한다. 서버가 준 quota reset 시각은 `Date`로 유지해 reset cycle identity와 snapshot freshness 판단에만 사용한다. 두 시간 축을 서로 변환해 예약하지 않는다.
+
+- reducer state에는 최대 하나의 in-flight request와 하나의 예약만 존재한다.
+- request와 예약은 각각 단조 증가 generation을 사용한다. stop이나 재예약 뒤 도착한 이전 generation의 completion과 timer fire는 무시한다.
+- 겹친 trigger는 새 요청을 만들지 않고 현재 in-flight 요청으로 합친다. wake trigger가 합쳐지면 그 성공은 wake baseline으로 취급한다.
+- 명시적 stop은 현재 request와 예약을 취소하는 command를 내보내고 비교 baseline을 비운다.
 
 ### 평상시
 
 - 프리셋의 평상시 간격에 맞춰 session을 시작한다.
 - snapshot을 받은 뒤 증가가 없으면 session을 종료한다.
 - timer, 메뉴의 수동 갱신, wake와 reset 요청이 겹치면 하나의 in-flight 작업으로 합친다.
+- 시작 후 첫 성공과 wake 성공은 비교 baseline만 교체하고 burst 신호로 사용하지 않는다.
+- 동일한 프리셋으로의 변경은 아무 state나 command도 바꾸지 않는다.
+- 자동 프리셋 변경 시 in-flight 요청은 유지하고 완료 뒤 새 간격을 사용한다. 요청이 없으면 retry가 아닌 기존 예약을 취소하고 변경 시각부터 새 평상시 또는 burst 간격으로 예약한다.
+- 수동 프리셋 진입은 예약과 in-flight 요청을 취소하고 burst와 연속 실패 횟수를 지운다. baseline과 coordinator 실행 상태는 유지하며 취소 뒤 늦게 도착한 completion은 generation 검증으로 무시한다.
+- 수동에서 자동으로 바꾸면 baseline을 유지하고 즉시 요청 없이 변경 시각부터 평상시 예약을 만든다.
 
 ### burst
 
-- 같은 reset cycle의 선택 quota에서 정수 used percent 증가가 감지되면 현재 session을 유지한다.
+- 비교 표본은 제품, raw duration과 reset 시각을 identity로 하고 내림한 정수 used percent를 값으로 사용한다.
+- 같은 identity의 선택 quota가 하나라도 증가하면 현재 session을 유지한다.
+- 값이 같으면 deadline을 연장하지 않는다. 다른 quota의 증가가 함께 있지 않다면 감소, 선택 identity 변경과 reset cycle 변경은 baseline을 교체하고 burst를 끝낸다.
 - 프리셋의 burst 간격으로 최대 5분간 재조회한다.
 - 추가 증가 시 종료 deadline을 5분 연장한다.
 - deadline 도달 또는 연속 3회 실패 시 session을 종료한다.
 
 ### backoff
 
-일시 실패는 30초, 1분, 2분, 4분, 8분, 16분, 30분 순으로 지수 backoff한다. 성공하면 실패 횟수를 지우고 사용자가 선택한 프리셋으로 돌아간다. 로그아웃, 실행 파일 미발견과 protocol 비호환은 무한 재시도하지 않고 사용자 조치 상태로 전환한다.
+일시 실패는 30초, 1분, 2분, 4분, 8분, 16분, 30분 순으로 지수 backoff하고 이후 30분으로 제한한다. 성공하면 실패 횟수를 지우고 사용자가 선택한 프리셋으로 돌아간다. 수동 프리셋은 일시 실패에도 자동 재시도를 예약하지 않는다. 로그아웃, 실행 파일 미발견과 protocol 비호환은 무한 재시도하지 않고 사용자 조치 상태로 전환한다.
 
 ### 시스템 상태
 

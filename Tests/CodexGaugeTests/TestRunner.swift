@@ -16,6 +16,7 @@ struct TestRunner {
             + quotaDisplayTests()
             + protocolTests()
             + codexExecutableLocatorTests()
+            + refreshTests()
     }
 
     private static func run(_ tests: [TestCase]) async -> Int32 {
