@@ -4,6 +4,9 @@ import Foundation
 @main
 struct TestRunner {
     static func main() async {
+        guard SyntheticAppServer.runIfRequested() == false else {
+            return
+        }
         let failures = await run(allTests())
         guard failures == 0 else {
             exit(EXIT_FAILURE)
@@ -16,6 +19,7 @@ struct TestRunner {
             + quotaDisplayTests()
             + protocolTests()
             + codexExecutableLocatorTests()
+            + usageSessionTests()
             + refreshTests()
             + statusItemRenderingTests()
     }
