@@ -72,6 +72,7 @@ Codex와 Spark를 나타낸다. App Server의 문자열 ID는 protocol adapter�
 - primary 또는 secondary slot
 
 남은 퍼센트 계산과 duration label 정책은 이 값 위의 순수 도메인 함수가 담당한다.
+남은 값은 보수적으로 내림하되 `usedPercent < 100`인 유효 quota는 최소 `1%`를 유지하고, 100 이상일 때만 `0%`가 된다.
 
 ### `UsageSnapshot`
 
@@ -186,7 +187,7 @@ coordinator는 각각 하나의 timer task와 request task만 보유한다. poll
 
 일시 실패는 30초, 1분, 2분, 4분, 8분, 16분, 30분 순으로 지수 backoff하고 이후 30분으로 제한한다. 성공하면 실패 횟수를 지우고 사용자가 선택한 프리셋으로 돌아간다. 수동 프리셋은 일시 실패에도 자동 재시도를 예약하지 않는다. 로그아웃, 실행 파일 미발견과 protocol 비호환은 무한 재시도하지 않고 사용자 조치 상태로 전환한다.
 
-성공 publication은 제품마다 독립적으로 갱신한다. `available` 또는 유효 window가 있는 `partial` 제품은 fresh가 되고 해당 제품의 마지막 성공 시각만 갱신한다. 현재 응답에서 unavailable·malformed인 제품은 이전 성공값과 제품별 성공 시각이 있으면 stale로 유지한다. 유효 window가 하나도 없는 성공 응답은 quota 값의 전역 마지막 성공 시각을 갱신하지 않지만, 별도 `lastAcceptedRateLimitResponse`에 정상 protocol 교환 시각을 기록한다. 전체 조회 실패도 이전 값은 stale로 보존하며 UI에는 raw error가 아닌 `RefreshFailure`만 전달한다. spend-control을 포함한 typed product detail과 snapshot은 메모리에만 둔다.
+성공 publication은 제품마다 독립적으로 갱신한다. `available` 또는 유효 window가 있는 `partial` 제품은 fresh가 되고 해당 제품의 마지막 성공 시각만 갱신한다. 정상 `unavailable` 제품의 empty window는 이전 표시값을 지우고 unavailable로 전환하되 제품별 마지막 성공 시각은 진단을 위해 유지할 수 있다. malformed 제품의 empty window만 이전 성공값과 제품별 성공 시각이 있으면 stale로 유지하며, 이전 값이 없으면 unavailable로 표시한다. 유효 window가 하나도 없는 성공 응답은 quota 값의 전역 마지막 성공 시각을 갱신하지 않지만, 별도 `lastAcceptedRateLimitResponse`에 정상 protocol 교환 시각을 기록한다. 전체 조회 실패도 이전 값은 stale로 보존하며 UI에는 raw error가 아닌 `RefreshFailure`만 전달한다. spend-control을 포함한 typed product detail과 snapshot은 메모리에만 둔다.
 
 응답 object에 quota container가 없거나 비어 있는 경우는 정상적으로 연결된 empty quota로 받아들이고 설정 연결 상태를 `연결됨`으로 표시한다. `rateLimitsByLimitId` 또는 legacy `rateLimits` container 자체가 object가 아니면 `RateLimitResponseStatus.incompatible`로 분류한다. coordinator는 이를 terminal protocol failure로 바꿔 자동 재시도를 멈추며, 해당 응답을 정상 교환 시각이나 quota 성공 시각으로 기록하지 않는다. 개별 제품 bucket 또는 window의 malformed는 outer container 비호환으로 승격하지 않아 다른 제품의 부분 성공을 보존한다.
 

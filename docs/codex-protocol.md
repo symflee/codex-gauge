@@ -201,10 +201,12 @@ multi-limit map 자체가 object가 아니면 두 제품을 malformed로 분류�
 
 ```text
 boundedUsed = min(max(usedPercent, 0), 100)
-remaining = 100 - boundedUsed
+rawRemaining = 100 - boundedUsed
+remaining = boundedUsed >= 100 ? 0 : max(1, floor(rawRemaining))
 ```
 
 - 유효한 값이 100 이상일 때만 남은 값을 `0%`로 표시한다.
+- 100 미만의 소수 사용률은 보수적으로 내림하되 양수 남은 값은 최소 `1%`로 표시한다.
 - 음수와 100 초과 값은 UI 안전을 위해 경계 안으로 보정하고 비식별 진단 code를 남긴다.
 - field 누락은 `0`으로 기본화하지 않고 해당 window의 부분 실패로 처리한다.
 - `usedPercent`는 정수와 부동소수 JSON number를 모두 받는다.

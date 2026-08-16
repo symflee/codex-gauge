@@ -76,7 +76,7 @@ Java 전용 코딩 규칙은 이 Swift 프로젝트에 적용하지 않는다. J
 
 저장소의 `codex-gauge-tests` executable은 Apple 테스트 framework가 포함되지 않은 Command Line Tools에서도 실행되는 작은 zero-dependency runner다. 순수 도메인·protocol·refresh 테스트는 이 runner에서 항상 검증한다. Xcode wrapper의 unit·UI target은 XCTest를 사용하며, 프레임워크 차이 때문에 TDD를 미루지 않는다.
 
-- remaining percent의 0...100 경계
+- remaining percent의 0...100 경계, 100 미만 소수 사용률의 최소 1%와 100 이상에서만 0% 처리
 - duration badge와 unknown duration
 - 자동 선택 `5h → w → 최단 양수 → primary/secondary`
 - 직접 선택 유지, 누락과 정렬
@@ -105,7 +105,8 @@ Java 전용 코딩 규칙은 이 Swift 프로젝트에 적용하지 않는다. J
 - 중복 system resume의 단일 5초 wake-baseline과 Low Power timer clamp
 - system suspension·resume 대기 중 quota reset latch와 단일 reset-baseline child
 - quota-reset 단발 trigger의 coalescing과 baseline-only 처리
-- 제품별 partial 성공 publication, 제품별 성공 시각과 stale 값 보존
+- 제품별 partial window의 fresh publication과 제품별 성공 시각
+- 정상 empty quota의 unavailable 전환, malformed empty의 이전 값 stale 보존과 no-prior unavailable
 - 정상 empty quota의 accepted 응답 시각과 연결 상태, container 비호환의 terminal 처리
 - 합성 App Server를 사용한 smoke locator·provider·session 전체 흐름, shared stop 완료 대기와 categorical 출력
 - refresh publication의 상태바 frame·상세 메뉴·discovered quota 단일 투영과 오류 격리

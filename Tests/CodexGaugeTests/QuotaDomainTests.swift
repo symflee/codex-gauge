@@ -38,12 +38,16 @@ private func clampsUsedPercentTest() -> TestCase {
 }
 
 private func floorsRemainingPercentTest() -> TestCase {
-    TestCase(name: "quota floors displayed and comparison percentages") {
+    TestCase(name: "quota floors positive remaining and comparison percentages") {
         let quota = try makeWindow(usedPercent: 16.2)
         let sameComparisonBucket = try makeWindow(usedPercent: 16.9)
         let nextComparisonBucket = try makeWindow(usedPercent: 17)
+        let nearlyExhausted = try makeWindow(usedPercent: 99.9)
+        let exhausted = try makeWindow(usedPercent: 100)
 
         try expect(quota.remainingPercent == 83, "Expected conservative remaining value")
+        try expect(nearlyExhausted.remainingPercent == 1, "Expected positive usage remainder")
+        try expect(exhausted.remainingPercent == 0, "Expected zero only at exhaustion")
         try expect(quota.comparisonUsedPercent == 16, "Expected integer comparison value")
         try expect(
             quota.comparisonUsedPercent == sameComparisonBucket.comparisonUsedPercent,
