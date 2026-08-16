@@ -16,6 +16,8 @@ public actor RefreshCoordinator {
     private var timerTask: Task<Void, Never>?
     private var timerPurpose: RefreshTimerPurpose?
     private var nextSystemResumeGeneration: UInt64 = 0
+    private var isSuspendedForSystem = false
+    private var pendingSystemResumeReset = false
     private var requestTask: Task<Void, Never>?
     private var requestGeneration: UInt64?
     private var activeSession: RefreshSessionLease?
@@ -42,6 +44,8 @@ public actor RefreshCoordinator {
     }
 
     public func start() async {
+        isSuspendedForSystem = false
+        pendingSystemResumeReset = false
         invalidateSystemResume()
         let instant = await clock.now()
         await process(.start(at: instant))
@@ -58,6 +62,10 @@ public actor RefreshCoordinator {
     }
 
     public func refreshAfterQuotaReset() async {
+        guard !isSuspendedForSystem else {
+            pendingSystemResumeReset = true
+            return
+        }
         let instant = await clock.now()
         await process(.quotaReset(at: instant))
     }
@@ -81,13 +89,21 @@ public actor RefreshCoordinator {
     }
 
     public func suspend() async {
+        guard !isSuspendedForSystem else {
+            return
+        }
+        isSuspendedForSystem = true
+        pendingSystemResumeReset = false
         invalidateSystemResume()
         cancelAnyTimer()
         await process(.stop)
     }
 
     public func resumeAfterSystemWake() async {
-        guard state.isRunning == false else {
+        guard isSuspendedForSystem, state.isRunning == false else {
+            return
+        }
+        if case .systemResume = timerPurpose {
             return
         }
         nextSystemResumeGeneration += 1
@@ -103,6 +119,8 @@ public actor RefreshCoordinator {
     }
 
     public func stop() async {
+        isSuspendedForSystem = false
+        pendingSystemResumeReset = false
         invalidateSystemResume()
         cancelAnyTimer()
         await process(.stop)
@@ -360,7 +378,14 @@ public actor RefreshCoordinator {
         }
         timerTask = nil
         timerPurpose = nil
+        isSuspendedForSystem = false
+        let shouldApplyReset = pendingSystemResumeReset
+        pendingSystemResumeReset = false
         await process(.resumeAfterSystemWake(at: instant))
+        guard shouldApplyReset else {
+            return
+        }
+        await process(.quotaReset(at: instant))
     }
 
     private func invalidateSystemResume() {

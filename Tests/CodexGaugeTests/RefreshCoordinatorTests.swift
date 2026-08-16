@@ -15,6 +15,8 @@ func refreshCoordinatorTests() -> [TestCase] {
         concurrentTriggerCoalescingExecutionTest(),
         manualAndSuspendCleanupTest(),
         systemResumeDelayTest(),
+        resetDuringSystemResumeCoalescingTest(),
+        stoppedCoordinatorClearsPendingResumeResetTest(),
         quotaResetTriggerTest(),
         quotaResetUpgradesInFlightRequestTest(),
         lowPowerCoordinatorSchedulingTest(),
@@ -328,6 +330,65 @@ private func systemResumeDelayTest() -> TestCase {
         try await eventually { await coordinator.state.inFlightRequest == nil }
         let resumedState = await coordinator.state
         try expect(resumedState.burstDeadline == nil, "Expected wake not to start burst")
+        await coordinator.stop()
+    }
+}
+
+private func resetDuringSystemResumeCoalescingTest() -> TestCase {
+    TestCase(name: "quota reset during system resume becomes one delayed reset request") {
+        let gate = TestReadGate()
+        let clock = TestRefreshClock()
+        let provider = TestRefreshSessionProvider(plans: [
+            [.success(coordinatorResult(codexUsed: 90))],
+            [.gated(gate, coordinatorResult(codexUsed: 5))]
+        ])
+        let coordinator = makeCoordinator(clock: clock, provider: provider)
+
+        await coordinator.start()
+        try await expectMetrics(provider, starts: 1, reads: 1, stops: 1)
+        await coordinator.suspend()
+        await coordinator.refreshAfterQuotaReset()
+        await coordinator.resumeAfterSystemWake()
+        await clock.advance(by: .seconds(4))
+        await coordinator.refreshAfterQuotaReset()
+        await coordinator.resumeAfterSystemWake()
+        try await expectMetrics(provider, starts: 1, reads: 1, stops: 1)
+
+        await clock.advance(by: .seconds(1))
+        try await expectMetrics(provider, starts: 2, reads: 2, stops: 1)
+        let request = await coordinator.state.inFlightRequest
+        try expect(request?.reason == .quotaReset, "Expected reset to win at original deadline")
+
+        await gate.release()
+        try await expectMetrics(provider, starts: 2, reads: 2, stops: 2)
+        let resumedState = await coordinator.state
+        try expect(resumedState.burstDeadline == nil, "Expected reset baseline without burst")
+        await coordinator.stop()
+    }
+}
+
+private func stoppedCoordinatorClearsPendingResumeResetTest() -> TestCase {
+    TestCase(name: "explicit stop clears a pending system-resume reset") {
+        let gate = TestReadGate()
+        let clock = TestRefreshClock()
+        let provider = TestRefreshSessionProvider(plans: [
+            [.success(coordinatorResult(codexUsed: 90))],
+            [.gated(gate, coordinatorResult(codexUsed: 25))]
+        ])
+        let coordinator = makeCoordinator(clock: clock, provider: provider)
+
+        await coordinator.start()
+        try await expectMetrics(provider, starts: 1, reads: 1, stops: 1)
+        await coordinator.suspend()
+        await coordinator.refreshAfterQuotaReset()
+        await coordinator.stop()
+        await coordinator.start()
+        try await expectMetrics(provider, starts: 2, reads: 2, stops: 1)
+
+        let request = await coordinator.state.inFlightRequest
+        try expect(request?.reason == .startup, "Expected fresh startup rather than stale reset")
+        await gate.release()
+        try await expectMetrics(provider, starts: 2, reads: 2, stops: 2)
         await coordinator.stop()
     }
 }
