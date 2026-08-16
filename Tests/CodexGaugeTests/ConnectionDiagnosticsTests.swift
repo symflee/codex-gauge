@@ -276,7 +276,18 @@ private func connectionStatusResolverTest() -> TestCase {
             failure: nil,
             isRefreshing: false
         )
+        let acceptedEmpty = RefreshPublication(
+            products: RefreshPublication.initial.products,
+            lastSuccessfulRefresh: nil,
+            lastAcceptedRateLimitResponse: Date(timeIntervalSince1970: 1_900_000_100),
+            failure: nil,
+            isRefreshing: false
+        )
         try expect(resolver.resolve(connected) == .connected, "Expected connected")
+        try expect(
+            resolver.resolve(acceptedEmpty) == .connected,
+            "Expected an accepted empty response to be connected"
+        )
     }
 }
 

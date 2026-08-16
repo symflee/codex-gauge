@@ -52,23 +52,27 @@ public struct RefreshPublication: Equatable, Sendable {
             }
         ),
         lastSuccessfulRefresh: nil,
+        lastAcceptedRateLimitResponse: nil,
         failure: nil,
         isRefreshing: false
     )
 
     public let products: [UsageProduct: RefreshProductResult]
     public let lastSuccessfulRefresh: Date?
+    public let lastAcceptedRateLimitResponse: Date?
     public let failure: RefreshFailure?
     public let isRefreshing: Bool
 
     public init(
         products: [UsageProduct: RefreshProductResult],
         lastSuccessfulRefresh: Date?,
+        lastAcceptedRateLimitResponse: Date? = nil,
         failure: RefreshFailure?,
         isRefreshing: Bool
     ) {
         self.products = products
         self.lastSuccessfulRefresh = lastSuccessfulRefresh
+        self.lastAcceptedRateLimitResponse = lastAcceptedRateLimitResponse
         self.failure = failure
         self.isRefreshing = isRefreshing
     }
@@ -81,6 +85,7 @@ extension RefreshPublication {
         RefreshPublication(
             products: products,
             lastSuccessfulRefresh: lastSuccessfulRefresh,
+            lastAcceptedRateLimitResponse: lastAcceptedRateLimitResponse,
             failure: failure,
             isRefreshing: refreshing
         )
@@ -94,6 +99,7 @@ extension RefreshPublication {
         return RefreshPublication(
             products: updated,
             lastSuccessfulRefresh: successfulRefresh ? result.capturedAt : lastSuccessfulRefresh,
+            lastAcceptedRateLimitResponse: result.capturedAt,
             failure: nil,
             isRefreshing: false
         )
@@ -104,6 +110,7 @@ extension RefreshPublication {
         return RefreshPublication(
             products: staleProducts,
             lastSuccessfulRefresh: lastSuccessfulRefresh,
+            lastAcceptedRateLimitResponse: lastAcceptedRateLimitResponse,
             failure: failure,
             isRefreshing: false
         )

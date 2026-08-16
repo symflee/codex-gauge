@@ -19,6 +19,11 @@ public enum ProductRateLimitState: Equatable, Sendable {
     case malformed
 }
 
+public enum RateLimitResponseStatus: Equatable, Sendable {
+    case accepted
+    case incompatible
+}
+
 public struct SpendControlLimit: Equatable, Sendable {
     public let remainingPercent: Int?
     public let reached: Bool?
@@ -47,13 +52,16 @@ public struct ProductRateLimits: Equatable, Sendable {
 
 public struct RateLimitReadResult: Equatable, Sendable {
     public let capturedAt: Date
+    public let responseStatus: RateLimitResponseStatus
     public let rateLimitsByProduct: [UsageProduct: ProductRateLimits]
 
     public init(
         capturedAt: Date,
+        responseStatus: RateLimitResponseStatus = .accepted,
         rateLimitsByProduct: [UsageProduct: ProductRateLimits]
     ) {
         self.capturedAt = capturedAt
+        self.responseStatus = responseStatus
         self.rateLimitsByProduct = rateLimitsByProduct
     }
 
@@ -190,8 +198,27 @@ private struct RateLimitResultDecoder {
         let products = decodeProducts(object)
         return RateLimitReadResult(
             capturedAt: capturedAt,
+            responseStatus: responseStatus(object),
             rateLimitsByProduct: products
         )
+    }
+
+    private func responseStatus(
+        _ object: [String: JSONValue]
+    ) -> RateLimitResponseStatus {
+        if let status = containerStatus(object["rateLimitsByLimitId"]) {
+            return status
+        }
+        return containerStatus(object["rateLimits"]) ?? .accepted
+    }
+
+    private func containerStatus(
+        _ value: JSONValue?
+    ) -> RateLimitResponseStatus? {
+        guard let value, value != .null else {
+            return nil
+        }
+        return value.objectValue == nil ? .incompatible : .accepted
     }
 
     private func decodeProducts(

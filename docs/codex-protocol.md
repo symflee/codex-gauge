@@ -193,7 +193,7 @@ stdout 원문과 exit 설명은 value, UI, clipboard 또는 로그에 남기지 
 - `unavailable`: bucket 또는 모든 window가 없거나 `null`
 - `malformed`: bucket이 잘못되었거나 정상 window 없이 malformed window만 있음
 
-multi-limit map 자체가 object가 아니면 두 제품을 malformed로 분류하고 legacy 값으로 우회하지 않는다. 한 제품이나 window의 malformed payload가 다른 제품 또는 sibling window의 성공값을 폐기하게 하지 않는다.
+multi-limit map 자체가 object가 아니면 두 제품을 malformed로 분류하고 response status도 `incompatible`로 표시하며 legacy 값으로 우회하지 않는다. legacy `rateLimits`를 사용할 때도 해당 container 자체가 object가 아니면 같은 상태다. container가 없거나 빈 object인 응답은 정상적인 empty quota로 받아들인다. 한 제품이나 window의 malformed payload는 outer response를 비호환으로 승격하지 않고 다른 제품 또는 sibling window의 성공값을 보존한다.
 
 ## 6. quota 변환
 
@@ -227,6 +227,8 @@ Spend-control은 quota window와 별도로 최소 정보만 변환한다.
 | protocol 결과 | 앱 상태 |
 | --- | --- |
 | 정상 응답 | 제품별 snapshot 갱신 |
+| 정상 empty quota | 값 성공 시각은 유지하고 연결 성공 시각만 갱신 |
+| quota container가 object가 아님 | terminal incompatible protocol |
 | 한 제품만 malformed | 해당 제품만 stale/unavailable |
 | request timeout | transient timeout 및 backoff |
 | child EOF 또는 비정상 종료 | transient process failure |

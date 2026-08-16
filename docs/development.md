@@ -85,6 +85,7 @@ Java 전용 코딩 규칙은 이 Swift 프로젝트에 적용하지 않는다. J
 - system suspension·resume 대기 중 quota reset latch와 단일 reset-baseline child
 - quota-reset 단발 trigger의 coalescing과 baseline-only 처리
 - 제품별 partial 성공 publication, 제품별 성공 시각과 stale 값 보존
+- 정상 empty quota의 accepted 응답 시각과 연결 상태, container 비호환의 terminal 처리
 - refresh publication의 상태바 frame·상세 메뉴·discovered quota 단일 투영과 오류 격리
 - 제품별 quota reset과 각 cached value의 `capturedAt + 24시간` 중 가장 이른 wall-clock one-shot 예약
 - reset·validity typed reason, 지난 deadline 병합과 동일 deadline 중복 방지

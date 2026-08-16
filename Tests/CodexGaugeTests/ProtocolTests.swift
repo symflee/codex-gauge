@@ -37,6 +37,7 @@ private func responseInterpretationTests() -> [TestCase] {
         clampsSpendControlLimitTest(),
         isolatesMalformedSpendControlTest(),
         treatsMissingBucketsAsUnavailableTest(),
+        classifiesRateLimitEnvelopeTest(),
         toleratesUnknownRateLimitFieldsTest(),
         propagatesTypedRPCFailureTest(),
         protocolValuesAreSendableTest()
@@ -200,6 +201,7 @@ private func preservesIndependentProductFailuresTest() -> TestCase {
 
         try expect(result.rateLimits(for: .codex).state == .malformed, "Expected isolated Codex failure")
         try expect(result.rateLimits(for: .spark).state == .available, "Expected preserved Spark quota")
+        try expect(result.responseStatus == .accepted, "Expected an accepted outer envelope")
         try expect(result.snapshot.quotaWindows(for: .spark).count == 1, "Expected Spark in snapshot")
     }
 }
@@ -274,6 +276,28 @@ private func treatsMissingBucketsAsUnavailableTest() -> TestCase {
     }
 }
 
+private func classifiesRateLimitEnvelopeTest() -> TestCase {
+    TestCase(name: "rate-limit response distinguishes empty and incompatible envelopes") {
+        let empty = try interpretRateLimits(rateLimitResponse(result: "{}"))
+        let incompatible = try interpretRateLimits(rateLimitResponse(result: """
+        {"rateLimitsByLimitId":"malformed"}
+        """))
+        let incompatibleLegacy = try interpretRateLimits(rateLimitResponse(result: """
+        {"rateLimits":"malformed"}
+        """))
+
+        try expect(empty.responseStatus == .accepted, "Expected an accepted empty response")
+        try expect(
+            incompatible.responseStatus == .incompatible,
+            "Expected an incompatible multi-bucket envelope"
+        )
+        try expect(
+            incompatibleLegacy.responseStatus == .incompatible,
+            "Expected an incompatible legacy envelope"
+        )
+    }
+}
+
 private func toleratesUnknownRateLimitFieldsTest() -> TestCase {
     TestCase(name: "rate-limit decoder ignores unknown buckets and fields") {
         let json = rateLimitResponse(result: """
@@ -308,6 +332,7 @@ private func protocolValuesAreSendableTest() -> TestCase {
         requireProtocolSendable(response)
         requireProtocolSendable(result)
         requireProtocolSendable(AccountStatus.signedOut)
+        requireProtocolSendable(RateLimitResponseStatus.accepted)
         try expect(response == response, "Expected response value equality")
     }
 }

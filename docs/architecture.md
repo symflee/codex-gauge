@@ -180,7 +180,9 @@ coordinator는 각각 하나의 timer task와 request task만 보유한다. poll
 
 일시 실패는 30초, 1분, 2분, 4분, 8분, 16분, 30분 순으로 지수 backoff하고 이후 30분으로 제한한다. 성공하면 실패 횟수를 지우고 사용자가 선택한 프리셋으로 돌아간다. 수동 프리셋은 일시 실패에도 자동 재시도를 예약하지 않는다. 로그아웃, 실행 파일 미발견과 protocol 비호환은 무한 재시도하지 않고 사용자 조치 상태로 전환한다.
 
-성공 publication은 제품마다 독립적으로 갱신한다. `available` 또는 유효 window가 있는 `partial` 제품은 fresh가 되고 해당 제품의 마지막 성공 시각만 갱신한다. 현재 응답에서 unavailable·malformed인 제품은 이전 성공값과 제품별 성공 시각이 있으면 stale로 유지한다. 유효 window가 하나도 없는 성공 응답은 전역 마지막 성공 시각도 갱신하지 않는다. 전체 조회 실패도 이전 값은 stale로 보존하며 UI에는 raw error가 아닌 `RefreshFailure`만 전달한다. spend-control을 포함한 typed product detail과 snapshot은 메모리에만 둔다.
+성공 publication은 제품마다 독립적으로 갱신한다. `available` 또는 유효 window가 있는 `partial` 제품은 fresh가 되고 해당 제품의 마지막 성공 시각만 갱신한다. 현재 응답에서 unavailable·malformed인 제품은 이전 성공값과 제품별 성공 시각이 있으면 stale로 유지한다. 유효 window가 하나도 없는 성공 응답은 quota 값의 전역 마지막 성공 시각을 갱신하지 않지만, 별도 `lastAcceptedRateLimitResponse`에 정상 protocol 교환 시각을 기록한다. 전체 조회 실패도 이전 값은 stale로 보존하며 UI에는 raw error가 아닌 `RefreshFailure`만 전달한다. spend-control을 포함한 typed product detail과 snapshot은 메모리에만 둔다.
+
+응답 object에 quota container가 없거나 비어 있는 경우는 정상적으로 연결된 empty quota로 받아들이고 설정 연결 상태를 `연결됨`으로 표시한다. `rateLimitsByLimitId` 또는 legacy `rateLimits` container 자체가 object가 아니면 `RateLimitResponseStatus.incompatible`로 분류한다. coordinator는 이를 terminal protocol failure로 바꿔 자동 재시도를 멈추며, 해당 응답을 정상 교환 시각이나 quota 성공 시각으로 기록하지 않는다. 개별 제품 bucket 또는 window의 malformed는 outer container 비호환으로 승격하지 않아 다른 제품의 부분 성공을 보존한다.
 
 ### 시스템 상태
 
@@ -226,13 +228,13 @@ frame이 하나면 scheduler에 timer 생성이나 취소 command를 보내지 �
 
 `SettingsWindowCoordinator`는 창을 요청할 때만 약 440pt 폭의 독립 `NSWindowController`를 만들고 한 번에 하나만 보유한다. 변경된 `SettingsFormValues`는 actor repository에 순서대로 전달하며 repository가 저장 시점의 최신 executable URL과 최초 실행 field에 원자적으로 merge한다. 따라서 창이 열린 동안 다른 owner가 갱신한 숨은 field를 오래된 form state가 덮어쓰지 않는다. 창을 닫은 뒤 다시 열 때는 진행 중인 저장을 먼저 마치고 `UserDefaults`를 새로 읽는다. window close callback은 coordinator의 강한 참조와 AppKit content graph를 제거한다. 로그인 실행 UI는 intent만 저장하며 `SMAppService` 호출은 launch adapter 경계에 남긴다. quota snapshot이나 오류 원문은 저장하지 않는다.
 
-각 form event는 저장 queue와 별도로 주입된 `onSettingsFormValuesChanged` callback에도 전달한다. composition root는 이 seam을 현재 display preference, refresh profile과 로그인 실행 intent에 적용하며 설정 UI가 runtime controller를 직접 알지 않게 한다. 연결 상태 publication과 종료 drain은 `ApplicationSettingsRuntime` 경계에 분리되어 있으며, 현재 settings coordinator에 해당 public API가 합쳐질 때 adapter의 주입 hook만 교체한다.
+각 form event는 저장 queue와 별도로 주입된 `onSettingsFormValuesChanged` callback에도 전달한다. composition root는 이 seam을 현재 display preference, refresh profile과 로그인 실행 intent에 적용하며 설정 UI가 runtime controller를 직접 알지 않게 한다. 연결 상태 publication과 종료 drain은 `ApplicationSettingsRuntime` 경계에 분리되고 adapter가 settings coordinator의 I/O 없는 상태 갱신과 terminal shutdown API에 직접 연결한다.
 
 초기 quota 조회가 열린 설정 창보다 늦게 끝나면 composition root는 `updateDiscoveredQuotaIDs(_:)`로 발견 목록만 교체한다. 이 system update는 remembered selection과 form value를 보존하고 UI row만 다시 만들며 저장 queue와 runtime preference callback을 호출하지 않는다. 창이 없을 때는 아무 객체도 만들지 않고 다음 `showSettings()`가 provider의 최신 목록을 읽는다.
 
 연결 영역은 `ConnectionDiagnosticsInspector`가 만든 immutable `ConnectionDiagnosticsSnapshot`만 소비한다. Inspector actor는 locator가 검증한 URL을 내부에서만 사용해 `CodexCLIVersionProbe`를 실행하고, UI에는 자동·사용자 선택 출처, 일반화된 위치 category, 제한된 basename, CLI version token과 typed 상태만 넘긴다. coordinator는 composition이 전달한 최신 연결 상태와 revision을 별도로 보존해 열린 화면과 진단 복사 snapshot에 I/O 없이 즉시 반영한다. CLI probe completion은 revision이 바뀌었으면 path·version 결과만 취하고 연결 상태는 최신 값을 다시 합쳐, probe 시작 시점의 상태가 UI를 되돌리지 못하게 한다. 최초 snapshot도 같은 최신 상태로 구성해 창을 표시한 직후 화면과 복사 report가 일치한다.
 
-`ConnectionStatusResolver`는 메모리에 있는 `RefreshPublication`의 checking, 마지막 성공과 typed failure를 연결 상태로 바꾸므로 설정을 열기 위해 별도 App Server quota 조회를 만들지 않는다. 다만 server 연결 성공과 정상적인 빈 quota를 더 세밀하게 구분하려면 `RefreshPublication`의 public model 확장이 필요하므로 이 task에서는 추측하지 않고 후속 domain task로 남긴다.
+`ConnectionStatusResolver`는 메모리에 있는 `RefreshPublication`의 checking, quota 값 성공 시각, 정상 rate-limit 응답 시각과 typed failure를 연결 상태로 바꾸므로 설정을 열기 위해 별도 App Server quota 조회를 만들지 않는다. 정상 empty quota도 마지막 accepted 응답 시각으로 `연결됨`이 되지만 container 비호환과 typed failure가 이 상태보다 우선한다.
 
 `CodexCLIVersionProbe`는 shell 없이 검증된 executable을 `--version` 인자 하나로 실행하는 background actor다. stdin과 stderr는 `/dev/null`에 연결하고 stdout은 한 chunk씩 backpressure를 유지하며 최대 4 KiB까지만 받는다. production child environment는 부모의 `LANG`, `LC_ALL`, `LC_CTYPE` 중 존재하는 값만 새 dictionary에 복사하고 `PATH=/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/bin`을 항상 설정한다. 이 고정 순서는 system interpreter를 Homebrew·Intel Homebrew 위치보다 먼저 찾으면서 `#!/usr/bin/env …` wrapper도 지원한다. 부모의 `PATH`, `HOME`과 그 밖의 environment는 전달하지 않는다.
 

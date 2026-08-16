@@ -20,6 +20,7 @@ func refreshCoordinatorTests() -> [TestCase] {
         quotaResetTriggerTest(),
         quotaResetUpgradesInFlightRequestTest(),
         lowPowerCoordinatorSchedulingTest(),
+        incompatibleRateLimitResponseStopsPollingTest(),
         refreshPublicationPartialProductTest(),
         refreshCoordinatorValuesAreSendableTest()
     ]
@@ -541,12 +542,50 @@ private func refreshPublicationPartialProductTest() -> TestCase {
             "Expected empty response not to advance global success"
         )
         try expect(
+            emptyPublication.lastAcceptedRateLimitResponse == emptyDate,
+            "Expected empty response to record a successful protocol exchange"
+        )
+        try expect(
             emptyPublication.products[.codex]?.lastSuccessfulRefresh == partialDate,
             "Expected empty Codex response to retain its success time"
         )
         try expect(
             emptyPublication.products[.spark]?.lastSuccessfulRefresh == completeDate,
             "Expected empty Spark response to retain its success time"
+        )
+        await coordinator.stop()
+    }
+}
+
+private func incompatibleRateLimitResponseStopsPollingTest() -> TestCase {
+    TestCase(name: "incompatible rate-limit envelope stops automatic polling") {
+        let clock = TestRefreshClock()
+        let result = coordinatorResult(
+            codexWindows: [],
+            sparkState: .malformed,
+            sparkWindows: [],
+            responseStatus: .incompatible
+        )
+        let provider = TestRefreshSessionProvider(plans: [[.success(result)]])
+        let coordinator = makeCoordinator(clock: clock, provider: provider)
+
+        await coordinator.start()
+        try await expectMetrics(provider, starts: 1, reads: 1, stops: 1)
+        try await eventually { await coordinator.state.inFlightRequest == nil }
+
+        let publication = await coordinator.publication
+        let finalState = await coordinator.state
+        try expect(
+            publication.failure == .protocolIncompatible,
+            "Expected a typed protocol failure"
+        )
+        try expect(
+            finalState.scheduledRefresh == nil,
+            "Expected no automatic retry"
+        )
+        try expect(
+            publication.lastAcceptedRateLimitResponse == nil,
+            "Expected incompatible data not to count as accepted"
         )
         await coordinator.stop()
     }
@@ -647,11 +686,13 @@ private func coordinatorResult(
     codexWindows: [QuotaWindow],
     sparkState: ProductRateLimitState? = nil,
     sparkWindows: [QuotaWindow],
-    capturedAt: Date = Date(timeIntervalSince1970: 1_900_000_000)
+    capturedAt: Date = Date(timeIntervalSince1970: 1_900_000_000),
+    responseStatus: RateLimitResponseStatus = .accepted
 ) -> RateLimitReadResult {
     let inferredSparkState: ProductRateLimitState = sparkWindows.isEmpty ? .unavailable : .available
     return RateLimitReadResult(
         capturedAt: capturedAt,
+        responseStatus: responseStatus,
         rateLimitsByProduct: [
             .codex: ProductRateLimits(
                 state: codexWindows.isEmpty ? .unavailable : .available,

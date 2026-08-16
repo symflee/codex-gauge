@@ -197,6 +197,9 @@ public actor RefreshCoordinator {
             try Task.checkCancellation()
             let capturedAt = await clock.currentDate()
             let result = try await acquired.session.readRateLimits(capturedAt: capturedAt)
+            guard result.responseStatus == .accepted else {
+                throw RefreshResponseValidationError.incompatible
+            }
             try Task.checkCancellation()
             let instant = await clock.now()
             await requestSucceeded(request, result: result, at: instant)
@@ -463,6 +466,10 @@ private struct RefreshFailureClassification {
     let isTransient: Bool
 
     init(_ error: any Error) {
+        if error is RefreshResponseValidationError {
+            self.init(failure: .protocolIncompatible, isTransient: false)
+            return
+        }
         if let locationError = error as? CodexLocationError {
             self = Self.location(locationError)
             return
@@ -529,4 +536,8 @@ private struct RefreshFailureClassification {
         }
         return RefreshFailureClassification(failure: .server(code: code), isTransient: true)
     }
+}
+
+private enum RefreshResponseValidationError: Error {
+    case incompatible
 }
