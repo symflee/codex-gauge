@@ -24,15 +24,17 @@ CodexUsageProviding / UsageSession
       │ UsageSnapshot or typed failure
       ▼
 RefreshCoordinator
-      │ current UsageState
+      │ RefreshPublication
       ▼
-DisplayFrame builder
-      │ cached visual and accessibility content
+RefreshPresentationAdapter / DisplayFrameBuilder
+      │ frames, menu input, discovered quota IDs
       ▼
 StatusItemController / menu / settings
 ```
 
 UI adapter는 provider를 직접 호출하지 않는다. 모든 조회는 `RefreshCoordinator`를 통해 직렬화하고, UI는 이미 해석된 snapshot과 상태만 소비한다.
+
+`RefreshPresentationAdapter`는 coordinator가 발행한 immutable 제품별 결과를 하나의 시각에 맞춰 상태바 frame, 상세 메뉴 input과 설정용 discovered quota ID로 투영한다. 전역 실패는 두 제품에 같은 복구 사유를 적용하되 partial·malformed 같은 제품별 issue와 마지막 성공 시각은 서로 오염시키지 않는다. adapter는 AppKit, process, timer와 I/O를 알지 않으며 초기 loading 상태에서 임의의 오류나 quota를 만들지 않는다.
 
 SwiftPM은 Core, Protocol, Refresh, Settings와 AppKit 모듈의 단일 source of truth다. Xcode application target은 이 package의 `CodexGaugeAppKit` product와 `App/CodexGauge`의 bundle metadata만 소유한다. 같은 Swift 소스를 package와 Xcode target membership에 중복 등록하지 않는다.
 
