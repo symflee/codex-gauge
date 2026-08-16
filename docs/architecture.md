@@ -149,6 +149,8 @@ polling, burst와 backoff deadline은 wall clock 변경의 영향을 받지 않�
 - wake 조회에서 이전 값보다 증가했더라도 이를 burst 신호로 사용하지 않는다.
 - Low Power Mode에서는 평상시 10분, burst 60초보다 빠르게 실행하지 않는다.
 
+AppKit의 `SystemActivityMonitor`는 `NSWorkspace`의 sleep, wake와 user session 활성 상태 알림 및 `ProcessInfo`의 power-state 알림만 구독한다. 시작 시에도 현재 Low Power Mode를 한 번 전달하고 이후 알림의 payload를 신뢰하지 않고 현재 값을 다시 읽는다. 이 adapter는 지연 timer나 process를 소유하지 않고 typed `SystemActivityEvent`만 내보낸다. observer 등록은 idempotent하며 명시적 `stop()`에서 모두 해제한다. 5초 wake 지연, 중복 resume 병합과 session 종료는 `RefreshCoordinator`가 monotonic clock 위에서 담당한다.
+
 ## 6. AppKit 생명주기
 
 ### 상태 항목
