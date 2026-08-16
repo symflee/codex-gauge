@@ -236,7 +236,8 @@ public struct ConnectionStatusResolver: Sendable {
         if let failure = publication.failure {
             return status(for: failure)
         }
-        if publication.lastSuccessfulRefresh != nil {
+        if publication.lastSuccessfulRefresh != nil
+            || publication.lastAcceptedRateLimitResponse != nil {
             return .connected
         }
         return .checking
