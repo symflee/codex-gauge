@@ -57,12 +57,17 @@ final class CodexGaugeFirstLaunchUITests: XCTestCase {
 
     @MainActor
     private func assertSyntheticStatus(in application: XCUIApplication) {
-        let statusItem = application.statusItems[statusItemIdentifier]
+        let predicate = NSPredicate(
+            format: "identifier == %@ AND label == %@",
+            statusItemIdentifier,
+            statusAccessibilityLabel
+        )
+        let statusItem = application.statusItems.matching(predicate).firstMatch
         XCTAssertTrue(
             statusItem.waitForExistence(timeout: 10),
-            "Expected the synthetic Codex status accessibility label"
+            "Expected status item \(statusItemIdentifier) to publish "
+                + "accessibility label \(statusAccessibilityLabel) within 10 seconds"
         )
-        XCTAssertEqual(statusItem.label, statusAccessibilityLabel)
     }
 
     @MainActor
