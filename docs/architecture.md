@@ -126,6 +126,8 @@ shell을 거치지 않고 실행 파일 URL을 `Process`에 직접 전달한다.
 
 명시적 정상 종료 순서는 stdin close, stdout callback 해제, SIGTERM, 제한된 비동기 grace, 필요 시 SIGKILL, handle close다. `stop()`은 pending request를 `stopped`로 정확히 한 번 완료한다. timeout, cancellation, malformed output, 인증 실패처럼 session이 failed 상태가 된 경우에는 호출자가 `stop()`을 빠뜨려도 같은 bounded cleanup을 자동 실행한다. 성공한 재사용 session은 burst 소유자인 `RefreshCoordinator`가 반드시 `stop()`으로 닫는다.
 
+명시적 로컬 검증용 `AppServerSmokeRunner`는 같은 locator 검증 로직, `CodexUsageProvider`와 `UsageSession`을 조합한다. no-argument CLI는 selected URL과 bundle application adapter 없이 현재 home을 주입한 `CodexExecutableLocator`를 만들므로 알려진 macOS application·Homebrew·local CLI 후보만 검사한다. 앱의 `UserDefaults` 선택 경로나 `NSWorkspace` bundle 검색 결과를 읽지 않으며 사용자 지정 위치 지원을 추측하지 않는다. runner는 handshake와 한도 조회를 한 번 실행하고 성공, 실패와 runner Task cancellation 모든 경로에서 하나의 shared stop task를 거쳐 session의 bounded cleanup 완료를 기다린다. 이 Task cancellation 계약은 CLI process signal 처리 계약을 의미하지 않는다. CLI adapter에는 제품별 availability와 typed 실패 범주만 전달하며 `RateLimitReadResult`의 window, 퍼센트, reset, spend-control이나 하위 오류 설명을 문자열로 만들지 않는다. 이 executable은 애플리케이션 composition과 CI 시작 경로에 연결하지 않는다.
+
 ## 5. 갱신 상태 머신
 
 `RefreshCoordinator`는 timer, 수동 요청, reset 요청, 시스템 상태를 하나의 actor에서 직렬화한다. 정책 자체는 현재 시각이 포함된 event와 immutable state를 받아 command를 반환하는 순수 reducer다. reducer는 `Task`, timer, process 또는 system notification을 직접 소유하지 않으며 coordinator의 executor가 command를 실행한다.

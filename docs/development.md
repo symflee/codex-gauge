@@ -105,6 +105,7 @@ Java 전용 코딩 규칙은 이 Swift 프로젝트에 적용하지 않는다. J
 - quota-reset 단발 trigger의 coalescing과 baseline-only 처리
 - 제품별 partial 성공 publication, 제품별 성공 시각과 stale 값 보존
 - 정상 empty quota의 accepted 응답 시각과 연결 상태, container 비호환의 terminal 처리
+- 합성 App Server를 사용한 smoke locator·provider·session 전체 흐름, shared stop 완료 대기와 categorical 출력
 - refresh publication의 상태바 frame·상세 메뉴·discovered quota 단일 투영과 오류 격리
 - 제품별 quota reset과 각 cached value의 `capturedAt + 24시간` 중 가장 이른 wall-clock one-shot 예약
 - reset·validity typed reason, 지난 deadline 병합과 동일 deadline 중복 방지
@@ -172,9 +173,39 @@ UI 테스트에서 최초 실행 화면을 재현할 때는 정확한 `--codex-g
 
 상태 항목의 `83%`, 상세 메뉴와 최초 실행 설정 창을 함께 검증하는 XCUITest는 Debug 구성에서 정확한 `--codex-gauge-ui-test-fixture-83` argument만 전달한다. fixture는 실제 AppKit composition 위에 메모리 publication과 무동작 외부 경계를 주입하므로 Codex 설치·로그인·네트워크 또는 로그인 항목 권한이 없어도 결정적으로 실행된다. custom runner는 Debug exact argument 판정, Release의 강제 production 판정, 저장값의 비변경, 합성 frame, 외부 경계와 shutdown 계약을 검증한다. Release에서는 fixture 타입을 컴파일해 정적 안전성을 확인하지만 인자로 활성화할 수 없다. 이 인자는 production smoke test, 실제 App Server smoke test와 성능 측정에 사용하지 않는다.
 
-### 로컬 smoke test
+### 로컬 App Server smoke
 
-실제 App Server smoke test는 명시적인 opt-in 환경에서만 실행한다. 실패 메시지와 attachment에는 raw JSON, 이메일, token, 절대 사용자 경로 또는 실제 quota 값을 남기지 않는다.
+실제 Codex 설치와 로그인 상태를 사용하므로 개발자가 다음 명령을 직접 실행할 때만 동작한다.
+
+```sh
+swift run codex-gauge-smoke
+```
+
+인자는 지원하지 않는다. 알 수 없는 인자를 전달하면 child를 시작하지 않고 `codex-gauge-smoke: failed reason=invalid_arguments`를 출력한 뒤 종료 코드 64를 반환한다. 일반 `swift build`, `swift run codex-gauge-tests`, Xcode test와 CI workflow는 이 명령을 호출하지 않는다.
+
+성공 출력은 `codex-gauge-smoke: ok codex=<state> spark=<state>` 한 줄이다. 각 제품 state는 다음 네 범주뿐이다.
+
+| state | 의미 |
+| --- | --- |
+| `available` | 하나 이상의 정상 quota window가 있음 |
+| `partial` | 정상 window와 해석 불가 window가 함께 있음 |
+| `unavailable` | 현재 제공된 quota window가 없음 |
+| `malformed` | 제품 bucket을 안전하게 해석할 수 없음 |
+
+실패 출력은 `codex-gauge-smoke: failed reason=<typed_reason>` 한 줄이다.
+
+| reason | 종료 코드 | 범주 |
+| --- | ---: | --- |
+| `executable_not_found` | 2 | 실행 파일 탐색 |
+| `signed_out`, `unsupported_authentication` | 3 | 인증 상태 |
+| `unsupported_version`, `incompatible_protocol`, `protocol_failure` | 4 | protocol 호환성 |
+| `timeout`, `process_failure` | 5 | 일시적 transport·process 실패 |
+| `cancelled`, `internal_failure` | 6 | 취소 또는 내부 계약 위반 |
+| `invalid_arguments` | 64 | 지원하지 않는 CLI 인자 |
+
+`invalid_selection`은 주입 가능한 runner가 selected URL locator와 조합될 때 종료 코드 2로 분류하는 범주다. 현재 no-argument CLI는 앱 설정의 selected URL을 읽지 않으므로 직접 출력하지 않는다.
+
+runner는 locator 검증 로직, production provider와 session을 재사용해 handshake와 한도 조회를 한 번 수행한다. CLI locator에는 selected URL이나 `NSWorkspace` bundle adapter를 주입하지 않으며 알려진 macOS application·Homebrew·local CLI 후보만 검사한다. 성공, 실패와 runner Task cancellation 모두 동일한 shared stop task를 지나며 모든 caller가 child cleanup 완료를 기다린다. 이 Task cancellation 보장은 CLI process signal을 변환하는 기능과 별개다. 출력 formatter는 실제 퍼센트, reset 시각, 이메일, token, account identifier, raw JSONL, stderr, 절대 경로, spend-control과 하위 오류 설명을 입력으로 받지 않는다. 결과를 attachment나 fixture에 기록할 때도 위 categorical 한 줄만 사용한다.
 
 ## 5. 성능 검증
 

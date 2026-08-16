@@ -269,7 +269,27 @@ Decoder fixture에는 다음을 포함한다.
 
 모든 fixture는 가상 값만 사용한다.
 
-## 8. 금지 경계
+## 8. 명시적 로컬 smoke
+
+실제 설치와 인증 경계를 확인하는 smoke command는 사용자가 다음 명령을 직접 실행할 때만 동작한다.
+
+```sh
+swift run codex-gauge-smoke
+```
+
+명령은 인자를 받지 않는다. 알 수 없는 인자가 있으면 App Server를 시작하지 않고 `invalid_arguments`만 출력한다. 정상 실행은 locator의 기존 실행 파일 검증과 알려진 macOS application·Homebrew·local CLI 후보, production provider를 통해 `UsageSession`의 `initialize → initialized → account/read → account/rateLimits/read` 흐름을 한 번 수행한다. 앱 설정에 저장된 selected URL과 `NSWorkspace` bundle adapter는 읽지 않으므로 사용자 지정 위치만 사용하는 설치는 자동 탐색하지 않는다. 성공, 실패와 runner Task cancellation 모두 하나의 shared stop task를 거치며 모든 caller가 session의 500ms 종료 grace와 필요 시 SIGKILL까지 완료되기를 기다린다. 이 cancellation 계약은 CLI process signal을 Task cancellation으로 변환한다는 의미가 아니다.
+
+표준 출력은 다음 categorical 값만 허용한다.
+
+- 성공: `codex-gauge-smoke: ok codex=<state> spark=<state>`
+- 제품 state: `available`, `partial`, `unavailable`, `malformed`
+- 실패: `codex-gauge-smoke: failed reason=<typed_reason>`
+
+실제 quota window, 퍼센트, reset, spend-control, 이메일, token, account identifier, raw JSONL, stderr, 실행 파일 경로와 하위 오류 설명은 출력·파일·로그로 옮기지 않는다. 명령은 snapshot을 저장하지 않고 child 정리가 끝나면 종료한다. 합성 session을 주입한 단위 테스트만 일반 test suite에 포함하며 실제 smoke는 CI, 앱 시작 또는 자동 테스트에서 실행하지 않는다.
+
+결과 reason과 종료 코드의 전체 계약은 [개발 가이드](development.md#로컬-app-server-smoke)에 기록한다.
+
+## 9. 금지 경계
 
 - 인증 파일 직접 읽기
 - access token 추출 또는 갱신

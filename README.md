@@ -66,6 +66,14 @@ xcodebuild -project CodexGauge.xcodeproj \
 
 Debug 구성의 XCUITest에서 실제 메뉴 막대·메뉴·설정 창 composition을 검증할 때는 정확한 `--codex-gauge-ui-test-fixture-83` 실행 인자를 사용합니다. 이 opt-in 모드는 메모리에 합성 Codex 5시간 한도 `83%`를 게시하며 Codex 탐색·프로세스·인증·네트워크와 로그인 항목 변경을 수행하지 않습니다. Release 빌드는 같은 인자를 무시하고 항상 production 경계를 사용하며, 일반 실행에도 이 인자를 전달하지 않습니다.
 
+실제 설치와 로그인을 한 번 확인하려면 다음 명령을 직접 실행합니다.
+
+```sh
+swift run codex-gauge-smoke
+```
+
+이 명령은 알려진 macOS application·Homebrew·local CLI 후보에서 실행 파일을 찾아 App Server handshake와 한도 조회를 한 번 수행한 뒤 child를 종료합니다. 앱 설정에 저장된 사용자 선택 경로나 `NSWorkspace` 결과는 읽지 않으므로 사용자 지정 위치만 사용하는 설치는 이 명령의 자동 탐색 대상이 아닙니다. 출력에는 제품별 `available`, `partial`, `unavailable`, `malformed` 범주 또는 고정된 실패 reason만 포함되며 실제 퍼센트, reset 시각, 계정 정보, 원문 응답과 경로는 포함되지 않습니다. 자동 test suite와 CI에서는 실행하지 않습니다. 자세한 결과와 종료 코드는 [개발 가이드](docs/development.md#로컬-app-server-smoke)를 참고하세요.
+
 ## 개인정보와 보안
 
 - `~/.codex/auth.json` 같은 인증 파일을 직접 읽지 않습니다.

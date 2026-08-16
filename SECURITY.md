@@ -33,6 +33,8 @@ Codex Gauge는 다음 원칙을 지킵니다.
 - 설정에는 비밀이 아닌 preference만 저장
 - 진단 정보에서 사용자 경로와 계정 정보를 제거
 
+명시적 `swift run codex-gauge-smoke` 검증도 같은 실행 파일 검증과 App Server session 경계를 사용합니다. no-argument CLI는 앱 설정의 선택 경로나 `NSWorkspace` 결과를 읽지 않고 알려진 자동 후보만 검사합니다. handshake와 한도 조회를 한 번 수행하고 bounded cleanup 뒤 종료하며, 제품 availability와 typed 실패 범주만 출력합니다. 실제 퍼센트, reset 시각, 이메일, token, account identifier, raw JSONL, stderr, 절대 경로와 하위 오류 설명은 출력하지 않습니다. 이 명령은 앱 시작, test suite 또는 CI에서 자동으로 실행하지 않습니다.
+
 다음은 명시적으로 지원하지 않습니다.
 
 - private IPC 또는 내부 database 접근
