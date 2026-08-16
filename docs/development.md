@@ -64,6 +64,9 @@ Java 전용 코딩 규칙은 이 Swift 프로젝트에 적용하지 않는다. J
 - 단일 frame의 무-timer 동작과 여러 frame의 5초 순서
 - 메뉴 열림, 화면 잠금, sleep, VoiceOver, Reduce Motion 중 순환 중단·재개
 - 순환 tick의 사전 렌더 frame 사용과 무-I/O 경계
+- 제품별 모든 quota·절대 reset·마지막 성공·typed 오류 menu model
+- 메뉴 open/close의 rotation pause와 cached `NSMenu` 무-I/O 경계
+- `Codex 열기`·`Codex 선택…` 조건 및 주입 action dispatch
 - partial, malformed와 unknown-field protocol fixture
 - legacy Codex fallback과 Spark key
 - 네 refresh profile과 burst 진입·종료

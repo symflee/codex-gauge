@@ -24,6 +24,7 @@ struct TestRunner {
             + appPreferencesTests()
             + statusItemRenderingTests()
             + launchAtLoginTests()
+            + quotaDetailsMenuTests()
     }
 
     private static func run(_ tests: [TestCase]) async -> Int32 {

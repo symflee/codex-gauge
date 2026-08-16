@@ -10,7 +10,7 @@ public protocol StatusItemPresenting: AnyObject {
 }
 
 @MainActor
-public final class SystemStatusItemPresenter: StatusItemPresenting {
+public final class SystemStatusItemPresenter: StatusItemPresenting, StatusMenuPresenting {
     private let statusItem: NSStatusItem
 
     public init(statusItem: NSStatusItem) {
@@ -33,6 +33,10 @@ public final class SystemStatusItemPresenter: StatusItemPresenting {
     public func present(_ frame: RenderedStatusFrame) {
         statusItem.button?.attributedTitle = frame.attributedTitle
         statusItem.button?.setAccessibilityLabel(frame.accessibilityLabel)
+    }
+
+    public func setMenu(_ menu: NSMenu) {
+        statusItem.menu = menu
     }
 }
 

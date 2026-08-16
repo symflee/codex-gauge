@@ -161,6 +161,10 @@ controller는 각 현재 frame의 제품·기간·비교 구조를 보존하고 
 
 frame이 하나면 scheduler에 timer 생성이나 취소 command를 보내지 않는다. 메뉴 열림, 화면 잠금, sleep, VoiceOver, Reduce Motion은 set으로 중첩 관리한다. 하나라도 활성화되면 timer를 취소하며 모든 사유가 해제되면 frame 0을 즉시 표시하고 새 5초 주기를 시작한다. 중단 중 경과한 tick은 실행하지 않는다.
 
+상세 메뉴는 `QuotaDetailsMenuInput → QuotaDetailsMenuModel → StatusMenuController`로 분리한다. 순수 builder는 메모리의 제품별 `ProductUsageState`, typed issue와 마지막 성공 시각만 받아 Codex·Spark section, 모든 quota window, 절대 reset 시각과 action group을 만든다. stale, partial과 unavailable은 제품별로 독립 유지하며 값을 알 수 없는 상태를 `0%`로 만들지 않는다. date formatter와 localization value를 주입해 합성 시각으로 검증할 수 있다.
+
+`StatusMenuController`는 상태 갱신 시 완성된 immutable model로 `NSMenu`를 미리 구성하고 `SystemStatusItemPresenter`에 연결한다. menu open callback에서는 model 생성, 날짜 formatting 또는 snapshot 조회를 하지 않고 `.menuOpen` rotation pause만 설정하며 close에서 해제한다. action은 refresh, Codex 열기·선택, 설정과 종료 closure로 주입하므로 UI adapter가 provider, process 또는 설정 창을 직접 알지 않는다. 실제 coordinator와 settings action이 없는 개발 host에는 무동작 메뉴를 붙이지 않고 이후 composition task에서 controller를 보유·연결한다. Spend-control은 현재 `UsageSnapshot`에 보존되지 않으므로 protocol result를 UI에 누출해 표시하지 않고, 별도 cached domain state가 추가되는 task까지 보류한다.
+
 ### 설정 창
 
 앱 delegate는 설정 controller를 강하게 영구 보유하지 않는다. 설정을 열 때 controller를 만들고, window close callback에서 참조를 제거한다. 설정 값은 변경 시 `UserDefaults`에 저장한다. quota snapshot이나 오류 원문은 저장하지 않는다.
