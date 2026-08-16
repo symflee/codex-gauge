@@ -12,6 +12,8 @@ func appPreferencesTests() -> [TestCase] {
         appPreferencesFieldRecoveryTest(),
         appPreferencesVersionZeroMigrationTest(),
         appPreferencesEmptyManualSelectionTest(),
+        appPreferencesManualProductNormalizationTest(),
+        appPreferencesInconsistentPayloadNormalizationTest(),
         appPreferencesNonFileURLTest(),
         appPreferencesExecutableSelectionMergeTest(),
         appPreferencesFirstLaunchAtomicMergeTest(),
@@ -308,15 +310,10 @@ private func appPreferencesVersionZeroMigrationTest() -> TestCase {
             forKey: AppPreferencesRepository.storageKey
         )
         let recovered = await repository.load()
-        let survivingIdentifier = QuotaSelectionID(
-            product: .spark,
-            rawDurationMinutes: 300
-        )
-
         try expect(recovered.displayPreference.productMode == .codex, "Expected v0 mode fallback")
         try expect(
-            recovered.displayPreference.quotaSelection == .manual([survivingIdentifier]),
-            "Expected valid v0 manual sibling"
+            recovered.displayPreference.quotaSelection == .automatic,
+            "Expected off-product v0 sibling to recover automatically"
         )
         try expect(recovered.refreshProfile == .balanced, "Expected v0 refresh fallback")
         try expect(!recovered.launchAtLoginIntent, "Expected v0 boolean fallback")
@@ -377,6 +374,102 @@ private func appPreferencesEmptyManualSelectionTest() -> TestCase {
         try expect(
             missingDuration.displayPreference.quotaSelection == .automatic,
             "Expected omitted duration item rejection"
+        )
+    }
+}
+
+private func appPreferencesManualProductNormalizationTest() -> TestCase {
+    TestCase(name: "manual preferences keep identifiers for displayed products only") {
+        let codex = QuotaSelectionID(product: .codex, rawDurationMinutes: 300)
+        let spark = QuotaSelectionID(product: .spark, rawDurationMinutes: 10_080)
+        let matching = AppPreferences(
+            displayPreference: DisplayPreference(
+                productMode: .codex,
+                quotaSelection: .manual([codex, spark])
+            )
+        )
+        let disjoint = AppPreferences(
+            displayPreference: DisplayPreference(
+                productMode: .spark,
+                quotaSelection: .manual([codex])
+            )
+        )
+
+        try expect(
+            matching.displayPreference.quotaSelection == .manual([codex]),
+            "Expected off-product manual identifier removal"
+        )
+        try expect(
+            disjoint.displayPreference.quotaSelection == .automatic,
+            "Expected disjoint manual selection to recover automatically"
+        )
+
+        let store = try PreferencesTestStore()
+        defer { store.cleanUp() }
+        let repository = try store.repository()
+        try await repository.save(matching)
+        let loaded = await repository.load()
+
+        try expect(loaded == matching, "Expected normalized save and load")
+        let data = try storedPreferencesData(in: store.userDefaults)
+        let object = try preferencesJSONObject(from: data)
+        guard let display = object["display"] as? [String: Any],
+              let selection = display["selection"] as? [String: Any],
+              let items = selection["items"] as? [[String: Any]] else {
+            throw TestFailure(description: "Expected persisted manual selection")
+        }
+        try expect(items.count == 1, "Expected normalized persisted identifiers")
+        try expect(items[0]["product"] as? String == "codex", "Expected Codex item only")
+    }
+}
+
+private func appPreferencesInconsistentPayloadNormalizationTest() -> TestCase {
+    TestCase(name: "versioned payloads normalize selections against product mode") {
+        let store = try PreferencesTestStore()
+        defer { store.cleanUp() }
+        let repository = try store.repository()
+        let versionOnePayload: [String: Any] = [
+            "version": 1,
+            "display": [
+                "productMode": "spark",
+                "selection": [
+                    "mode": "manual",
+                    "items": [
+                        ["product": "codex", "rawDurationMinutes": 300],
+                        ["product": "spark", "rawDurationMinutes": 10_080]
+                    ]
+                ]
+            ]
+        ]
+        store.userDefaults.set(
+            try preferencesJSON(versionOnePayload),
+            forKey: AppPreferencesRepository.storageKey
+        )
+
+        let versionOne = await repository.load()
+        let spark = QuotaSelectionID(product: .spark, rawDurationMinutes: 10_080)
+        try expect(
+            versionOne.displayPreference.quotaSelection == .manual([spark]),
+            "Expected version one selection filtering"
+        )
+
+        let versionZeroPayload: [String: Any] = [
+            "version": 0,
+            "displayProductMode": "codex",
+            "displayQuotaSelection": "manual",
+            "manualQuotaSelections": [
+                ["product": "spark", "rawDurationMinutes": 300]
+            ]
+        ]
+        store.userDefaults.set(
+            try preferencesJSON(versionZeroPayload),
+            forKey: AppPreferencesRepository.storageKey
+        )
+
+        let versionZero = await repository.load()
+        try expect(
+            versionZero.displayPreference.quotaSelection == .automatic,
+            "Expected disjoint version zero selection recovery"
         )
     }
 }

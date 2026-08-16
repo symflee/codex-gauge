@@ -31,13 +31,20 @@ public struct AppPreferences: Equatable, Sendable {
         guard case .manual(let identifiers) = preference.quotaSelection else {
             return preference
         }
-        guard !identifiers.isEmpty else {
+        let displayedProducts = Set(preference.productMode.products)
+        let relevantIdentifiers = Set(identifiers.filter { identifier in
+            displayedProducts.contains(identifier.product)
+        })
+        guard !relevantIdentifiers.isEmpty else {
             return DisplayPreference(
                 productMode: preference.productMode,
                 quotaSelection: .automatic
             )
         }
-        return preference
+        return DisplayPreference(
+            productMode: preference.productMode,
+            quotaSelection: .manual(relevantIdentifiers)
+        )
     }
 
     private static func fileURL(_ url: URL?) -> URL? {
