@@ -3,6 +3,9 @@
 "menu.product.spark" = "Spark";
 "menu.quota.with_reset" = "[{duration}] · {remaining}% remaining · resets {reset}";
 "menu.quota.without_reset" = "[{duration}] · {remaining}% remaining · reset unavailable";
+"menu.spend_control.reached" = "Spend limit reached";
+"menu.spend_control.remaining" = "Spend limit · {remaining}% remaining";
+"menu.spend_control.not_reached_without_remaining" = "Spend limit not reached · remaining percentage unavailable";
 "menu.last_success" = "Last success: {date}";
 "menu.status.loading" = "Checking connection";
 "menu.status.unavailable" = "Usage unavailable";
