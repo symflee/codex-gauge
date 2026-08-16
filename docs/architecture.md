@@ -88,16 +88,23 @@ Finder로 실행한 앱은 사용자의 interactive shell `PATH`를 신뢰할 �
 
 ### `CodexUsageProviding`과 `UsageSession`
 
-Provider는 session 생성만 책임지고 session은 다음을 캡슐화한다.
+Provider는 `CodexLocating`이 검증한 URL로 session을 생성한다. `UsageSession`은 actor이며 `Process`, `Pipe`, `FileHandle`을 actor 밖으로 노출하지 않고 다음을 캡슐화한다.
 
 - `Process` 시작과 종료
 - stdin/stdout JSONL framing
 - request ID 생성과 응답 matching
 - `initialize` handshake
+- session 최초 조회의 `account/read` 인증 분류
 - `account/rateLimits/read`
 - timeout, EOF, malformed response와 unsupported method 분류
 
-shell을 거치지 않고 실행 파일 URL을 `Process`에 직접 전달한다. stdout line parser와 stderr drain은 main actor 밖에서 동작한다. 종료 순서는 stdin close, 제한된 graceful wait, 필요 시 child terminate이며 orphan process를 남기지 않는다.
+`start()`는 child를 `app-server` argument 하나로 실행하고 5초 안에 initialize matching response를 받은 뒤 `initialized` notification을 보낸다. 첫 `readRateLimits()`는 `account/read`를 `refreshToken: false`로 한 번 호출한다. 로그인된 ChatGPT 계정 또는 미래의 unknown provider로 분류되면 그 사실만 session 메모리에 기록하고, 같은 burst session의 후속 조회는 15초 제한의 `account/rateLimits/read`만 호출한다. 새 session은 account를 다시 검증한다. signed-out과 지원하지 않는 provider는 서로 다른 typed error다.
+
+한 번에 matching response waiter 하나만 허용하고 ID는 1부터 단조 증가한다. notification, server request와 다른 ID의 response는 소비하지 않고 무시한다. stdout callback은 한 chunk를 읽는 즉시 handler를 해제하고 actor가 framing과 decoding을 끝낸 뒤에만 다시 연결한다. 따라서 noisy child에도 무한 queue나 chunk 유실 없이 pipe backpressure가 적용된다. stderr는 원문을 읽거나 기록하지 않고 null device로 직접 버려 pipe deadlock을 만들지 않는다.
+
+shell을 거치지 않고 실행 파일 URL을 `Process`에 직접 전달한다. callback은 복사된 `Data` 또는 exit status만 actor로 보내며 Foundation process 객체를 concurrency 경계 밖으로 옮기거나 `@unchecked Sendable`로 감싸지 않는다. timeout과 종료 grace는 `ContinuousClock`을 사용하고 `waitUntilExit`처럼 cooperative executor를 막는 API는 사용하지 않는다.
+
+명시적 정상 종료 순서는 stdin close, stdout callback 해제, SIGTERM, 제한된 비동기 grace, 필요 시 SIGKILL, handle close다. `stop()`은 pending request를 `stopped`로 정확히 한 번 완료한다. timeout, cancellation, malformed output, 인증 실패처럼 session이 failed 상태가 된 경우에는 호출자가 `stop()`을 빠뜨려도 같은 bounded cleanup을 자동 실행한다. 성공한 재사용 session은 burst 소유자인 `RefreshCoordinator`가 반드시 `stop()`으로 닫는다.
 
 ## 5. 갱신 상태 머신
 

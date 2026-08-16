@@ -31,7 +31,7 @@ swift build -c release --explicit-target-dependency-import-check error
 
 향후 `.app` bundle을 위한 Xcode wrapper는 root package의 `CodexGaugeAppKit` product만 연결하는 얇은 target으로 추가한다. 같은 Swift source를 Xcode target membership에 중복 등록하지 않는다. wrapper와 shared `CodexGauge` scheme이 실제로 추가된 task에서만 `xcodebuild`, UI test, signing-disabled universal build를 CI gate로 활성화한다.
 
-package build와 단위 테스트는 실제 Codex 설치, 사용자 계정 또는 애플리케이션 네트워크 요청에 의존하지 않는다. protocol 테스트는 합성 JSONL fixture와 fake process transport를 사용한다.
+package build와 단위 테스트는 실제 Codex 설치, 사용자 계정 또는 애플리케이션 네트워크 요청에 의존하지 않는다. decoder 테스트는 합성 JSONL fixture를 사용한다. process session 통합 테스트는 `codex-gauge-tests` 실행 파일 자체를 test-only 합성 `app-server`로 다시 실행해 handshake, timeout, flood와 종료를 검증한다. 이 mode는 test environment key로만 동작하며 account 이메일이나 원문 사용자 응답을 생성·기록하지 않는다.
 
 ## 3. 구현 원칙
 

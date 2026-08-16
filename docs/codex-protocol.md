@@ -15,6 +15,8 @@ v0.1은 다음 흐름만 사용한다.
 3. `account/read` (`refreshToken: false`)
 4. `account/rateLimits/read`
 
+`account/read`는 session의 첫 quota 조회에서 한 번만 실행한다. `chatgpt` 계열 또는 미래의 unknown provider를 확인하면 비식별 boolean 상태만 session 메모리에 남기고, 같은 child를 재사용하는 후속 burst 조회에서는 `account/rateLimits/read`만 반복한다. child를 종료하고 새 session을 만들면 account를 다시 확인한다.
+
 `account/read`에서는 account provider type과 `requiresOpenaiAuth`만 즉시 비식별 상태로 분류한다. account의 이메일, plan 문자열과 그 밖의 개인 필드는 account 전용 model이나 앱 상태로 옮기지 않는다. API key와 Bedrock provider는 ChatGPT quota 미지원으로 분류하고, 미래의 알 수 없는 provider는 rate-limit 조회를 시도할 수 있는 unknown 상태로 보존한다.
 
 `account/rateLimits/updated` notification을 수신할 수는 있지만 외부 Codex 사용이 항상 기존 child에 전달된다고 가정하지 않는다. notification은 갱신 힌트로만 사용하고 polling 정책을 제거하지 않는다.
@@ -35,11 +37,16 @@ v0.1은 다음 흐름만 사용한다.
 - request와 response는 UTF-8 JSON 한 개를 한 줄에 기록한다.
 - request ID는 session 내에서 단조 증가하며 matching ID 응답만 소비한다.
 - stdout의 알 수 없는 notification과 field는 무시한다.
+- stdout은 한 chunk씩 actor가 처리한 뒤 다음 read를 허용해 무한 buffering 없이 pipe backpressure를 사용한다.
 - JSONL은 chunk 경계, 한 chunk의 여러 줄, CRLF, 빈 줄과 마지막 newline이 없는 EOF를 처리한다.
 - 한 JSON line은 UTF-8 byte 기준 1 MiB로 제한한다.
-- stderr는 deadlock 방지를 위해 drain하지만 원문을 사용자 로그에 기록하지 않는다.
+- stderr는 null device로 직접 버려 deadlock을 피하고 원문을 메모리 value나 사용자 로그로 옮기지 않는다.
 - EOF, timeout, JSON 파싱 실패와 method-not-found를 서로 다른 typed failure로 바꾼다.
 - JSON-RPC error에서는 정수 `code`만 보존하고 원문 `message`와 `data`는 앱의 value type으로 옮기지 않는다.
+
+initialize timeout은 5초, account와 rate-limit request timeout은 각각 15초다. request마다 waiter는 하나이고 timeout, task cancellation, EOF, 명시적 stop 중 먼저 확정된 사건만 continuation을 완료한다. 늦게 도착한 사건과 mismatched response는 이미 완료된 결과를 바꾸지 않는다.
+
+stdout callback은 read 가능한 chunk를 하나 가져온 직후 handler를 잠시 해제한다. actor가 해당 chunk의 1 MiB framing과 모든 line 분류를 끝내야 handler를 다시 연결하므로, server가 notification을 빠르게 보내도 앱 내부에 무제한 `AsyncStream` 또는 배열이 쌓이지 않는다. 이는 chunk를 drop하고 정상 응답을 계속하는 방식이 아니라 OS pipe의 bounded backpressure를 사용하는 방식이다.
 
 ### 실행 파일 탐색
 
@@ -143,6 +150,12 @@ App Server session을 열기 전에 `CodexLocating`에서 검증된 executable U
 
 `resetsAt` 예제는 미래의 가상 epoch다. 테스트에서는 wall clock을 주입하고 고정된 synthetic 시각만 사용한다.
 
+같은 session의 두 번째 한도 조회 request ID는 이어서 증가하지만 `account/read`를 반복하지 않는다.
+
+```json
+{"id":4,"method":"account/rateLimits/read","params":{}}
+```
+
 ## 5. 제품 매핑
 
 | App Server key | 도메인 제품 | 비고 |
@@ -202,6 +215,10 @@ Spend-control은 quota window와 별도로 최소 정보만 변환한다.
 | 인증되지 않은 account 상태 | logged out |
 | executable 없음 | Codex not found |
 
+Session adapter의 공개 오류는 lifecycle용 `notStarted`·`requestInProgress`·`requestIdentifierExhausted`, `launchFailed`, optional exit status만 가진 `processFailed`, `endOfFile`, operation별 `timeout`, `malformedResponse`, `responseTooLarge`, `unsupportedVersion`, `signedOut`, `unsupportedAuth`, code만 가진 `rpcFailure`, `stopped`, `cancelled`를 구분한다. 원문 stderr, JSON-RPC message/data, 이메일과 executable path는 오류 associated value에 넣지 않는다.
+
+정상 session은 소유자가 명시적으로 `stop()`한다. stop은 stdin을 닫고 제한된 grace 동안 비동기로 종료를 관찰한 뒤 필요하면 SIGKILL하며 blocking `waitUntilExit`를 사용하지 않는다. Failed session은 호출자가 stop을 누락해도 같은 bounded cleanup을 자동 실행한다.
+
 성공 snapshot이 있으면 transient 실패 동안 24시간 또는 reset 시각까지 `~`로 유지한다. 둘 중 먼저 도달한 시점 이후에는 `—`로 바꾼다. reset 시각이 지났다고 100%로 추측하지 않는다.
 
 Decoder fixture에는 다음을 포함한다.
@@ -219,6 +236,10 @@ Decoder fixture에는 다음을 포함한다.
 - 정상·malformed spend-control, remaining percent 내림과 clamp
 - split chunk, 여러 줄, CRLF, 빈 줄과 newline 없는 EOF
 - 정확히 1 MiB인 line과 상한 초과 line
+- 실제 합성 child의 handshake, account 1회 cache와 연속 rate-limit request ID
+- notification·server request·mismatched ID, timeout·cancellation·EOF·nonzero exit
+- stderr flood와 stdout notification flood의 deadlock·unbounded-buffer 방지
+- stop과 failed-path cleanup 뒤 orphan process 부재
 
 모든 fixture는 가상 값만 사용한다.
 
