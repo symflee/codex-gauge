@@ -34,7 +34,8 @@ public struct RefreshPresentationAdapter: Sendable {
         let menuInput = makeMenuInput(
             publication: publication,
             productStates: states,
-            canOpenCodexApplication: canOpenCodexApplication
+            canOpenCodexApplication: canOpenCodexApplication,
+            now: now
         )
         return RefreshPresentation(
             frames: frameBuilder.makeFrames(
@@ -58,7 +59,8 @@ public struct RefreshPresentationAdapter: Sendable {
     private func makeMenuInput(
         publication: RefreshPublication,
         productStates: [UsageProduct: ProductUsageState],
-        canOpenCodexApplication: Bool
+        canOpenCodexApplication: Bool,
+        now: Date
     ) -> QuotaDetailsMenuInput {
         QuotaDetailsMenuInput(
             productStates: productStates,
@@ -68,7 +70,8 @@ public struct RefreshPresentationAdapter: Sendable {
             codexAvailability: availability(
                 for: publication.failure,
                 canOpenCodexApplication: canOpenCodexApplication
-            )
+            ),
+            currentDate: now
         )
     }
 

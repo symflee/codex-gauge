@@ -1,9 +1,8 @@
 import Foundation
 
 public struct DisplayFrameBuilder: Sendable {
-    private static let maximumValueAge: TimeInterval = 86_400
-
     private let selector = QuotaSelector()
+    private let validityPolicy = QuotaValueValidityPolicy()
 
     public init() {}
 
@@ -207,7 +206,7 @@ public struct DisplayFrameBuilder: Sendable {
         freshness: ProductValueFreshness,
         now: Date
     ) -> DisplayValueState {
-        guard isValid(quota: quota, capturedAt: capturedAt, now: now) else {
+        guard validityPolicy.isValid(quota, capturedAt: capturedAt, now: now) else {
             return .unavailable
         }
         switch freshness {
@@ -216,14 +215,6 @@ public struct DisplayFrameBuilder: Sendable {
         case .stale:
             return .stale(quota.remainingPercent)
         }
-    }
-
-    private func isValid(quota: QuotaWindow, capturedAt: Date, now: Date) -> Bool {
-        if let resetsAt = quota.resetsAt, now >= resetsAt {
-            return false
-        }
-        let age = now.timeIntervalSince(capturedAt)
-        return age < Self.maximumValueAge
     }
 
     private func placeholder(

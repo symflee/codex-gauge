@@ -36,19 +36,22 @@ public struct QuotaDetailsMenuInput: Equatable, Sendable {
     public let issuesByProduct: [UsageProduct: QuotaMenuIssue]
     public let lastSuccessfulRefreshByProduct: [UsageProduct: Date]
     public let codexAvailability: CodexMenuAvailability
+    public let currentDate: Date
 
     public init(
         productStates: [UsageProduct: ProductUsageState],
         spendControlsByProduct: [UsageProduct: QuotaMenuSpendControl] = [:],
         issuesByProduct: [UsageProduct: QuotaMenuIssue] = [:],
         lastSuccessfulRefreshByProduct: [UsageProduct: Date] = [:],
-        codexAvailability: CodexMenuAvailability
+        codexAvailability: CodexMenuAvailability,
+        currentDate: Date
     ) {
         self.productStates = productStates
         self.spendControlsByProduct = spendControlsByProduct
         self.issuesByProduct = issuesByProduct
         self.lastSuccessfulRefreshByProduct = lastSuccessfulRefreshByProduct
         self.codexAvailability = codexAvailability
+        self.currentDate = currentDate
     }
 }
 
@@ -138,6 +141,7 @@ public struct QuotaMenuDateFormatter {
 public struct QuotaDetailsMenuModelBuilder {
     private let localization: QuotaMenuLocalization
     private let dateFormatter: QuotaMenuDateFormatter
+    private let validityPolicy = QuotaValueValidityPolicy()
 
     public init(
         localization: QuotaMenuLocalization = .bundled(),
@@ -169,7 +173,8 @@ public struct QuotaDetailsMenuModelBuilder {
             state: state,
             explicitSuccess: explicitSuccess,
             issue: issue,
-            spendControl: spendControl
+            spendControl: spendControl,
+            currentDate: input.currentDate
         )
     }
 
@@ -178,7 +183,8 @@ public struct QuotaDetailsMenuModelBuilder {
         state: ProductUsageState,
         explicitSuccess: Date?,
         issue: QuotaMenuIssue?,
-        spendControl: QuotaMenuSpendControl?
+        spendControl: QuotaMenuSpendControl?,
+        currentDate: Date
     ) -> QuotaMenuProductSection {
         switch state {
         case .loading:
@@ -201,7 +207,8 @@ public struct QuotaDetailsMenuModelBuilder {
                 freshness: freshness,
                 explicitSuccess: explicitSuccess,
                 issue: issue,
-                spendControl: spendControl
+                spendControl: spendControl,
+                currentDate: currentDate
             )
         }
     }
@@ -212,10 +219,13 @@ public struct QuotaDetailsMenuModelBuilder {
         freshness: ProductValueFreshness,
         explicitSuccess: Date?,
         issue: QuotaMenuIssue?,
-        spendControl: QuotaMenuSpendControl?
+        spendControl: QuotaMenuSpendControl?,
+        currentDate: Date
     ) -> QuotaMenuProductSection {
         let success = explicitSuccess ?? value.capturedAt
-        let rows = value.quotaWindows.sorted(by: quotaAscending).map(quotaRow)
+        let rows = value.quotaWindows.sorted(by: quotaAscending).map {
+            quotaRow($0, capturedAt: value.capturedAt, currentDate: currentDate)
+        }
         let status = successRows(success) + freshnessRows(freshness, issue: issue)
         return makeSection(
             product: product,
@@ -258,7 +268,18 @@ public struct QuotaDetailsMenuModelBuilder {
         }
     }
 
-    private func quotaRow(_ quota: QuotaWindow) -> String {
+    private func quotaRow(
+        _ quota: QuotaWindow,
+        capturedAt: Date,
+        currentDate: Date
+    ) -> String {
+        guard validityPolicy.isValid(
+            quota,
+            capturedAt: capturedAt,
+            now: currentDate
+        ) else {
+            return expiredQuotaRow(quota)
+        }
         let values = [
             "duration": quota.durationBadge.label,
             "remaining": String(quota.remainingPercent)
@@ -268,6 +289,17 @@ public struct QuotaDetailsMenuModelBuilder {
         }
         return template(
             .quotaWithReset,
+            values: values.merging(["reset": dateFormatter.string(from: reset)]) { _, new in new }
+        )
+    }
+
+    private func expiredQuotaRow(_ quota: QuotaWindow) -> String {
+        let values = ["duration": quota.durationBadge.label]
+        guard let reset = quota.resetsAt else {
+            return template(.quotaExpiredWithoutReset, values: values)
+        }
+        return template(
+            .quotaExpiredWithReset,
             values: values.merging(["reset": dateFormatter.string(from: reset)]) { _, new in new }
         )
     }
@@ -362,6 +394,8 @@ private enum QuotaMenuTextKey: String, CaseIterable {
     case productSpark = "menu.product.spark"
     case quotaWithReset = "menu.quota.with_reset"
     case quotaWithoutReset = "menu.quota.without_reset"
+    case quotaExpiredWithReset = "menu.quota.expired_with_reset"
+    case quotaExpiredWithoutReset = "menu.quota.expired_without_reset"
     case spendControlReached = "menu.spend_control.reached"
     case spendControlRemaining = "menu.spend_control.remaining"
     case spendControlNotReachedWithoutRemaining =

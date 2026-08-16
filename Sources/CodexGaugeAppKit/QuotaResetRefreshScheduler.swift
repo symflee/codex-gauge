@@ -11,8 +11,6 @@ public final class QuotaResetRefreshScheduler {
     public static let defaultTolerance: TimeInterval = 5
     public private(set) var scheduledDeadlineDate: Date?
 
-    private static let validityDuration: TimeInterval = 86_400
-
     private let timerScheduler: WallClockOneShotScheduling
     private let now: @MainActor () -> Date
     private let notificationCenter: NotificationCenter
@@ -126,7 +124,9 @@ public final class QuotaResetRefreshScheduler {
             deadlines.insert(UsageDeadline(date: resetDate, reason: .quotaReset))
         }
         deadlines.insert(UsageDeadline(
-            date: value.capturedAt.addingTimeInterval(Self.validityDuration),
+            date: value.capturedAt.addingTimeInterval(
+                QuotaValueValidityPolicy.maximumValueAge
+            ),
             reason: .validityExpired
         ))
     }

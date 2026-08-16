@@ -5,6 +5,7 @@ import CodexGaugeCore
 func quotaDetailsMenuTests() -> [TestCase] {
     [
         quotaMenuGroupsAllWindowsTest(),
+        quotaMenuExpiresValuesWithToolbarValidityPolicyTest(),
         quotaMenuShowsSpendControlDetailsTest(),
         quotaMenuExplainsIncompleteSpendControlTest(),
         quotaMenuKeepsIndependentFailureStatesTest(),
@@ -12,6 +13,115 @@ func quotaDetailsMenuTests() -> [TestCase] {
         quotaMenuAdapterUsesCachedModelTest(),
         quotaMenuDispatchesInjectedActionsTest()
     ]
+}
+
+private func quotaMenuExpiresValuesWithToolbarValidityPolicyTest() -> TestCase {
+    TestCase(name: "quota menu and toolbar expire values at the same exact boundaries") {
+        let currentDate = Date(timeIntervalSince1970: 1_900_100_000)
+        let expiredAtReset = try menuQuota(
+            slot: .primary,
+            used: 17,
+            duration: 300,
+            reset: currentDate.timeIntervalSince1970
+        )
+        let validWindow = try menuQuota(
+            slot: .secondary,
+            used: 41,
+            duration: 10_080,
+            reset: currentDate.timeIntervalSince1970 + 3_600
+        )
+        let freshValue = ProductQuotaValue(
+            capturedAt: currentDate,
+            quotaWindows: [expiredAtReset, validWindow]
+        )
+        let freshInput = QuotaDetailsMenuInput(
+            productStates: [.codex: .value(freshValue, freshness: .fresh)],
+            spendControlsByProduct: [.codex: .remaining(percent: 64)],
+            lastSuccessfulRefreshByProduct: [.codex: currentDate],
+            codexAvailability: .available,
+            currentDate: currentDate
+        )
+
+        let freshSection = menuBuilder().build(freshInput).productSections[0]
+        let freshFrame = DisplayFrameBuilder().makeFrames(
+            preference: DisplayPreference(
+                productMode: .codex,
+                quotaSelection: .manual([
+                    QuotaSelectionID(product: .codex, rawDurationMinutes: 300)
+                ])
+            ),
+            productStates: freshInput.productStates,
+            now: currentDate
+        )[0]
+
+        try expect(freshSection.quotaRows == [
+            "[5h] · — · resets D1900100000 · refresh required",
+            "[w] · 59% remaining · resets D1900103600"
+        ], "Expected only the reset-boundary window to lose its percentage")
+        try expect(
+            freshSection.spendControlRows == ["Spend limit · 64% remaining"],
+            "Expected spend-control details to survive quota expiry"
+        )
+        try expect(
+            freshSection.statusRows == ["Last success: D1900100000"],
+            "Expected fresh last-success details to survive quota expiry"
+        )
+        try expect(
+            singleMenuDisplayValue(freshFrame) == .unavailable,
+            "Expected toolbar and menu to agree at the reset boundary"
+        )
+
+        let capturedAt = currentDate.addingTimeInterval(-86_400)
+        let ageExpiredWindow = try menuQuota(
+            slot: .primary,
+            used: 25,
+            duration: 300
+        )
+        let staleValue = ProductQuotaValue(
+            capturedAt: capturedAt,
+            quotaWindows: [ageExpiredWindow]
+        )
+        let staleInput = QuotaDetailsMenuInput(
+            productStates: [.spark: .value(staleValue, freshness: .stale)],
+            spendControlsByProduct: [.spark: .reached],
+            issuesByProduct: [.spark: .timeout],
+            lastSuccessfulRefreshByProduct: [.spark: capturedAt],
+            codexAvailability: .needsSelection,
+            currentDate: currentDate
+        )
+
+        let staleModel = menuBuilder().build(staleInput)
+        let staleSection = staleModel.productSections[1]
+        let staleFrame = DisplayFrameBuilder().makeFrames(
+            preference: DisplayPreference(
+                productMode: .spark,
+                quotaSelection: .automatic
+            ),
+            productStates: staleInput.productStates,
+            now: currentDate
+        )[0]
+
+        try expect(staleSection.quotaRows == [
+            "[5h] · — · refresh required"
+        ], "Expected the exact 24-hour boundary to hide a stale percentage")
+        try expect(
+            staleSection.spendControlRows == ["Spend limit reached"],
+            "Expected spend-control state to remain independent"
+        )
+        try expect(staleSection.statusRows == [
+            "Last success: D1900013600",
+            "Last value · Timed out"
+        ], "Expected stale reason and last-success action context to remain")
+        try expect(
+            singleMenuDisplayValue(staleFrame) == .unavailable,
+            "Expected toolbar and menu to agree at the age boundary"
+        )
+        try expect(
+            staleModel.actionGroups.flatMap { $0 }.map(\.action)
+                == [.refresh, .selectCodex, .settings, .quit],
+            "Expected refresh and recovery actions to remain available"
+        )
+    }
 }
 
 private func quotaMenuShowsSpendControlDetailsTest() -> TestCase {
@@ -37,7 +147,8 @@ private func quotaMenuShowsSpendControlDetailsTest() -> TestCase {
                 .codex: .reached,
                 .spark: .remaining(percent: 72)
             ],
-            codexAvailability: .available
+            codexAvailability: .available,
+            currentDate: Date(timeIntervalSince1970: 1_900_000_000)
         )
 
         let sections = menuBuilder().build(input).productSections
@@ -64,7 +175,8 @@ private func quotaMenuExplainsIncompleteSpendControlTest() -> TestCase {
         let input = QuotaDetailsMenuInput(
             productStates: [.codex: .unavailable, .spark: .unavailable],
             spendControlsByProduct: [.codex: .notReachedWithoutRemainingPercent],
-            codexAvailability: .available
+            codexAvailability: .available,
+            currentDate: Date(timeIntervalSince1970: 1_900_000_000)
         )
 
         let sections = menuBuilder().build(input).productSections
@@ -112,7 +224,8 @@ private func quotaMenuGroupsAllWindowsTest() -> TestCase {
                     freshness: .fresh
                 )
             ],
-            codexAvailability: .available
+            codexAvailability: .available,
+            currentDate: capturedAt
         )
 
         let model = menuBuilder().build(input)
@@ -160,7 +273,8 @@ private func quotaMenuKeepsIndependentFailureStatesTest() -> TestCase {
             lastSuccessfulRefreshByProduct: [
                 .spark: Date(timeIntervalSince1970: 1_900_000_050)
             ],
-            codexAvailability: .available
+            codexAvailability: .available,
+            currentDate: Date(timeIntervalSince1970: 1_900_000_100)
         )
 
         let model = menuBuilder().build(input)
@@ -183,7 +297,8 @@ private func quotaMenuKeepsIndependentFailureStatesTest() -> TestCase {
         let partialInput = QuotaDetailsMenuInput(
             productStates: [.codex: .value(staleValue, freshness: .fresh)],
             issuesByProduct: [.codex: .partialData],
-            codexAvailability: .available
+            codexAvailability: .available,
+            currentDate: Date(timeIntervalSince1970: 1_900_000_100)
         )
         let partial = menuBuilder().build(partialInput).productSections[0]
         try expect(partial.statusRows.last == "Some limits unavailable", "Expected partial state")
@@ -195,7 +310,8 @@ private func quotaMenuSelectsConnectionActionTest() -> TestCase {
         let input = QuotaDetailsMenuInput(
             productStates: [.codex: .loading],
             issuesByProduct: [.spark: .codexNotFound],
-            codexAvailability: .needsSelection
+            codexAvailability: .needsSelection,
+            currentDate: Date(timeIntervalSince1970: 1_900_000_000)
         )
 
         let model = menuBuilder().build(input)
@@ -240,7 +356,8 @@ private func quotaMenuAdapterUsesCachedModelTest() -> TestCase {
                     )
                 ],
                 spendControlsByProduct: [.codex: .remaining(percent: 64)],
-                codexAvailability: .available
+                codexAvailability: .available,
+                currentDate: Date(timeIntervalSince1970: 1_900_000_000)
             ))
             let actionCalls = MenuCallRecorder()
             let menuController = StatusMenuController(
@@ -311,6 +428,9 @@ private func menuLocalization() -> QuotaMenuLocalization {
         "menu.product.spark": "Spark",
         "menu.quota.with_reset": "[{duration}] · {remaining}% remaining · resets {reset}",
         "menu.quota.without_reset": "[{duration}] · {remaining}% remaining · reset unavailable",
+        "menu.quota.expired_with_reset":
+            "[{duration}] · — · resets {reset} · refresh required",
+        "menu.quota.expired_without_reset": "[{duration}] · — · refresh required",
         "menu.spend_control.reached": "Spend limit reached",
         "menu.spend_control.remaining": "Spend limit · {remaining}% remaining",
         "menu.spend_control.not_reached_without_remaining":
@@ -366,6 +486,13 @@ private func menuFrame(duration: Int?, value: DisplayValueState) -> DisplayFrame
         identifier: QuotaSelectionID(product: .codex, rawDurationMinutes: duration),
         value: value
     ))
+}
+
+private func singleMenuDisplayValue(_ frame: DisplayFrame) -> DisplayValueState? {
+    guard case .single(let quota) = frame else {
+        return nil
+    }
+    return quota.value
 }
 
 @MainActor
