@@ -20,4 +20,16 @@ public actor AppPreferencesRepository {
         let data = try PreferencesCodec.encode(preferences)
         userDefaults.set(data, forKey: Self.storageKey)
     }
+
+    public func saveSettingsForm(_ values: SettingsFormValues) throws {
+        let current = load()
+        let merged = AppPreferences(
+            displayPreference: values.displayPreference,
+            refreshProfile: values.refreshProfile,
+            launchAtLoginIntent: values.launchAtLoginIntent,
+            selectedExecutableURL: current.selectedExecutableURL,
+            hasCompletedFirstLaunch: current.hasCompletedFirstLaunch
+        )
+        try save(merged)
+    }
 }
