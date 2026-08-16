@@ -46,12 +46,19 @@ swift run codex-gauge-tests
 swift build -c release
 ```
 
-전체 Xcode가 준비되면 얇은 macOS application wrapper와 shared `CodexGauge` scheme도 검증합니다.
+실제 `.app`은 root package의 `CodexGaugeAppKit` product를 연결한 얇은 Xcode application target으로 빌드합니다. shared `CodexGauge` scheme에는 application, unit test와 UI test target이 포함됩니다.
 
 ```sh
 xcodebuild -project CodexGauge.xcodeproj \
   -scheme CodexGauge \
   -destination 'platform=macOS' \
+  -only-testing:CodexGaugeUnitTests \
+  test
+
+xcodebuild -project CodexGauge.xcodeproj \
+  -scheme CodexGauge \
+  -destination 'platform=macOS' \
+  -only-testing:CodexGaugeUITests \
   test
 ```
 

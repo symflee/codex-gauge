@@ -206,6 +206,12 @@ reset 절대 시각과 제품별 24시간 만료는 wall clock `Date`이므로 p
 
 ## 6. AppKit 생명주기
 
+### 앱 bundle 경계
+
+root `Package.swift`가 모든 domain, protocol, refresh, settings와 AppKit runtime source의 기준이다. `CodexGauge.xcodeproj`의 application target은 같은 domain/runtime source를 target membership으로 복제하지 않고 local package product `CodexGaugeAppKit`을 연결하며, `App/CodexGauge`의 `main.swift`, `Info.plist`와 `Assets.xcassets`만 직접 소유한다.
+
+application bundle은 macOS 13 이상, Swift 6 language mode, `LSUIElement=true`, Hardened Runtime 활성화와 App Sandbox 비활성화를 명시한다. Release는 standard architecture와 `ONLY_ACTIVE_ARCH=NO`로 Apple Silicon·Intel universal 산출물을 만든다. shared `CodexGauge` scheme은 package 경계를 확인하는 XCTest unit smoke와 최초 실행 설정 창 XCUITest를 함께 제공한다.
+
 ### 상태 항목
 
 `StatusItemController`는 앱 실행 동안 유지되며 domain `DisplayFrame`을 AppKit 표현으로 바꾸는 얇은 경계다. production의 `SystemStatusItemPresenter`만 `NSStatusItem`을 알고 controller test는 주입한 presenter를 사용해 전역 status bar를 만들지 않는다. 상세 메뉴는 별도 adapter가 메모리 snapshot으로 구성하며 조회 완료를 기다리지 않는다.

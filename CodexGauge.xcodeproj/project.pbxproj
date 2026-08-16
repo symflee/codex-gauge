@@ -1,0 +1,477 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		C00000000000000000000001 /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000001 /* main.swift */; };
+		C00000000000000000000002 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000003 /* Assets.xcassets */; };
+		C00000000000000000000003 /* CodexGaugeAppKit in Frameworks */ = {isa = PBXBuildFile; productRef = 800000000000000000000002 /* CodexGaugeAppKit */; };
+		C00000000000000000000004 /* CodexGaugeApplicationSmokeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000004 /* CodexGaugeApplicationSmokeTests.swift */; };
+		C00000000000000000000005 /* CodexGaugeAppKit in Frameworks */ = {isa = PBXBuildFile; productRef = 800000000000000000000003 /* CodexGaugeAppKit */; };
+		C00000000000000000000006 /* CodexGaugeFirstLaunchUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000005 /* CodexGaugeFirstLaunchUITests.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		900000000000000000000001 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A00000000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = F00000000000000000000001;
+			remoteInfo = CodexGauge;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		B00000000000000000000001 /* main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
+		B00000000000000000000002 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		B00000000000000000000003 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		B00000000000000000000004 /* CodexGaugeApplicationSmokeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexGaugeApplicationSmokeTests.swift; sourceTree = "<group>"; };
+		B00000000000000000000005 /* CodexGaugeFirstLaunchUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexGaugeFirstLaunchUITests.swift; sourceTree = "<group>"; };
+		B00000000000000000000006 /* CodexGauge.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CodexGauge.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		B00000000000000000000007 /* CodexGaugeUnitTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CodexGaugeUnitTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		B00000000000000000000008 /* CodexGaugeUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CodexGaugeUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		D00000000000000000000001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C00000000000000000000003 /* CodexGaugeAppKit in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D00000000000000000000004 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C00000000000000000000005 /* CodexGaugeAppKit in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D00000000000000000000007 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		A00000000000000000000002 = {
+			isa = PBXGroup;
+			children = (
+				A00000000000000000000003 /* CodexGauge */,
+				A00000000000000000000004 /* XcodeTests */,
+				A00000000000000000000005 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		A00000000000000000000003 /* CodexGauge */ = {
+			isa = PBXGroup;
+			children = (
+				B00000000000000000000001 /* main.swift */,
+				B00000000000000000000002 /* Info.plist */,
+				B00000000000000000000003 /* Assets.xcassets */,
+			);
+			path = App/CodexGauge;
+			sourceTree = SOURCE_ROOT;
+		};
+		A00000000000000000000004 /* XcodeTests */ = {
+			isa = PBXGroup;
+			children = (
+				A00000000000000000000006 /* CodexGaugeUnitTests */,
+				A00000000000000000000007 /* CodexGaugeUITests */,
+			);
+			path = XcodeTests;
+			sourceTree = SOURCE_ROOT;
+		};
+		A00000000000000000000005 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				B00000000000000000000006 /* CodexGauge.app */,
+				B00000000000000000000007 /* CodexGaugeUnitTests.xctest */,
+				B00000000000000000000008 /* CodexGaugeUITests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		A00000000000000000000006 /* CodexGaugeUnitTests */ = {
+			isa = PBXGroup;
+			children = (
+				B00000000000000000000004 /* CodexGaugeApplicationSmokeTests.swift */,
+			);
+			path = CodexGaugeUnitTests;
+			sourceTree = "<group>";
+		};
+		A00000000000000000000007 /* CodexGaugeUITests */ = {
+			isa = PBXGroup;
+			children = (
+				B00000000000000000000005 /* CodexGaugeFirstLaunchUITests.swift */,
+			);
+			path = CodexGaugeUITests;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		F00000000000000000000001 /* CodexGauge */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = E00000000000000000000002 /* Build configuration list for PBXNativeTarget "CodexGauge" */;
+			buildPhases = (
+				D00000000000000000000002 /* Sources */,
+				D00000000000000000000001 /* Frameworks */,
+				D00000000000000000000003 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = CodexGauge;
+			packageProductDependencies = (
+				800000000000000000000002 /* CodexGaugeAppKit */,
+			);
+			productName = CodexGauge;
+			productReference = B00000000000000000000006 /* CodexGauge.app */;
+			productType = "com.apple.product-type.application";
+		};
+		F00000000000000000000002 /* CodexGaugeUnitTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = E00000000000000000000003 /* Build configuration list for PBXNativeTarget "CodexGaugeUnitTests" */;
+			buildPhases = (
+				D00000000000000000000005 /* Sources */,
+				D00000000000000000000004 /* Frameworks */,
+				D00000000000000000000006 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = CodexGaugeUnitTests;
+			packageProductDependencies = (
+				800000000000000000000003 /* CodexGaugeAppKit */,
+			);
+			productName = CodexGaugeUnitTests;
+			productReference = B00000000000000000000007 /* CodexGaugeUnitTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		F00000000000000000000003 /* CodexGaugeUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = E00000000000000000000004 /* Build configuration list for PBXNativeTarget "CodexGaugeUITests" */;
+			buildPhases = (
+				D00000000000000000000008 /* Sources */,
+				D00000000000000000000007 /* Frameworks */,
+				D00000000000000000000009 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				900000000000000000000002 /* PBXTargetDependency */,
+			);
+			name = CodexGaugeUITests;
+			packageProductDependencies = (
+			);
+			productName = CodexGaugeUITests;
+			productReference = B00000000000000000000008 /* CodexGaugeUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		A00000000000000000000001 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastSwiftUpdateCheck = 2660;
+				LastUpgradeCheck = 2660;
+				TargetAttributes = {
+					F00000000000000000000001 = {
+						CreatedOnToolsVersion = 26.6;
+					};
+					F00000000000000000000002 = {
+						CreatedOnToolsVersion = 26.6;
+					};
+					F00000000000000000000003 = {
+						CreatedOnToolsVersion = 26.6;
+						TestTargetID = F00000000000000000000001;
+					};
+				};
+			};
+			buildConfigurationList = E00000000000000000000001 /* Build configuration list for PBXProject "CodexGauge" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = ko;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				ko,
+				en,
+				Base,
+			);
+			mainGroup = A00000000000000000000002;
+			packageReferences = (
+				800000000000000000000001 /* XCLocalSwiftPackageReference "." */,
+			);
+			productRefGroup = A00000000000000000000005 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				F00000000000000000000001 /* CodexGauge */,
+				F00000000000000000000002 /* CodexGaugeUnitTests */,
+				F00000000000000000000003 /* CodexGaugeUITests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		D00000000000000000000003 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C00000000000000000000002 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D00000000000000000000006 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D00000000000000000000009 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		D00000000000000000000002 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C00000000000000000000001 /* main.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D00000000000000000000005 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C00000000000000000000004 /* CodexGaugeApplicationSmokeTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D00000000000000000000008 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C00000000000000000000006 /* CodexGaugeFirstLaunchUITests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		900000000000000000000002 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = F00000000000000000000001 /* CodexGauge */;
+			targetProxy = 900000000000000000000001 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		E00000000000000000000011 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_MODULES = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_TESTABILITY = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+		E00000000000000000000012 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_MODULES = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				ONLY_ACTIVE_ARCH = NO;
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
+		E00000000000000000000021 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_APP_SANDBOX = NO;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = App/CodexGauge/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = io.github.symflee.codex-gauge;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = macosx;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+			};
+			name = Debug;
+		};
+		E00000000000000000000022 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ARCHS = "$(ARCHS_STANDARD)";
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_APP_SANDBOX = NO;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = App/CodexGauge/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				ONLY_ACTIVE_ARCH = NO;
+				PRODUCT_BUNDLE_IDENTIFIER = io.github.symflee.codex-gauge;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = macosx;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+			};
+			name = Release;
+		};
+		E00000000000000000000031 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = io.github.symflee.codex-gauge.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = macosx;
+			};
+			name = Debug;
+		};
+		E00000000000000000000032 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = io.github.symflee.codex-gauge.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = macosx;
+			};
+			name = Release;
+		};
+		E00000000000000000000041 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = io.github.symflee.codex-gauge.uitests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = macosx;
+				TEST_TARGET_NAME = CodexGauge;
+			};
+			name = Debug;
+		};
+		E00000000000000000000042 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = io.github.symflee.codex-gauge.uitests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = macosx;
+				TEST_TARGET_NAME = CodexGauge;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		E00000000000000000000001 /* Build configuration list for PBXProject "CodexGauge" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				E00000000000000000000011 /* Debug */,
+				E00000000000000000000012 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		E00000000000000000000002 /* Build configuration list for PBXNativeTarget "CodexGauge" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				E00000000000000000000021 /* Debug */,
+				E00000000000000000000022 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		E00000000000000000000003 /* Build configuration list for PBXNativeTarget "CodexGaugeUnitTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				E00000000000000000000031 /* Debug */,
+				E00000000000000000000032 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		E00000000000000000000004 /* Build configuration list for PBXNativeTarget "CodexGaugeUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				E00000000000000000000041 /* Debug */,
+				E00000000000000000000042 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		800000000000000000000001 /* XCLocalSwiftPackageReference "." */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = .;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		800000000000000000000002 /* CodexGaugeAppKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 800000000000000000000001 /* XCLocalSwiftPackageReference "." */;
+			productName = CodexGaugeAppKit;
+		};
+		800000000000000000000003 /* CodexGaugeAppKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 800000000000000000000001 /* XCLocalSwiftPackageReference "." */;
+			productName = CodexGaugeAppKit;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = A00000000000000000000001 /* Project object */;
+}

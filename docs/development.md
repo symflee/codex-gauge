@@ -20,7 +20,7 @@ Codex Gauge는 외부 Swift package나 런타임을 사용하지 않는다. 새 
 
 ## 2. 빌드와 테스트
 
-현재 저장소의 source of truth는 root `Package.swift`다. `.xcodeproj` 또는 `.xcworkspace` wrapper는 아직 없으며, SwiftPM 모듈과 AppKit 개발 호스트를 다음 명령으로 검증한다.
+현재 저장소의 source of truth는 root `Package.swift`다. SwiftPM 모듈과 AppKit 개발 호스트를 다음 명령으로 검증한다.
 
 ```sh
 swift package describe
@@ -29,7 +29,26 @@ swift run codex-gauge-tests
 swift build -c release --explicit-target-dependency-import-check error
 ```
 
-향후 `.app` bundle을 위한 Xcode wrapper는 root package의 `CodexGaugeAppKit` product만 연결하는 얇은 target으로 추가한다. 같은 Swift source를 Xcode target membership에 중복 등록하지 않는다. wrapper와 shared `CodexGauge` scheme이 실제로 추가된 task에서만 `xcodebuild`, UI test, signing-disabled universal build를 CI gate로 활성화한다.
+`CodexGauge.xcodeproj`는 `.app` bundle을 위한 얇은 wrapper다. application target은 root package의 `CodexGaugeAppKit` product만 연결하고 `main.swift`, `Info.plist`와 AppIcon을 소유한다. 같은 domain/runtime source를 Xcode target membership에 중복 등록하지 않는다.
+
+```sh
+xcodebuild -project CodexGauge.xcodeproj \
+  -scheme CodexGauge \
+  -destination 'platform=macOS' \
+  -only-testing:CodexGaugeUnitTests \
+  CODE_SIGNING_ALLOWED=NO \
+  test
+
+xcodebuild -project CodexGauge.xcodeproj \
+  -scheme CodexGauge \
+  -configuration Release \
+  -destination 'generic/platform=macOS' \
+  CODE_SIGNING_ALLOWED=NO \
+  ONLY_ACTIVE_ARCH=NO \
+  build
+```
+
+shared scheme의 UI smoke는 `CodexGaugeUITests`를 명시해 실행한다. 최초 실행 테스트는 `--codex-gauge-ui-test-reset-first-launch` argument로 완료 flag만 초기화하며 실제 Codex 설치나 인증을 요구하지 않는다.
 
 package build와 단위 테스트는 실제 Codex 설치, 사용자 계정 또는 애플리케이션 네트워크 요청에 의존하지 않는다. decoder 테스트는 합성 JSONL fixture를 사용한다. process session 통합 테스트는 `codex-gauge-tests` 실행 파일 자체를 test-only 합성 `app-server`로 다시 실행해 handshake, timeout, flood와 종료를 검증한다. 이 mode는 test environment key로만 동작하며 account 이메일이나 원문 사용자 응답을 생성·기록하지 않는다.
 
@@ -55,7 +74,7 @@ Java 전용 코딩 규칙은 이 Swift 프로젝트에 적용하지 않는다. J
 
 ### 단위 테스트
 
-저장소의 `codex-gauge-tests` executable은 Apple 테스트 framework가 포함되지 않은 Command Line Tools에서도 실행되는 작은 zero-dependency runner다. 순수 도메인·protocol·refresh 테스트는 이 runner에서 항상 검증한다. 전체 Xcode가 준비되면 UI·performance test에 XCTest를 사용하며, 프레임워크 차이 때문에 TDD를 미루지 않는다.
+저장소의 `codex-gauge-tests` executable은 Apple 테스트 framework가 포함되지 않은 Command Line Tools에서도 실행되는 작은 zero-dependency runner다. 순수 도메인·protocol·refresh 테스트는 이 runner에서 항상 검증한다. Xcode wrapper의 unit·UI target은 XCTest를 사용하며, 프레임워크 차이 때문에 TDD를 미루지 않는다.
 
 - remaining percent의 0...100 경계
 - duration badge와 unknown duration
@@ -246,7 +265,7 @@ feat(menubar): render quota status frames
 - workflow `GITHUB_TOKEN`은 `contents: read`만 허용하고 checkout credential을 작업 copy에 유지하지 않는다. checkout 이외의 action, cache, Codecov와 secret을 사용하지 않는다.
 - 테스트는 synthetic fixture와 fake 경계만 사용한다. build·test 단계에는 Codex executable, Codex 로그인, OpenAI API key, 사용자 인증 파일 또는 애플리케이션 네트워크 요청이 필요하지 않다.
 - `.github/dependabot.yml`은 GitHub Actions reference를 매주 확인한다. action update PR에서는 release tag뿐 아니라 full commit SHA와 version comment가 함께 바뀌었는지 검토한다.
-- 현재 CI는 `.app` bundle, UI 동작, universal binary와 Instruments 성능을 검증한다고 주장하지 않는다. Xcode wrapper가 추가되면 signing-disabled universal `arm64 x86_64` build와 UI smoke를 별도 task로 추가하고, resource baseline은 실제 macOS hardware의 opt-in performance gate로 유지한다.
+- Xcode wrapper는 app·unit·UI target과 shared scheme을 제공한다. signing-disabled universal `arm64 x86_64` build와 UI smoke의 공개 CI 연결은 별도 CI task로 관리하고, resource baseline은 실제 macOS hardware의 opt-in performance gate로 유지한다.
 - main은 force push, branch 삭제와 merge commit을 차단한다.
 - 첫 바이너리는 Developer ID 서명과 notarization을 준비한 뒤 공증된 universal ZIP으로만 배포한다.
 - 자동 업데이트, DMG와 Homebrew cask는 v0.1 이후 task다.
