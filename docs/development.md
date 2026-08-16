@@ -48,7 +48,7 @@ xcodebuild -project CodexGauge.xcodeproj \
   build
 ```
 
-shared scheme의 UI smoke는 `CodexGaugeUITests`를 명시해 실행한다. 최초 실행 테스트는 `--codex-gauge-ui-test-reset-first-launch` argument로 완료 flag만 초기화하며 실제 Codex 설치나 인증을 요구하지 않는다.
+shared scheme의 UI smoke는 `CodexGaugeUITests`를 명시해 실행한다. 최초 실행 테스트의 두 launch는 모두 `--codex-gauge-ui-test-fixture-83`으로 외부 경계를 격리하고, 첫 launch에만 `--codex-gauge-ui-test-reset-first-launch`를 더해 완료 flag만 초기화한다. 실제 Codex 설치나 인증을 요구하지 않는다.
 
 package build와 단위 테스트는 실제 Codex 설치, 사용자 계정 또는 애플리케이션 네트워크 요청에 의존하지 않는다. decoder 테스트는 합성 JSONL fixture를 사용한다. process session 통합 테스트는 `codex-gauge-tests` 실행 파일 자체를 test-only 합성 `app-server`로 다시 실행해 handshake, timeout, flood와 종료를 검증한다. 이 mode는 test environment key로만 동작하며 account 이메일이나 원문 사용자 응답을 생성·기록하지 않는다.
 
@@ -149,12 +149,12 @@ Java 전용 코딩 규칙은 이 Swift 프로젝트에 적용하지 않는다. J
 - executable 교체 중 pending 5초 wake phase 보존과 즉시 startup 방지
 - validity expiry의 presentation-only 처리와 중복 shutdown의 단일 drain
 - 상태 항목 표시와 refresh 시작 이후에만 이루어지는 최초 실행 판단
-- visible 설정 창의 한 번만 자동 표시와 실패·취소 시 완료 미기록
+- visible 설정 창의 한 번만 자동 표시, 표시 전 취소의 미기록과 표시 후 shutdown cancellation의 완료 저장 drain
 - 완료된 다음 실행의 자동 표시 생략과 test-only launch argument의 field-only reset
 - reset·form·선택 executable·완료 저장이 겹쳐도 sibling preference를 보존하는 actor merge
 - pending startup과 경쟁하는 shutdown의 drain 뒤 terminal second-stop
 - Quit·Cmd-Q의 terminate-later, runtime 없는 immediate 종료와 exactly-once reply
-- UI fixture launch argument의 Debug-only exact match와 first-launch reset 결합
+- UI fixture launch argument의 Debug-only exact match와 first-launch reset 독립 판정
 - 저장 설정을 바꾸지 않는 Codex 자동 표시 overlay와 합성 `[5h] 83%` publication
 - UI fixture의 무-Codex 탐색·무-process diagnostics·무-`SMAppService` 경계와 terminal stop
 
@@ -171,9 +171,9 @@ Java 전용 코딩 규칙은 이 Swift 프로젝트에 적용하지 않는다. J
 - 로그인 시 실행 adapter
 - Release CPU와 memory metric
 
-UI 테스트에서 최초 실행 화면을 재현할 때는 정확한 `--codex-gauge-ui-test-reset-first-launch` argument를 사용한다. 이 seam은 namespaced defaults domain을 삭제하지 않고 `hasCompletedFirstLaunch`만 false로 바꾸므로 표시·갱신·로그인·선택 executable 설정을 보존한다. 일반 production 실행과 smoke test에서는 이 argument를 전달하지 않는다.
+UI 테스트에서 최초 실행 화면을 재현할 때는 정확한 `--codex-gauge-ui-test-reset-first-launch` argument를 사용한다. 이 seam은 namespaced defaults domain을 삭제하지 않고 `hasCompletedFirstLaunch`만 false로 바꾸므로 표시·갱신·로그인·선택 executable 설정을 보존한다. fixture 활성화 자체는 이 flag를 바꾸지 않는다. 일반 production 실행과 smoke test에서는 이 argument를 전달하지 않는다.
 
-상태 항목의 `83%`, 상세 메뉴와 최초 실행 설정 창을 함께 검증하는 XCUITest는 Debug 구성에서 정확한 `--codex-gauge-ui-test-fixture-83` argument만 전달한다. fixture는 실제 AppKit composition 위에 메모리 publication과 무동작 외부 경계를 주입하므로 Codex 설치·로그인·네트워크 또는 로그인 항목 권한이 없어도 결정적으로 실행된다. custom runner는 Debug exact argument 판정, Release의 강제 production 판정, 저장값의 비변경, 합성 frame, 외부 경계와 shutdown 계약을 검증한다. Release에서는 fixture 타입을 컴파일해 정적 안전성을 확인하지만 인자로 활성화할 수 없다. 이 인자는 production smoke test, 실제 App Server smoke test와 성능 측정에 사용하지 않는다.
+상태 항목의 `83%`, 상세 메뉴와 최초 실행 설정 창을 함께 검증하는 XCUITest는 Debug 구성에서 정확한 `--codex-gauge-ui-test-fixture-83` argument를 전달한다. 첫 launch에는 독립된 최초 실행 reset 인자를 함께 전달하고, 후속 launch에는 fixture 인자만 유지해 외부 I/O 없이 한 번만 자동 표시되는 계약을 검증한다. fixture는 실제 AppKit composition 위에 메모리 publication과 무동작 외부 경계를 주입하므로 Codex 설치·로그인·네트워크 또는 로그인 항목 권한이 없어도 결정적으로 실행된다. custom runner는 Debug exact argument 판정, fixture와 reset의 독립성, Release의 강제 production 판정, 저장값의 비변경, 합성 frame, 외부 경계와 shutdown 계약을 검증한다. Release에서는 fixture 타입을 컴파일해 정적 안전성을 확인하지만 인자로 활성화할 수 없다. 이 인자는 production smoke test, 실제 App Server smoke test와 성능 측정에 사용하지 않는다.
 
 ### 로컬 App Server smoke
 

@@ -19,29 +19,14 @@ public struct CodexGaugeApplicationLaunchOptions: Equatable, Sendable {
 
     public init(arguments: [String]) {
         #if DEBUG
-        let usesFixture = arguments.contains(Self.uiTestFixture83Argument)
-        mode = usesFixture ? .uiTestFixture83 : .production
-        firstLaunchTestingOptions = Self.firstLaunchOptions(
-            arguments: arguments,
-            usesFixture: usesFixture
-        )
+        mode = arguments.contains(Self.uiTestFixture83Argument)
+            ? .uiTestFixture83
+            : .production
         #else
         mode = .production
+        #endif
         firstLaunchTestingOptions = FirstLaunchTestingOptions(
             arguments: arguments
-        )
-        #endif
-    }
-
-    private static func firstLaunchOptions(
-        arguments: [String],
-        usesFixture: Bool
-    ) -> FirstLaunchTestingOptions {
-        guard usesFixture else {
-            return FirstLaunchTestingOptions(arguments: arguments)
-        }
-        return FirstLaunchTestingOptions(
-            arguments: [FirstLaunchTestingOptions.resetCompletionArgument]
         )
     }
 }

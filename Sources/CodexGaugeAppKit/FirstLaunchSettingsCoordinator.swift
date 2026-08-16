@@ -33,7 +33,7 @@ public final class FirstLaunchSettingsCoordinator {
             return
         }
         let isVisible = await settingsRuntime.showSettings()
-        guard !Task.isCancelled, isVisible else {
+        guard isVisible else {
             return
         }
         try? await repository.markFirstLaunchCompleted()

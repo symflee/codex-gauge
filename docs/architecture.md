@@ -46,7 +46,7 @@ SwiftPM은 Core, Protocol, Refresh, Settings와 AppKit 모듈의 단일 source o
 
 시작 순서는 상태 항목의 loading frame과 cached menu 표시, deadline scheduler·monitor 연결, preferences load, provider 구성, refresh 시작 순이다. 따라서 `UserDefaults` actor hop 전에 상태 항목이 먼저 보인다. 저장된 로그인 실행 의도는 refresh 시작 뒤 `SMAppService` 상태와 한 번 reconcile한다. 최초 실행 판단은 refresh coordinator에 `start()`를 전달한 뒤의 startup hook에서만 이어진다.
 
-factory는 launch argument를 시스템 adapter 생성 전에 판정한다. Debug 빌드에서 정확한 `--codex-gauge-ui-test-fixture-83`가 전달된 경우에만 production locator·App Server refresh builder·connection inspector·`NSWorkspace` Codex adapter와 `LaunchAtLoginController`를 생성하지 않는다. 대신 terminal stop을 지원하는 메모리 refresh coordinator, 정적 diagnostics, 열기 동작이 없는 workspace와 메모리 login adapter를 주입한다. 상태 항목, 상세 메뉴, 설정 coordinator와 최초 실행 창은 production과 같은 composition을 사용한다. fixture preferences loader는 저장값을 쓰지 않고 런타임의 표시 대상만 Codex 자동 선택으로 만들어 합성 5시간 남은 값 `83%`를 결정적으로 표시한다. Release 컴파일에서는 fixture mode 판정을 제거해 동일한 인자도 production 경계로만 이어진다.
+factory는 launch argument를 시스템 adapter 생성 전에 판정한다. Debug 빌드에서 정확한 `--codex-gauge-ui-test-fixture-83`가 전달된 경우에만 production locator·App Server refresh builder·connection inspector·`NSWorkspace` Codex adapter와 `LaunchAtLoginController`를 생성하지 않는다. 대신 terminal stop을 지원하는 메모리 refresh coordinator, 정적 diagnostics, 열기 동작이 없는 workspace와 메모리 login adapter를 주입한다. 상태 항목, 상세 메뉴, 설정 coordinator와 최초 실행 창은 production과 같은 composition을 사용한다. fixture preferences loader는 저장값을 쓰지 않고 런타임의 표시 대상만 Codex 자동 선택으로 만들어 합성 5시간 남은 값 `83%`를 결정적으로 표시한다. fixture 활성화와 최초 실행 reset은 서로 독립이므로 XCUITest의 후속 launch도 같은 외부 경계를 유지하면서 저장된 완료 상태를 읽는다. Release 컴파일에서는 fixture mode 판정을 제거해 동일한 인자도 production 경계로만 이어진다.
 
 하나의 `RefreshPublication` callback은 같은 main-actor transaction에서 상태 frame, menu model, discovered quota ID, 연결 상태와 deadline 후보를 모두 갱신한다. application-open capability는 root 생성 때 한 번 읽어 캐시하며, display 변경과 validity deadline은 메모리 publication을 다시 투영할 뿐 provider 또는 workspace I/O를 만들지 않는다. profile, 수동 조회, quota reset, power와 system resume 명령은 직렬 operation chain을 통해 현재 refresh generation에만 전달된다.
 
@@ -274,11 +274,11 @@ macOS 호출이 실패해도 호출 직후 시스템 상태가 이미 요청 결
 
 production factory는 `FirstLaunchSettingsCoordinator`를 refresh 시작 뒤의 startup hook에 연결한다. coordinator는 process 수명 동안 자동 표시를 한 번만 시도하며, repository의 최신 `hasCompletedFirstLaunch`가 false일 때만 기존 설정 창 runtime을 호출한다. 별도 onboarding controller는 만들지 않는다.
 
-`ApplicationSettingsRuntime.showSettings()`는 window controller 생성 여부가 아니라 실제 `NSWindow.isVisible` 결과를 돌려준다. shutdown 또는 caller cancellation과 경쟁해 `nil`이 되거나 창이 visible 상태가 아니면 완료로 기록하지 않는다. 표시가 성공한 뒤에만 repository actor의 `markFirstLaunchCompleted()`를 호출한다. 이 read-modify-write는 저장 시점의 표시·refresh·로그인·선택 executable 값을 모두 보존하고 최초 실행 값만 true로 바꾸며, 이미 완료된 경우에는 다시 쓰지 않는다.
+`ApplicationSettingsRuntime.showSettings()`는 window controller 생성 여부가 아니라 실제 `NSWindow.isVisible` 결과를 돌려준다. 표시 전에 caller가 취소되거나 shutdown과 경쟁해 `nil`이 되거나 창이 visible 상태가 아니면 완료로 기록하지 않는다. `true`를 받은 순간부터는 caller cancellation을 다시 완료 조건으로 사용하지 않고 repository actor의 `markFirstLaunchCompleted()`가 끝날 때까지 기다린다. application shutdown도 취소한 startup operation을 drain하므로, 사용자가 본 설정 창이 다음 실행에 다시 자동 표시되는 경쟁을 만들지 않는다. 이 read-modify-write는 저장 시점의 표시·refresh·로그인·선택 executable 값을 모두 보존하고 최초 실행 값만 true로 바꾸며, 이미 완료된 경우에는 다시 쓰지 않는다.
 
 UI 테스트용 `--codex-gauge-ui-test-reset-first-launch` argument는 production defaults에서도 안전한 field-only seam이다. defaults domain을 지우지 않고 최초 실행 완료 여부만 false로 되돌리며, 표시 설정·refresh profile·로그인 실행 의도·선택 executable을 그대로 둔다. reset, form save, executable save와 완료 기록은 같은 repository actor에서 직렬화해 서로의 field를 잃지 않는다. 비슷한 이름의 argument는 인식하지 않는다.
 
-통합 UI fixture argument는 위 reset seam을 내부적으로 함께 사용한다. 합성 publication은 메모리에서만 유지되고 quota payload나 선택 경로를 defaults에 쓰지 않는다. fixture refresh가 종료되면 이후 start·수동 갱신·wake 요청은 새 publication을 만들지 않으며, executable 변경으로 새 fixture generation이 필요할 때만 새 coordinator를 구성한다.
+통합 UI fixture argument와 reset seam은 독립적으로 판정한다. 최초 실행 XCUITest의 첫 launch만 두 인자를 함께 사용하고 후속 launch는 fixture만 유지한다. 합성 publication은 메모리에서만 유지되고 quota payload나 선택 경로를 defaults에 쓰지 않는다. fixture refresh가 종료되면 이후 start·수동 갱신·wake 요청은 새 publication을 만들지 않으며, executable 변경으로 새 fixture generation이 필요할 때만 새 coordinator를 구성한다.
 
 Quit 또는 Command-Q가 들어오면 AppDelegate는 `.terminateLater`를 반환하고 같은 비동기 runtime shutdown을 공유한다. 설정 저장과 child 정리가 끝난 뒤 요청한 `NSApplication`에 성공 답변을 정확히 한 번 보내며, runtime 생성 전이나 drain 완료 뒤의 요청은 즉시 종료한다.
 

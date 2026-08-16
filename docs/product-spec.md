@@ -138,13 +138,13 @@ reset 상대 시간은 메뉴를 구성하는 시점에만 계산한다. 매초 
 2. 초기 사용량 조회를 비동기로 시작한다.
 3. 상태 항목이 표시되고 refresh coordinator에 초기 시작 명령을 전달한 뒤 최초 실행 여부를 한 번 판단한다. 사용량 응답 완료를 기다리지는 않는다.
 4. 최초 실행에만 설정 창을 열어 연결 영역을 보여준다.
-5. 설정 창이 실제 visible 상태로 표시된 경우에만 `hasCompletedFirstLaunch`를 기록한다.
-6. shutdown 또는 cancellation과 경쟁해 창을 표시하지 못하면 기록하지 않으며, 같은 process에서는 자동 표시를 다시 시도하지 않고 다음 앱 실행에서 재시도한다.
+5. 설정 창이 실제 visible 상태로 표시된 경우에만 `hasCompletedFirstLaunch`를 기록한다. visible 결과를 얻은 뒤에는 shutdown cancellation과 경쟁하더라도 완료 기록을 끝까지 기다린다.
+6. 창 표시를 시작하기 전에 취소되었거나 shutdown과 경쟁해 visible 결과를 얻지 못하면 기록하지 않으며, 같은 process에서는 자동 표시를 다시 시도하지 않고 다음 앱 실행에서 재시도한다.
 7. 이후 실행에서는 사용자가 메뉴의 `설정…`을 선택할 때만 창을 연다.
 
 별도 튜토리얼이나 온보딩 창은 만들지 않는다. UI 테스트는 명시적인 `--codex-gauge-ui-test-reset-first-launch` launch argument로 최초 실행 완료 여부만 false로 되돌릴 수 있다. 이 seam은 표시·갱신·로그인·선택 executable 설정을 보존하고 defaults domain이나 다른 사용자 데이터를 삭제하지 않는다. 같은 실행에서 설정 창이 실제로 표시되면 완료 여부는 다시 true가 된다.
 
-Debug 구성의 통합 XCUITest는 정확한 `--codex-gauge-ui-test-fixture-83` launch argument를 사용한다. 이 인자는 최초 실행 완료 여부를 같은 field-only 방식으로 초기화하고, 런타임 표시 설정만 Codex 자동 선택으로 덮어써 상태 항목에 합성 `[5h] 83%`를 게시한다. 저장된 표시·갱신·로그인·선택 executable 값은 변경하지 않는다. fixture에서도 실제 상태 항목, 상세 메뉴와 설정 창을 사용하지만 Codex를 탐색하거나 실행하지 않고, App Server·인증·네트워크와 `SMAppService`에 접근하지 않는다. 비슷한 이름의 인자와 일반 실행에서는 이 모드를 활성화하지 않으며 Release 빌드는 정확한 인자도 무시하고 production 모드로 실행한다.
+Debug 구성의 통합 XCUITest는 정확한 `--codex-gauge-ui-test-fixture-83` launch argument를 사용한다. 이 인자는 런타임 표시 설정만 Codex 자동 선택으로 덮어써 상태 항목에 합성 `[5h] 83%`를 게시하며, 최초 실행 완료 여부는 바꾸지 않는다. 최초 실행을 재현할 때만 별도의 `--codex-gauge-ui-test-reset-first-launch`를 함께 전달한다. 따라서 후속 실행은 fixture를 유지하면서 reset 인자를 빼면 동일한 격리 환경에서 설정 창의 한 번만 자동 표시되는 계약을 검증할 수 있다. 저장된 표시·갱신·로그인·선택 executable 값은 변경하지 않는다. fixture에서도 실제 상태 항목, 상세 메뉴와 설정 창을 사용하지만 Codex를 탐색하거나 실행하지 않고, App Server·인증·네트워크와 `SMAppService`에 접근하지 않는다. 비슷한 이름의 인자와 일반 실행에서는 이 모드를 활성화하지 않으며 Release 빌드는 정확한 인자도 무시하고 production 모드로 실행한다.
 
 ## 6. 갱신 프리셋
 
