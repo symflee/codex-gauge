@@ -39,11 +39,19 @@ let package = Package(
             ]
         ),
         .target(
+            name: "CodexGaugeSettings",
+            dependencies: [
+                "CodexGaugeCore",
+                "CodexGaugeRefresh"
+            ]
+        ),
+        .target(
             name: "CodexGaugeAppKit",
             dependencies: [
                 "CodexGaugeCore",
                 "CodexGaugeProtocol",
-                "CodexGaugeRefresh"
+                "CodexGaugeRefresh",
+                "CodexGaugeSettings"
             ],
             resources: [
                 .process("Resources")
@@ -68,6 +76,7 @@ let package = Package(
                 "CodexGaugeCore",
                 "CodexGaugeProtocol",
                 "CodexGaugeRefresh",
+                "CodexGaugeSettings",
                 "CodexGaugeAppKit"
             ],
             path: "Tests/CodexGaugeTests"

@@ -34,7 +34,7 @@ StatusItemController / menu / settings
 
 UI adapter는 provider를 직접 호출하지 않는다. 모든 조회는 `RefreshCoordinator`를 통해 직렬화하고, UI는 이미 해석된 snapshot과 상태만 소비한다.
 
-SwiftPM은 Core, Protocol, Refresh와 AppKit 모듈의 단일 source of truth다. Xcode application target은 이 package의 `CodexGaugeAppKit` product와 `App/CodexGauge`의 bundle metadata만 소유한다. 같은 Swift 소스를 package와 Xcode target membership에 중복 등록하지 않는다.
+SwiftPM은 Core, Protocol, Refresh, Settings와 AppKit 모듈의 단일 source of truth다. Xcode application target은 이 package의 `CodexGaugeAppKit` product와 `App/CodexGauge`의 bundle metadata만 소유한다. 같은 Swift 소스를 package와 Xcode target membership에 중복 등록하지 않는다.
 
 ## 3. 도메인 경계
 
@@ -173,9 +173,8 @@ window controller와 view controller가 실제로 해제되는지는 weak-refere
 
 ## 7. 설정 저장
 
-`UserDefaults`에는 다음과 같은 비밀이 아닌 preference만 저장한다.
+`CodexGaugeSettings`의 `AppPreferences`는 다음과 같은 비밀이 아닌 값만 가진 immutable `Sendable` value다.
 
-- schema version
 - 표시 제품
 - 자동 또는 직접 한도 식별자
 - 갱신 프리셋
@@ -183,7 +182,11 @@ window controller와 view controller가 실제로 해제되는지는 weak-refere
 - 사용자가 선택한 Codex 실행 파일 경로
 - 최초 실행 완료 여부
 
-저장 구조는 versioned value로 감싸고 알 수 없는 enum 값은 안전한 기본값으로 복구한다. migration은 순수 함수로 구현하고 fixture로 테스트한다.
+`AppPreferencesRepository` actor만 주입받은 `UserDefaults`에 접근한다. 전체 값을 `io.github.symflee.codex-gauge.preferences`라는 하나의 namespaced key에 versioned JSON `Data`로 저장해 같은 defaults domain의 다른 key를 건드리지 않는다. UI용 부분 업데이트 API는 실제 필요가 생기기 전에는 추가하지 않고 현재 경계는 전체 `load`와 `save`만 제공한다.
+
+저장 envelope에는 schema version을 별도로 포함한다. 현재 version 1은 display 설정을 중첩하고 나머지 허용 필드를 top-level에 둔다. version 0은 `displayProductMode`, `displayQuotaSelection`, `manualQuotaSelections`가 분리된 초기 flat schema이며 순수 decoder에서 현재 `AppPreferences`로 migration한다. manual selection은 제품 raw value 오름차순, 같은 제품 안에서는 양수 raw duration 오름차순과 기간 미상 마지막 순서로 정렬해 항상 같은 byte를 만든다. 빈 manual selection은 automatic으로 정규화한다.
+
+version이나 root가 해석되지 않거나 미래 version이면 전체 기본값을 사용한다. 현재 또는 version 0 schema의 개별 enum, boolean, manual item과 URL이 잘못되면 해당 field만 기본값으로 복구하고 나머지는 유지한다. 선택한 executable은 file URL만 받는다. quota snapshot, used/remaining percent, reset, account/error와 raw response는 schema에 없으며 repository는 payload나 경로를 log 또는 description에 넣지 않는다.
 
 ## 8. 보안과 개인정보 경계
 

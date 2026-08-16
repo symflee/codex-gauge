@@ -21,6 +21,7 @@ struct TestRunner {
             + codexExecutableLocatorTests()
             + usageSessionTests()
             + refreshTests()
+            + appPreferencesTests()
             + statusItemRenderingTests()
     }
 
