@@ -111,7 +111,7 @@ reset 상대 시간은 메뉴를 구성하는 시점에만 계산한다. 매초 
 - Codex 실행 파일 경로, 버전과 연결 상태
 - 자동 탐색 실패 시 `Codex 선택…`
 - 민감정보를 제거한 `진단 정보 복사`
-- 비공식 커뮤니티 프로젝트 및 experimental protocol 안내
+- OpenAI 비공식 커뮤니티 프로젝트이며 OpenAI와 제휴하거나 보증받지 않고 experimental Codex App Server에 의존한다는 안내
 
 앱은 표시 제품과 자동·직접 한도 선택, 갱신 프리셋, 로그인 시 실행 의도, 사용자가 선택한 실행 파일 URL과 최초 실행 완료 여부만 설정으로 저장한다. 기본값은 Codex 자동 한도, 균형 갱신, 로그인 시 실행 꺼짐, 선택 경로 없음과 최초 실행 미완료다. 직접 한도 선택이 비어 있으면 자동 선택으로 복구하고 실행 파일 선택은 file URL만 허용한다. 손상되거나 미래 버전인 설정은 안전한 기본값으로 복구하며 quota snapshot, 퍼센트, 계정 상태, 오류와 원문 응답은 저장하지 않는다.
 
@@ -119,11 +119,15 @@ reset 상대 시간은 메뉴를 구성하는 시점에만 계산한다. 매초 
 
 표시 제품은 Codex, Spark, 둘 다 중 하나를 고른다. 직접 선택에서는 현재 메모리 snapshot에서 발견한 제품·raw duration 식별자를 checkbox로 제공하며, 저장된 식별자가 새 응답에서 사라져도 행을 삭제하지 않고 `현재 없음`으로 남겨 사용자가 선택을 해제할 수 있게 한다. 제품을 바꾸면 직접 선택의 유효 범위를 새 표시 제품으로 제한하고 유효한 선택이 하나도 없으면 안전하게 자동 선택으로 저장한다. 자동 선택에서는 같은 행을 읽기 전용으로 보여준다. 로그인 시 실행 toggle은 설정 의도만 바꾸고 실제 시스템 등록은 별도 로그인 실행 adapter가 담당한다.
 
-창은 한 번에 하나만 연다. 닫으면 window controller, view controller와 관련 view의 강한 참조를 제거한다. 다음에 열 때 `UserDefaults`에서 설정을 읽어 화면을 다시 구성한다. allocator 특성상 프로세스 RSS가 즉시 줄지 않을 수 있지만 객체 graph는 해제되어야 한다.
+창은 한 번에 하나만 연다. 닫으면 window controller, view controller와 관련 view의 강한 참조를 제거한다. 다음에 열 때 `UserDefaults`에서 설정을 읽어 화면을 다시 구성한다. allocator 특성상 프로세스 RSS가 즉시 줄지 않을 수 있지만 객체 graph는 해제되어야 한다. 실행 파일 선택 panel이 열린 상태에서 창을 닫거나 앱 종료를 시작하면 panel을 취소하고 continuation을 정확히 한 번 완료한다. 늦게 도착한 panel 응답은 무시하며 다시 연 창의 새 선택 작업과 섞지 않는다.
 
-연결 영역의 경로는 절대 경로 대신 `자동 감지` 또는 `사용자 선택` 출처와 안전한 executable basename을 표시한다. basename을 안전하게 표현할 수 없으면 애플리케이션 내부, Homebrew, 사용자 로컬 CLI 또는 기타 위치처럼 일반화한다. 연결 상태는 연결됨, 확인 중, 찾을 수 없음, 잘못된 선택, 로그아웃, 지원하지 않는 인증, 비호환 버전, timeout과 process 실패를 구분한다.
+연결 영역의 경로는 절대 경로 대신 `자동 감지` 또는 `사용자 선택` 출처와 안전한 executable basename을 표시한다. basename을 안전하게 표현할 수 없으면 애플리케이션 내부, Homebrew, 사용자 로컬 CLI 또는 기타 위치처럼 일반화한다. 연결 상태는 연결됨, 확인 중, 찾을 수 없음, 잘못된 선택, 로그아웃, 지원하지 않는 인증, 비호환 버전, timeout과 process 실패를 구분한다. 메모리의 연결 상태 변경은 별도 I/O 없이 열린 화면과 진단 복사 snapshot에 즉시 반영한다. 동시에 진행 중인 CLI version probe가 끝나도 시작 시점의 오래된 연결 상태로 이를 덮어쓰지 않는다.
 
 진단 복사에는 앱 버전, macOS 버전, architecture, CLI 버전, typed 연결·version 오류 code와 경로 출처·일반화 category만 포함한다. 절대 경로, 이메일, token, raw JSON과 원문 process 출력은 포함하지 않는다.
+
+앱 종료용 설정 coordinator shutdown은 terminal drain이다. 이미 queue에 들어간 form 저장을 마치고, diagnostics probe를 취소한 뒤 process cleanup을 기다리며, 미확정 선택 panel은 취소한다. URL 저장을 시작한 선택은 저장과 runtime callback까지 마친 뒤 종료한다. 저장 대기 중이던 창 표시 요청과 shutdown 이후 새 요청에는 창을 반환하지 않으며, 경쟁으로 이미 생성한 창도 즉시 닫고 해제한다.
+
+실행 파일 선택 저장 중 원래 설정 창을 닫고 다시 열어도 commit 결과는 현재 열린 창을 기준으로 적용한다. 새 창의 이전 경로·상태를 먼저 `확인 중`으로 지우고 선택된 URL로 diagnostics를 다시 시작해, 닫힌 창을 대상으로 한 결과가 화면을 stale 상태에 남기지 않게 한다.
 
 ## 5. 최초 실행
 

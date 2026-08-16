@@ -9,10 +9,113 @@ public protocol CodexExecutableSelecting: AnyObject {
 }
 
 @MainActor
+public protocol CodexExecutablePanelPresenting: AnyObject {
+    var selectedURL: URL? { get }
+
+    func present(
+        attachedTo window: NSWindow?,
+        completion: @escaping @MainActor (NSApplication.ModalResponse) -> Void
+    )
+
+    func dismiss()
+}
+
+public typealias CodexExecutablePanelFactory = @MainActor () ->
+    any CodexExecutablePanelPresenting
+
+@MainActor
 public final class NSOpenPanelCodexExecutableSelector: CodexExecutableSelecting {
-    public init() {}
+    private let panelFactory: CodexExecutablePanelFactory
+
+    public init() {
+        panelFactory = { SystemCodexExecutablePanel() }
+    }
+
+    public init(panelFactory: @escaping CodexExecutablePanelFactory) {
+        self.panelFactory = panelFactory
+    }
 
     public func selectExecutable(attachedTo window: NSWindow?) async -> URL? {
+        let panel = panelFactory()
+        let session = CodexExecutablePanelSession(panel: panel)
+        let response = await withTaskCancellationHandler {
+            await session.response(attachedTo: window)
+        } onCancel: {
+            Task { @MainActor in
+                session.cancel()
+            }
+        }
+        guard !Task.isCancelled, response == .OK else {
+            return nil
+        }
+        return panel.selectedURL
+    }
+}
+
+@MainActor
+private final class CodexExecutablePanelSession {
+    private let panel: any CodexExecutablePanelPresenting
+    private var continuation: CheckedContinuation<NSApplication.ModalResponse, Never>?
+    private var isPresented = false
+    private var isFinished = false
+
+    init(panel: any CodexExecutablePanelPresenting) {
+        self.panel = panel
+    }
+
+    func response(
+        attachedTo window: NSWindow?
+    ) async -> NSApplication.ModalResponse {
+        guard !Task.isCancelled else {
+            cancel()
+            return .cancel
+        }
+        return await withCheckedContinuation { continuation in
+            guard !isFinished else {
+                continuation.resume(returning: .cancel)
+                return
+            }
+            self.continuation = continuation
+            isPresented = true
+            panel.present(attachedTo: window) { [weak self] response in
+                self?.finish(response)
+            }
+            if Task.isCancelled {
+                cancel()
+            }
+        }
+    }
+
+    func cancel() {
+        guard !isFinished else {
+            return
+        }
+        if isPresented {
+            panel.dismiss()
+        }
+        finish(.cancel)
+    }
+
+    private func finish(_ response: NSApplication.ModalResponse) {
+        guard !isFinished else {
+            return
+        }
+        isFinished = true
+        let continuation = continuation
+        self.continuation = nil
+        continuation?.resume(returning: response)
+    }
+}
+
+@MainActor
+private final class SystemCodexExecutablePanel: CodexExecutablePanelPresenting {
+    private let panel: NSOpenPanel
+
+    var selectedURL: URL? {
+        panel.url
+    }
+
+    init() {
         let panel = NSOpenPanel()
         panel.allowsMultipleSelection = false
         panel.canChooseDirectories = false
@@ -20,28 +123,26 @@ public final class NSOpenPanelCodexExecutableSelector: CodexExecutableSelecting 
         panel.canCreateDirectories = false
         panel.resolvesAliases = true
         panel.prompt = SettingsStrings.selectCodexAction
-        let response = await response(for: panel, attachedTo: window)
-        guard response == .OK else {
-            return nil
-        }
-        return panel.url
+        self.panel = panel
     }
 
-    private func response(
-        for panel: NSOpenPanel,
-        attachedTo window: NSWindow?
-    ) async -> NSApplication.ModalResponse {
-        await withCheckedContinuation { continuation in
-            guard let window else {
-                panel.begin { response in
-                    continuation.resume(returning: response)
-                }
-                return
-            }
-            panel.beginSheetModal(for: window) { response in
-                continuation.resume(returning: response)
-            }
+    func present(
+        attachedTo window: NSWindow?,
+        completion: @escaping @MainActor (NSApplication.ModalResponse) -> Void
+    ) {
+        guard let window else {
+            panel.begin(completionHandler: completion)
+            return
         }
+        panel.beginSheetModal(for: window, completionHandler: completion)
+    }
+
+    func dismiss() {
+        guard let parent = panel.sheetParent else {
+            panel.cancel(nil)
+            return
+        }
+        parent.endSheet(panel, returnCode: .cancel)
     }
 }
 

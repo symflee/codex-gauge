@@ -71,3 +71,4 @@
 "settings.connection.unavailable" = "Unavailable";
 "settings.connection.select" = "Select Codex…";
 "settings.connection.copy-diagnostics" = "Copy Diagnostics";
+"settings.project-notice" = "Codex Gauge is an unofficial community project. It is not affiliated with or endorsed by OpenAI and depends on the experimental Codex App Server.";

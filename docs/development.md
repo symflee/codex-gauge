@@ -109,9 +109,15 @@ Java 전용 코딩 규칙은 이 Swift 프로젝트에 적용하지 않는다. J
 - direct child timeout·cancellation의 stderr 폐기와 TERM/KILL cleanup
 - UI의 안전한 basename/category 일반화와 진단 복사의 basename·절대 경로 제거
 - refresh publication의 연결 상태 매핑과 sanitized 진단 report
+- 초기·실시간 연결 상태의 화면·복사 report 동기화와 in-flight CLI probe의 stale 상태 병합 방지
 - 설정 연결 section의 선택·복사 callback과 선택 URL의 원자적 저장
 - close/reopen selection generation, commit 이후 callback과 stale task 격리
+- `NSOpenPanel` cancellation·늦은 응답 경쟁에서 exactly-once continuation과 새 panel 분리
 - pending diagnostics 중 설정 window/controller/view deallocation과 직렬 cleanup
+- terminal 설정 shutdown의 pending form save, diagnostics cleanup, panel 취소와 committed selection drain
+- form save·repository await 중 shutdown과 terminal 이후 direct show의 nil 반환·무생성
+- executable commit 중 close/reopen한 현재 window의 checking 전환과 새 URL diagnostics
+- 한국어·영어 비공식·비제휴·experimental App Server 안내 parity
 - form 변경의 runtime 적용 callback과 repository 저장 동시 전달
 - 초기 조회 뒤 discovery row 갱신의 무저장·무-runtime-callback 동작
 - 최초 실행 상태
