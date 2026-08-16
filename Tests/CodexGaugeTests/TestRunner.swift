@@ -11,7 +11,7 @@ struct TestRunner {
     }
 
     private static func allTests() -> [TestCase] {
-        scaffoldTests() + quotaDomainTests() + quotaDisplayTests()
+        scaffoldTests() + quotaDomainTests() + quotaDisplayTests() + protocolTests()
     }
 
     private static func run(_ tests: [TestCase]) async -> Int32 {
