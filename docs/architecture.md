@@ -40,6 +40,18 @@ composition은 `NSWorkspace`에서 실제 application bundle을 찾았는지를 
 
 SwiftPM은 Core, Protocol, Refresh, Settings와 AppKit 모듈의 단일 source of truth다. Xcode application target은 이 package의 `CodexGaugeAppKit` product와 `App/CodexGauge`의 bundle metadata만 소유한다. 같은 Swift 소스를 package와 Xcode target membership에 중복 등록하지 않는다.
 
+### 런타임 composition
+
+`CodexGaugeApplicationCoordinator`는 앱 수명 동안 하나만 존재하는 `@MainActor` composition root다. 동일한 `SystemStatusItemPresenter`를 사용하는 status controller와 menu controller, lazy settings coordinator, system·assistive monitor, wall-clock deadline scheduler, 로그인 실행 adapter와 현재 refresh coordinator를 소유한다. `CodexGaugeApplicationDelegate`는 이 root를 생성·보유하고 한 번만 시작한다.
+
+시작 순서는 상태 항목의 loading frame과 cached menu 표시, deadline scheduler·monitor 연결, preferences load, provider 구성, refresh 시작 순이다. 따라서 `UserDefaults` actor hop 전에 상태 항목이 먼저 보인다. 저장된 로그인 실행 의도는 refresh 시작 뒤 `SMAppService` 상태와 한 번 reconcile하고, 최초 실행 후속 동작은 이 시점의 startup hook에서만 이어진다.
+
+하나의 `RefreshPublication` callback은 같은 main-actor transaction에서 상태 frame, menu model, discovered quota ID, 연결 상태와 deadline 후보를 모두 갱신한다. application-open capability는 root 생성 때 한 번 읽어 캐시하며, display 변경과 validity deadline은 메모리 publication을 다시 투영할 뿐 provider 또는 workspace I/O를 만들지 않는다. profile, 수동 조회, quota reset, power와 system resume 명령은 직렬 operation chain을 통해 현재 refresh generation에만 전달된다.
+
+사용자가 executable을 바꾸면 generation을 즉시 올리고 loading presentation으로 전환한 뒤 이전 coordinator의 `stop()` 완료를 기다린다. 그 후 최신 preferences로 provider를 새로 만들며 이전 generation의 늦은 publication은 버린다. 실제 application bundle 탐색과 열기는 `NSWorkspaceCodexApplicationAdapter`만 담당하고 shell을 사용하지 않는다.
+
+sleep·wake가 preferences load 또는 executable 교체의 `stop()`과 겹치면 새 coordinator를 request 없는 suspended 상태로 만든 뒤 동일한 직렬 chain의 resume만 적용한다. 따라서 교체 coordinator가 중간에 startup child를 만들지 않는다. 종료는 generation을 먼저 무효화하고 monitor·deadline을 멈춘 뒤 현재 refresh와 진행 중 교체를 drain하며, 중복 `shutdown()` 호출은 하나의 shared task 완료를 기다린다.
+
 ## 3. 도메인 경계
 
 ### `UsageProduct`
@@ -184,7 +196,7 @@ executor의 `suspend()`는 reducer stop command를 통해 timer, in-flight reque
 
 system suspension 중 또는 5초 resume timer가 대기하는 동안 `refreshAfterQuotaReset()`이 도착하면 coordinator가 typed reset intent만 메모리에 latch한다. 중복 resume는 기존 deadline을 연장하지 않고, timer가 fire하면 running 상태를 복구한 뒤 wake request를 같은 generation의 quota-reset baseline으로 승격한다. 따라서 child는 하나만 시작하며 reset 신호 유실, wake와 reset의 이중 조회 및 잘못된 burst를 모두 피한다. 명시적 stop과 새 start는 남아 있는 reset intent를 폐기한다.
 
-composition의 `ApplicationActivityReducer`는 sleep과 session lock을 중복 가능한 set으로 유지한다. 첫 중단 사유가 시작될 때만 coordinator에 suspend command를 보내고 마지막 사유가 끝날 때만 resume command를 보낸다. 중복 notification이나 존재하지 않는 사유의 종료는 no-op이므로 wake 뒤에도 여전히 잠긴 session에서 polling이 먼저 재개되지 않는다.
+composition의 `ApplicationActivityReducer`는 sleep과 session lock을 중복 가능한 set으로 유지한다. 첫 중단 사유가 시작될 때만 coordinator에 suspend command를 보내고 마지막 사유가 끝날 때만 resume command를 보낸다. 각 원시 알림은 별도로 `.sleeping`과 `.screenLocked` rotation pause를 즉시 갱신하므로 두 사유가 겹쳐도 마지막 사유가 해제될 때까지 순환이 재개되지 않는다. 중복 notification이나 존재하지 않는 사유의 종료는 polling state에서는 no-op이므로 wake 뒤에도 여전히 잠긴 session에서 polling이 먼저 재개되지 않는다.
 
 reset 절대 시각과 제품별 24시간 만료는 wall clock `Date`이므로 polling의 단조 deadline으로 변환하지 않는다. `QuotaResetRefreshScheduler`가 clock change, publication 교체와 sleep/wake에 맞춰 별도 one-shot을 재등록하며 이 분리는 polling timer가 wall-clock 변경으로 앞당겨지거나 지연되는 것을 막는다.
 
@@ -206,7 +218,7 @@ frame이 하나면 scheduler에 timer 생성이나 취소 command를 보내지 �
 
 상세 메뉴는 `QuotaDetailsMenuInput → QuotaDetailsMenuModel → StatusMenuController`로 분리한다. 순수 builder는 메모리의 제품별 `ProductUsageState`, typed issue와 마지막 성공 시각만 받아 Codex·Spark section, 모든 quota window, 절대 reset 시각과 action group을 만든다. stale, partial과 unavailable은 제품별로 독립 유지하며 값을 알 수 없는 상태를 `0%`로 만들지 않는다. date formatter와 localization value를 주입해 합성 시각으로 검증할 수 있다.
 
-`StatusMenuController`는 상태 갱신 시 완성된 immutable model로 `NSMenu`를 미리 구성하고 `SystemStatusItemPresenter`에 연결한다. menu open callback에서는 model 생성, 날짜 formatting 또는 snapshot 조회를 하지 않고 `.menuOpen` rotation pause만 설정하며 close에서 해제한다. action은 refresh, Codex 열기·선택, 설정과 종료 closure로 주입하므로 UI adapter가 provider, process 또는 설정 창을 직접 알지 않는다. 실제 coordinator와 settings action이 없는 개발 host에는 무동작 메뉴를 붙이지 않고 이후 composition task에서 controller를 보유·연결한다. Spend-control은 현재 `UsageSnapshot`에 보존되지 않으므로 protocol result를 UI에 누출해 표시하지 않고, 별도 cached domain state가 추가되는 task까지 보류한다.
+`StatusMenuController`는 상태 갱신 시 완성된 immutable model로 `NSMenu`를 미리 구성하고 `SystemStatusItemPresenter`에 연결한다. menu open callback에서는 model 생성, 날짜 formatting 또는 snapshot 조회를 하지 않고 `.menuOpen` rotation pause만 설정하며 close에서 해제한다. action은 refresh, Codex 열기·선택, 설정과 종료 closure로 주입하므로 UI adapter가 provider, process 또는 설정 창을 직접 알지 않는다. production composition은 이 action을 application coordinator의 현재 generation과 settings runtime에 연결한다. Spend-control은 현재 `UsageSnapshot`에 보존되지 않으므로 protocol result를 UI에 누출해 표시하지 않고, 별도 cached domain state가 추가되는 task까지 보류한다.
 
 ### 설정 창
 
@@ -214,7 +226,7 @@ frame이 하나면 scheduler에 timer 생성이나 취소 command를 보내지 �
 
 `SettingsWindowCoordinator`는 창을 요청할 때만 약 440pt 폭의 독립 `NSWindowController`를 만들고 한 번에 하나만 보유한다. 변경된 `SettingsFormValues`는 actor repository에 순서대로 전달하며 repository가 저장 시점의 최신 executable URL과 최초 실행 field에 원자적으로 merge한다. 따라서 창이 열린 동안 다른 owner가 갱신한 숨은 field를 오래된 form state가 덮어쓰지 않는다. 창을 닫은 뒤 다시 열 때는 진행 중인 저장을 먼저 마치고 `UserDefaults`를 새로 읽는다. window close callback은 coordinator의 강한 참조와 AppKit content graph를 제거한다. 로그인 실행 UI는 intent만 저장하며 `SMAppService` 호출은 launch adapter 경계에 남긴다. quota snapshot이나 오류 원문은 저장하지 않는다.
 
-각 form event는 저장 queue와 별도로 주입된 `onSettingsFormValuesChanged` callback에도 전달한다. composition root는 이 seam을 현재 display preference, refresh profile과 로그인 실행 intent에 적용하며 설정 UI가 runtime controller를 직접 알지 않게 한다.
+각 form event는 저장 queue와 별도로 주입된 `onSettingsFormValuesChanged` callback에도 전달한다. composition root는 이 seam을 현재 display preference, refresh profile과 로그인 실행 intent에 적용하며 설정 UI가 runtime controller를 직접 알지 않게 한다. 연결 상태 publication과 종료 drain은 `ApplicationSettingsRuntime` 경계에 분리되어 있으며, 현재 settings coordinator에 해당 public API가 합쳐질 때 adapter의 주입 hook만 교체한다.
 
 초기 quota 조회가 열린 설정 창보다 늦게 끝나면 composition root는 `updateDiscoveredQuotaIDs(_:)`로 발견 목록만 교체한다. 이 system update는 remembered selection과 form value를 보존하고 UI row만 다시 만들며 저장 queue와 runtime preference callback을 호출하지 않는다. 창이 없을 때는 아무 객체도 만들지 않고 다음 `showSettings()`가 provider의 최신 목록을 읽는다.
 
@@ -240,11 +252,11 @@ window controller와 view controller가 실제로 해제되는지는 weak-refere
 
 `LaunchAtLoginController`는 main actor에서 `SMAppService.mainApp`을 감싸고 `disabled`, `enabled`, `requiresApproval`, `unavailable`의 비식별 상태만 UI에 제공한다. 이미 원하는 상태에서는 register 또는 unregister를 반복하지 않는다. 승인 대기 상태에서 enable 요청은 재등록하지 않고 로그인 항목 System Settings 동작을 별도로 제공하며, disable 요청은 등록을 해제한다.
 
-macOS 호출이 실패해도 호출 직후 시스템 상태가 이미 요청 결과가 되었다면 경쟁 상태의 성공으로 취급한다. 그 밖의 NSError domain, code와 description은 버리고 registration, unregistration, unavailable의 typed failure만 전달한다. 설정의 `launchAtLoginIntent`는 사용자가 마지막으로 요청한 값이며 실제 토글 상태와 복구 안내는 매번 `SMAppService` 상태를 기준으로 구성한다.
+macOS 호출이 실패해도 호출 직후 시스템 상태가 이미 요청 결과가 되었다면 경쟁 상태의 성공으로 취급한다. 그 밖의 NSError domain, code와 description은 버리고 registration, unregistration, unavailable의 typed failure만 전달한다. 설정의 `launchAtLoginIntent`는 사용자가 마지막으로 요청한 값이며 실제 토글 상태와 복구 안내는 매번 `SMAppService` 상태를 기준으로 구성한다. composition은 시작 시 저장된 intent를 한 번 적용해 defaults와 실제 OS 상태의 drift를 복구하고, 이후 form 변경도 같은 adapter로 직렬 전달한다.
 
 ### 최초 실행
 
-상태 항목과 초기 조회를 먼저 시작한 뒤 `hasCompletedFirstLaunch`가 false이면 설정 창을 연다. 창 표시가 성공한 뒤 `markFirstLaunchCompleted()`로 플래그를 기록한다. 이 actor 연산은 저장 시점의 표시·refresh·로그인·선택 executable 값을 모두 보존하고 최초 실행 값만 true로 바꾸며, 이미 완료된 경우에는 다시 쓰지 않는다. UI 테스트 launch argument는 테스트 전용 defaults domain을 사용한다.
+상태 항목과 초기 조회를 먼저 시작한 뒤 `hasCompletedFirstLaunch`가 false이면 설정 창을 연다. 창 표시가 성공한 뒤 `markFirstLaunchCompleted()`로 플래그를 기록한다. 이 actor 연산은 저장 시점의 표시·refresh·로그인·선택 executable 값을 모두 보존하고 최초 실행 값만 true로 바꾸며, 이미 완료된 경우에는 다시 쓰지 않는다. UI 테스트 launch argument는 테스트 전용 defaults domain을 사용한다. 현재 composition root는 refresh 시작 뒤의 주입 가능한 startup hook까지만 제공하며, 자동 창 표시·완료 기록과 종료 시 비동기 drain을 AppDelegate 수명에 맞추는 작업은 별도 후속 task다.
 
 ## 7. 설정 저장
 

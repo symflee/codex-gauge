@@ -36,6 +36,7 @@ struct TestRunner {
             + assistiveDisplayMonitorTests()
             + refreshPresentationAdapterTests()
             + applicationActivityGateTests()
+            + applicationRuntimeTests()
     }
 
     private static func run(_ tests: [TestCase]) async -> Int32 {

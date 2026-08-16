@@ -92,6 +92,7 @@ Java 전용 코딩 규칙은 이 Swift 프로젝트에 적용하지 않는다. J
 - snapshot 교체, 시스템 시계 변경, sleep/wake/stop과 늦은 timer generation 폐기
 - sleep, wake, 잠금과 Low Power Mode
 - sleep·잠금 중첩에서 최초 1회 suspend와 최종 1회 resume
+- sleep·잠금별 status rotation pause와 reset-before-resume 직렬 순서
 - workspace·power notification의 typed system activity event 변환과 observer 해제
 - VoiceOver KVO·accessibility display notification의 최초 상태, 변경 중복 제거와 observer 해제
 - versioned `UserDefaults` 기본값, round trip, field 복구와 v0 migration
@@ -120,6 +121,9 @@ Java 전용 코딩 규칙은 이 Swift 프로젝트에 적용하지 않는다. J
 - 한국어·영어 비공식·비제휴·experimental App Server 안내 parity
 - form 변경의 runtime 적용 callback과 repository 저장 동시 전달
 - 초기 조회 뒤 discovery row 갱신의 무저장·무-runtime-callback 동작
+- status-first 시작, publication 단일 투영과 저장된 로그인 실행 의도 reconcile
+- executable 변경 시 old-stop-before-new-start와 이전 generation publication 폐기
+- validity expiry의 presentation-only 처리와 중복 shutdown의 단일 drain
 - 최초 실행 상태
 
 ### XCTest와 UI 테스트
