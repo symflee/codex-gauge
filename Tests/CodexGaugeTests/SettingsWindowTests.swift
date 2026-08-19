@@ -14,6 +14,10 @@ func settingsWindowTests() -> [TestCase] {
         settingsWindowCreationFailureSkipsActivationTest(),
         settingsWindowLateCancellationSkipsActivationTest(),
         settingsWindowPersistsEditsTest(),
+        settingsWindowRelocalizesInPlaceTest(),
+        settingsWindowExternalLanguageUpdateDoesNotSaveTest(),
+        settingsExecutableSelectorForwardsPromptTest(),
+        settingsWindowUsesCurrentLanguageForExecutablePromptTest(),
         settingsWindowRecreationReloadsPreferencesTest(),
         settingsWindowReleasesUIObjectsTest(),
         settingsWindowConnectionSectionTest(),
@@ -36,6 +40,227 @@ func settingsWindowTests() -> [TestCase] {
     ]
 }
 
+private func settingsWindowRelocalizesInPlaceTest() -> TestCase {
+    TestCase(name: "settings changes every owned string in place and persists language") {
+        try await settingsWindowRelocalizesInPlaceScenario()
+    }
+}
+
+@MainActor
+private func settingsWindowRelocalizesInPlaceScenario() async throws {
+    _ = NSApplication.shared
+    let store = try SettingsUITestStore()
+    defer { store.cleanUp() }
+    let repository = try store.repository(defaultLanguage: .korean)
+    let quota = QuotaSelectionID(product: .codex, rawDurationMinutes: 300)
+    let preferences = AppPreferences(
+        displayPreference: DisplayPreference(
+            productMode: .both,
+            quotaSelection: .manual([quota])
+        ),
+        language: .korean
+    )
+    try await repository.save(preferences)
+    var runtimeValues = [SettingsFormValues]()
+    let coordinator = SettingsWindowCoordinator(
+        repository: repository,
+        discoveredQuotaProvider: { [quota] },
+        connectionDiagnosticsProvider: { _, _ in
+            ConnectionDiagnosticsSnapshot(
+                executableSource: .automatic,
+                path: nil,
+                cliVersion: nil,
+                cliVersionIssue: nil,
+                connectionStatus: .connected
+            )
+        },
+        connectionStatusProvider: { .checking },
+        onSettingsFormValuesChanged: { runtimeValues.append($0) }
+    )
+    let controller = try await showSettingsController(coordinator)
+    let viewController = controller.settingsViewController
+    try await waitForSettingsCondition {
+        viewController.connectionDiagnostics.connectionStatus == .connected
+    }
+    let diagnosticsBeforeChange = viewController.connectionDiagnostics
+
+    try expect(controller.window?.title == "Codex Gauge 설정", "Expected Korean title")
+    try expect(
+        viewController.renderedSectionTitles == [
+            "언어", "표시 대상", "표시할 한도", "갱신 주기", "Codex 연결"
+        ],
+        "Expected every Korean section title"
+    )
+    try expect(
+        viewController.renderedLanguageOptionTitles == ["한국어", "English"],
+        "Expected recognizable language autonyms"
+    )
+    try expect(
+        viewController.renderedProductOptionTitles.last == "Codex와 Spark",
+        "Expected Korean product option"
+    )
+    try expect(
+        viewController.renderedSelectionOptionTitles == ["자동 선택", "직접 선택"],
+        "Expected Korean selection options"
+    )
+    try expect(
+        viewController.renderedRefreshOptionTitles == ["수동", "절전", "균형", "빠름"],
+        "Expected Korean refresh options"
+    )
+    try expect(
+        viewController.renderedLaunchAtLoginTitle == "로그인 시 실행",
+        "Expected Korean launch title"
+    )
+
+    viewController.apply(.languageChanged(.english))
+    await coordinator.flushPendingSave()
+
+    try expect(coordinator.activeWindowController === controller, "Expected same window controller")
+    try expect(controller.settingsViewController === viewController, "Expected same view controller")
+    try expect(controller.window?.title == "Codex Gauge Settings", "Expected English title")
+    try expect(viewController.formState.language == .english, "Expected English form state")
+    try expect(
+        viewController.renderedSectionTitles == [
+            "Language", "Display", "Quotas to display", "Refresh profile", "Codex connection"
+        ],
+        "Expected every English section title"
+    )
+    try expect(
+        viewController.renderedLanguageOptionTitles == ["한국어", "English"],
+        "Expected stable language autonyms"
+    )
+    try expect(
+        viewController.renderedProductOptionTitles.last == "Codex and Spark",
+        "Expected English product option"
+    )
+    try expect(
+        viewController.renderedSelectionOptionTitles == ["Automatic", "Manual"],
+        "Expected English selection options"
+    )
+    try expect(
+        viewController.renderedRefreshOptionTitles == ["Manual", "Eco", "Balanced", "Fast"],
+        "Expected English refresh options"
+    )
+    try expect(
+        viewController.renderedLaunchAtLoginTitle == "Launch at login",
+        "Expected English launch title"
+    )
+    try expect(
+        viewController.renderedConnectionActionTitles == ["Select Codex…", "Copy Diagnostics"],
+        "Expected English connection actions"
+    )
+    try expect(
+        viewController.renderedConnectionDetailTexts.contains { $0.hasPrefix("Connection:") },
+        "Expected English connection details"
+    )
+    try expect(
+        viewController.renderedProjectNoticeText.contains("unofficial community project"),
+        "Expected English project notice"
+    )
+    try expect(
+        viewController.renderedQuotaAccessibilityLabels == ["Codex 5 hours quota"],
+        "Expected English quota accessibility"
+    )
+    try expect(
+        viewController.connectionDiagnostics == diagnosticsBeforeChange,
+        "Expected diagnostics state preserved"
+    )
+    try expect(runtimeValues.last?.language == .english, "Expected runtime language callback")
+    let savedPreferences = await repository.load()
+    try expect(savedPreferences.language == .english, "Expected saved language")
+    controller.close()
+}
+
+private func settingsWindowExternalLanguageUpdateDoesNotSaveTest() -> TestCase {
+    TestCase(name: "external settings language update relocalizes without save callbacks") {
+        try await settingsWindowExternalLanguageUpdateDoesNotSaveScenario()
+    }
+}
+
+@MainActor
+private func settingsWindowExternalLanguageUpdateDoesNotSaveScenario() async throws {
+    _ = NSApplication.shared
+    let store = try SettingsUITestStore()
+    defer { store.cleanUp() }
+    let repository = try store.repository(defaultLanguage: .korean)
+    try await repository.save(AppPreferences(language: .korean))
+    var runtimeChangeCount = 0
+    let coordinator = SettingsWindowCoordinator(
+        repository: repository,
+        discoveredQuotaProvider: { [] },
+        onSettingsFormValuesChanged: { _ in runtimeChangeCount += 1 }
+    )
+    let controller = try await showSettingsController(coordinator)
+    let viewController = controller.settingsViewController
+
+    coordinator.updateLanguage(.english)
+
+    try expect(coordinator.activeWindowController === controller, "Expected same controller")
+    try expect(controller.settingsViewController === viewController, "Expected same view")
+    try expect(controller.window?.title == "Codex Gauge Settings", "Expected live title")
+    try expect(viewController.formState.language == .english, "Expected live form language")
+    try expect(runtimeChangeCount == 0, "Expected no user-change callback")
+    let savedPreferences = await repository.load()
+    try expect(savedPreferences.language == .korean, "Expected no implicit save")
+    controller.close()
+}
+
+private func settingsExecutableSelectorForwardsPromptTest() -> TestCase {
+    TestCase(name: "executable selector gives each panel the requested localized prompt") {
+        try await settingsExecutableSelectorForwardsPromptScenario()
+    }
+}
+
+@MainActor
+private func settingsExecutableSelectorForwardsPromptScenario() async throws {
+    _ = NSApplication.shared
+    let panel = SettingsExecutablePanelStub(selectedURL: nil)
+    var prompts = [String]()
+    let selector = NSOpenPanelCodexExecutableSelector(
+        panelFactory: { prompt in
+            prompts.append(prompt)
+            return panel
+        }
+    )
+    let selection = Task { @MainActor in
+        await selector.selectExecutable(attachedTo: nil, prompt: "Codex 선택…")
+    }
+    try await waitForSettingsCondition { panel.presentCount == 1 }
+
+    try expect(prompts == ["Codex 선택…"], "Expected localized panel prompt")
+    panel.respond(.cancel)
+    _ = await selection.value
+}
+
+private func settingsWindowUsesCurrentLanguageForExecutablePromptTest() -> TestCase {
+    TestCase(name: "settings gives executable selection the current language prompt") {
+        try await settingsWindowUsesCurrentLanguageForExecutablePromptScenario()
+    }
+}
+
+@MainActor
+private func settingsWindowUsesCurrentLanguageForExecutablePromptScenario() async throws {
+    _ = NSApplication.shared
+    let store = try SettingsUITestStore()
+    defer { store.cleanUp() }
+    let repository = try store.repository(defaultLanguage: .korean)
+    try await repository.save(AppPreferences(language: .korean))
+    let selector = SettingsPromptRecordingExecutableSelectorStub()
+    let coordinator = SettingsWindowCoordinator(
+        repository: repository,
+        discoveredQuotaProvider: { [] },
+        executableSelector: selector
+    )
+    _ = try await showSettingsController(coordinator)
+
+    coordinator.updateLanguage(.english)
+    coordinator.requestExecutableSelection()
+    try await waitForSettingsCondition { selector.prompts.count == 1 }
+
+    try expect(selector.prompts == ["Select Codex…"], "Expected current English prompt")
+    await coordinator.shutdown()
+}
+
 private func settingsWindowLateCancellationSkipsActivationTest() -> TestCase {
     TestCase(name: "cancelled settings creation does not activate the application") {
         try await settingsWindowLateCancellationSkipsActivationScenario()
@@ -48,6 +273,7 @@ private func settingsWindowLateCancellationSkipsActivationScenario() async throw
     let store = try SettingsUITestStore()
     defer { store.cleanUp() }
     let activation = SettingsWindowCoordinatorActivationSpy()
+    let showTaskCancellation = SettingsShowTaskCancellation()
     let coordinator = SettingsWindowCoordinator(
         repository: try store.repository(),
         discoveredQuotaProvider: { [] },
@@ -55,15 +281,14 @@ private func settingsWindowLateCancellationSkipsActivationScenario() async throw
             applicationActivator: activation
         ),
         onSettingsWindowCreated: { _ in
-            withUnsafeCurrentTask { task in
-                task?.cancel()
-            }
+            showTaskCancellation.cancel()
         }
     )
     let showResult = SettingsWindowResult()
     let showTask = Task { @MainActor in
         showResult.controller = await coordinator.showSettings()
     }
+    showTaskCancellation.install(showTask)
 
     await showTask.value
     await Task.yield()
@@ -390,11 +615,16 @@ private struct SettingsUITestStore {
         self.inspectionDefaults = inspectionDefaults
     }
 
-    func repository() throws -> AppPreferencesRepository {
+    func repository(
+        defaultLanguage: AppLanguage = .english
+    ) throws -> AppPreferencesRepository {
         guard let repositoryDefaults = UserDefaults(suiteName: suiteName) else {
             throw TestFailure(description: "Unable to inject settings UI defaults")
         }
-        return AppPreferencesRepository(userDefaults: repositoryDefaults)
+        return AppPreferencesRepository(
+            userDefaults: repositoryDefaults,
+            defaultLanguage: defaultLanguage
+        )
     }
 
     func cleanUp() {
@@ -1361,6 +1591,25 @@ private final class SettingsExecutableSelectorStub: CodexExecutableSelecting {
 }
 
 @MainActor
+private final class SettingsPromptRecordingExecutableSelectorStub: CodexExecutableSelecting {
+    private(set) var prompts = [String]()
+
+    func selectExecutable(attachedTo window: NSWindow?) async -> URL? {
+        _ = window
+        return nil
+    }
+
+    func selectExecutable(
+        attachedTo window: NSWindow?,
+        prompt: String
+    ) async -> URL? {
+        _ = window
+        prompts.append(prompt)
+        return nil
+    }
+}
+
+@MainActor
 private final class SettingsExecutablePanelStub: CodexExecutablePanelPresenting {
     let selectedURL: URL?
     private(set) var presentCount = 0
@@ -1417,6 +1666,19 @@ private final class SettingsShutdownCompletion {
 @MainActor
 private final class SettingsWindowResult {
     var controller: SettingsWindowController?
+}
+
+@MainActor
+private final class SettingsShowTaskCancellation {
+    private var task: Task<Void, Never>?
+
+    func install(_ task: Task<Void, Never>) {
+        self.task = task
+    }
+
+    func cancel() {
+        task?.cancel()
+    }
 }
 
 @MainActor

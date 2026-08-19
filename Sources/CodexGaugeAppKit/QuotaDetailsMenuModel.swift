@@ -1,4 +1,5 @@
 import CodexGaugeCore
+import CodexGaugeSettings
 import Foundation
 
 public enum QuotaMenuIssue: Equatable, Sendable {
@@ -115,6 +116,13 @@ public struct QuotaMenuLocalization: Sendable {
         }
     }
 
+    public static func bundled(
+        language: AppLanguage
+    ) -> QuotaMenuLocalization {
+        let localization = AppLocalization(language: language)
+        return QuotaMenuLocalization(resolve: localization.string)
+    }
+
     fileprivate func string(_ key: QuotaMenuTextKey) -> String {
         values[key.rawValue] ?? key.rawValue
     }
@@ -130,6 +138,22 @@ public struct QuotaMenuDateFormatter {
     public static var localized: QuotaMenuDateFormatter {
         QuotaMenuDateFormatter { date in
             date.formatted(date: .abbreviated, time: .shortened)
+        }
+    }
+
+    public static func localized(
+        language: AppLanguage,
+        timeZone: TimeZone = .autoupdatingCurrent
+    ) -> QuotaMenuDateFormatter {
+        let localization = AppLocalization(language: language)
+        let style = Date.FormatStyle(
+            date: .abbreviated,
+            time: .shortened,
+            locale: localization.locale,
+            timeZone: timeZone
+        )
+        return QuotaMenuDateFormatter { date in
+            date.formatted(style)
         }
     }
 
@@ -149,6 +173,15 @@ public struct QuotaDetailsMenuModelBuilder {
     ) {
         self.localization = localization
         self.dateFormatter = dateFormatter
+    }
+
+    public static func bundled(
+        language: AppLanguage
+    ) -> QuotaDetailsMenuModelBuilder {
+        QuotaDetailsMenuModelBuilder(
+            localization: .bundled(language: language),
+            dateFormatter: .localized(language: language)
+        )
     }
 
     public func build(_ input: QuotaDetailsMenuInput) -> QuotaDetailsMenuModel {

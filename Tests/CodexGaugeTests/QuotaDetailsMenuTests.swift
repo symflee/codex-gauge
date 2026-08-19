@@ -1,9 +1,12 @@
 import AppKit
 import CodexGaugeAppKit
 import CodexGaugeCore
+import CodexGaugeSettings
 
 func quotaDetailsMenuTests() -> [TestCase] {
     [
+        quotaMenuExplicitLanguageFactoryTest(),
+        quotaMenuLocalizedDateLocaleTest(),
         quotaMenuGroupsAllWindowsTest(),
         quotaMenuExpiresValuesWithToolbarValidityPolicyTest(),
         quotaMenuShowsSpendControlDetailsTest(),
@@ -13,6 +16,69 @@ func quotaDetailsMenuTests() -> [TestCase] {
         quotaMenuAdapterUsesCachedModelTest(),
         quotaMenuDispatchesInjectedActionsTest()
     ]
+}
+
+private func quotaMenuExplicitLanguageFactoryTest() -> TestCase {
+    TestCase(name: "quota menu factory resolves an explicit application language") {
+        let input = QuotaDetailsMenuInput(
+            productStates: [.codex: .loading, .spark: .unavailable],
+            codexAvailability: .needsSelection,
+            currentDate: Date(timeIntervalSince1970: 1_900_000_000)
+        )
+
+        let korean = QuotaDetailsMenuModelBuilder
+            .bundled(language: .korean)
+            .build(input)
+        let english = QuotaDetailsMenuModelBuilder
+            .bundled(language: .english)
+            .build(input)
+
+        try expect(
+            korean.productSections[0].statusRows == ["연결 확인 중"],
+            "Expected Korean menu content"
+        )
+        try expect(
+            korean.actionGroups.flatMap { $0 }.map(\.title)
+                == ["새로 고침", "Codex 선택…", "설정…", "Codex Gauge 종료"],
+            "Expected Korean menu actions"
+        )
+        try expect(
+            english.productSections[0].statusRows == ["Checking connection"],
+            "Expected English menu content"
+        )
+        try expect(
+            english.actionGroups.flatMap { $0 }.map(\.title)
+                == ["Refresh", "Select Codex…", "Settings…", "Quit Codex Gauge"],
+            "Expected English menu actions"
+        )
+    }
+}
+
+private func quotaMenuLocalizedDateLocaleTest() -> TestCase {
+    TestCase(name: "quota menu dates follow the selected application language locale") {
+        guard let timeZone = TimeZone(secondsFromGMT: 0) else {
+            throw TestFailure(description: "Expected a GMT time zone")
+        }
+        let date = Date(timeIntervalSince1970: 1_900_003_600)
+        let korean = QuotaMenuDateFormatter.localized(
+            language: .korean,
+            timeZone: timeZone
+        ).string(from: date)
+        let english = QuotaMenuDateFormatter.localized(
+            language: .english,
+            timeZone: timeZone
+        ).string(from: date)
+
+        try expect(korean != english, "Expected language-specific date formatting")
+        try expect(containsHangul(korean), "Expected a Korean-localized date")
+        try expect(!containsHangul(english), "Expected an English-localized date")
+    }
+}
+
+private func containsHangul(_ value: String) -> Bool {
+    value.unicodeScalars.contains { scalar in
+        (0xAC00...0xD7A3).contains(Int(scalar.value))
+    }
 }
 
 private func quotaMenuExpiresValuesWithToolbarValidityPolicyTest() -> TestCase {

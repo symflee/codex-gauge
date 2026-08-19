@@ -31,22 +31,26 @@ public struct SettingsFormValues: Equatable, Sendable {
     public let displayPreference: DisplayPreference
     public let refreshProfile: RefreshProfile
     public let launchAtLoginIntent: Bool
+    public let language: AppLanguage
 
     public init(preferences: AppPreferences) {
         displayPreference = preferences.displayPreference
         refreshProfile = preferences.refreshProfile
         launchAtLoginIntent = preferences.launchAtLoginIntent
+        language = preferences.language
     }
 
     public init(
         displayPreference: DisplayPreference,
         refreshProfile: RefreshProfile,
-        launchAtLoginIntent: Bool
+        launchAtLoginIntent: Bool,
+        language: AppLanguage = .english
     ) {
         let normalized = AppPreferences(
             displayPreference: displayPreference,
             refreshProfile: refreshProfile,
-            launchAtLoginIntent: launchAtLoginIntent
+            launchAtLoginIntent: launchAtLoginIntent,
+            language: language
         )
         self.init(preferences: normalized)
     }
@@ -57,6 +61,7 @@ public struct SettingsFormState: Equatable, Sendable {
     public let quotaSelectionMode: SettingsQuotaSelectionMode
     public let refreshProfile: RefreshProfile
     public let launchAtLoginIntent: Bool
+    public let language: AppLanguage
 
     let discoveredQuotaIDs: Set<QuotaSelectionID>
     let rememberedQuotaIDs: Set<QuotaSelectionID>
@@ -68,6 +73,7 @@ public struct SettingsFormState: Equatable, Sendable {
         productMode = preferences.displayPreference.productMode
         refreshProfile = preferences.refreshProfile
         launchAtLoginIntent = preferences.launchAtLoginIntent
+        language = preferences.language
         self.discoveredQuotaIDs = discoveredQuotaIDs
 
         switch preferences.displayPreference.quotaSelection {
@@ -98,7 +104,8 @@ public struct SettingsFormState: Equatable, Sendable {
                 quotaSelection: persistedQuotaSelection
             ),
             refreshProfile: refreshProfile,
-            launchAtLoginIntent: launchAtLoginIntent
+            launchAtLoginIntent: launchAtLoginIntent,
+            language: language
         )
     }
 
@@ -108,6 +115,7 @@ public struct SettingsFormState: Equatable, Sendable {
         rememberedQuotaIDs: Set<QuotaSelectionID>,
         refreshProfile: RefreshProfile,
         launchAtLoginIntent: Bool,
+        language: AppLanguage,
         discoveredQuotaIDs: Set<QuotaSelectionID>
     ) {
         self.productMode = productMode
@@ -115,6 +123,7 @@ public struct SettingsFormState: Equatable, Sendable {
         self.rememberedQuotaIDs = rememberedQuotaIDs
         self.refreshProfile = refreshProfile
         self.launchAtLoginIntent = launchAtLoginIntent
+        self.language = language
         self.discoveredQuotaIDs = discoveredQuotaIDs
     }
 

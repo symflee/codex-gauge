@@ -38,6 +38,10 @@
 "menu.action.settings" = "Settings…";
 "menu.quit" = "Quit Codex Gauge";
 "settings.window.title" = "Codex Gauge Settings";
+"settings.section.language" = "Language";
+"settings.language.accessibility" = "Application language";
+"settings.language.korean" = "한국어";
+"settings.language.english" = "English";
 "settings.section.display" = "Display";
 "settings.product.codex" = "Codex";
 "settings.product.spark" = "Spark";

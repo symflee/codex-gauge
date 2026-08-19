@@ -1,11 +1,14 @@
 import AppKit
 import CodexGaugeAppKit
 import CodexGaugeCore
+import CodexGaugeSettings
 
 func statusItemRenderingTests() -> [TestCase] {
     [
+        explicitAppLocalizationTest(),
         badgeImageCacheTest(),
         localizedAccessibilityTest(),
+        statusRendererReplacementTest(),
         attributedFrameRenderingTest(),
         renderedStateSemanticsTest(),
         fixedWidthPolicyTest(),
@@ -18,16 +21,28 @@ func statusItemRenderingTests() -> [TestCase] {
     ]
 }
 
+private func explicitAppLocalizationTest() -> TestCase {
+    TestCase(name: "app localization resolves explicit Korean and English bundles") {
+        let korean = AppLocalization(language: .korean)
+        let english = AppLocalization(language: .english)
+
+        try expect(
+            korean.string("menu.action.refresh") == "새로 고침",
+            "Expected explicit Korean bundle"
+        )
+        try expect(
+            english.string("menu.action.refresh") == "Refresh",
+            "Expected explicit English bundle"
+        )
+        try expect(korean.locale.identifier == "ko", "Expected Korean locale")
+        try expect(english.locale.identifier == "en", "Expected English locale")
+    }
+}
+
 private func localizedAccessibilityTest() -> TestCase {
     TestCase(name: "status accessibility supports Korean and English localization") {
-        let korean = StatusAccessibilityFormatter(
-            vocabulary: statusVocabulary(language: .korean),
-            durationVocabulary: durationVocabulary(language: .korean)
-        )
-        let english = StatusAccessibilityFormatter(
-            vocabulary: statusVocabulary(language: .english),
-            durationVocabulary: durationVocabulary(language: .english)
-        )
+        let korean = StatusAccessibilityFormatter(language: .korean)
+        let english = StatusAccessibilityFormatter(language: .english)
         let comparison = DisplayFrame.comparison(
             codex: menubarQuota(product: .codex, duration: 300, value: .stale(75)),
             spark: menubarQuota(product: .spark, duration: nil, value: .unavailable)
@@ -53,6 +68,36 @@ private func localizedAccessibilityTest() -> TestCase {
             unknownDuration == "unknown duration",
             "Expected sentence-case English duration resource"
         )
+    }
+}
+
+private func statusRendererReplacementTest() -> TestCase {
+    TestCase(name: "status controller replaces its renderer for immediate localization") {
+        try await MainActor.run {
+            let presenter = RecordingStatusItemPresenter()
+            let controller = StatusItemController(
+                presenter: presenter,
+                renderer: StatusFrameRenderer(language: .korean),
+                scheduler: ManualStatusRotationScheduler()
+            )
+            let frame = menubarFrame(
+                product: .codex,
+                duration: 300,
+                value: .fresh(83)
+            )
+
+            controller.setFrames([frame])
+            controller.replaceRenderer(StatusFrameRenderer(language: .english))
+            controller.setFrames([frame])
+
+            try expect(
+                presenter.accessibilityLabels == [
+                    "Codex 5시간 한도 남은 사용량 83퍼센트",
+                    "Codex 5 hours quota, 83 percent remaining"
+                ],
+                "Expected replacement renderer to use the selected language"
+            )
+        }
     }
 }
 

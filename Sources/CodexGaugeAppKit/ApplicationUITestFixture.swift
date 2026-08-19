@@ -180,7 +180,8 @@ public struct UITestFixtureApplicationPreferencesLoader:
             refreshProfile: stored.refreshProfile,
             launchAtLoginIntent: stored.launchAtLoginIntent,
             selectedExecutableURL: stored.selectedExecutableURL,
-            hasCompletedFirstLaunch: stored.hasCompletedFirstLaunch
+            hasCompletedFirstLaunch: stored.hasCompletedFirstLaunch,
+            language: stored.language
         )
     }
 }

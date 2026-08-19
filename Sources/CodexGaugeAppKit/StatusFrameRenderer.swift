@@ -1,5 +1,6 @@
 import AppKit
 import CodexGaugeCore
+import CodexGaugeSettings
 
 @MainActor
 public struct RenderedStatusFrame {
@@ -46,6 +47,18 @@ public final class StatusFrameRenderer: StatusFrameRendering {
         self.titleFormatter = titleFormatter
         self.accessibilityFormatter = accessibilityFormatter
         self.badgeCache = badgeCache
+    }
+
+    public convenience init(
+        language: AppLanguage,
+        badgeCache: StatusBadgeImageCache = StatusBadgeImageCache()
+    ) {
+        self.init(
+            accessibilityFormatter: StatusAccessibilityFormatter(
+                language: language
+            ),
+            badgeCache: badgeCache
+        )
     }
 
     public func render(

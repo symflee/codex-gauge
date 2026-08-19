@@ -36,6 +36,7 @@ public final class SettingsWindowCoordinator {
     private var selectionCleanupGeneration: UInt64 = 0
     private var committingSelectionGeneration: UInt64?
     private var selectedExecutableURL: URL?
+    private var language: AppLanguage = .english
     private var latestConnectionStatus: CodexConnectionStatus
     private var latestConnectionDiagnostics = ConnectionDiagnosticsSnapshot.checking
     private var latestLaunchAtLoginState: LaunchAtLoginSettingsState
@@ -200,6 +201,11 @@ public final class SettingsWindowCoordinator {
         )
     }
 
+    public func updateLanguage(_ language: AppLanguage) {
+        self.language = language
+        activeWindowController?.updateLanguage(language)
+    }
+
     private func refreshLaunchAtLoginState() {
         updateLaunchAtLoginState(launchAtLoginStateProvider())
     }
@@ -208,6 +214,7 @@ public final class SettingsWindowCoordinator {
         preferences: AppPreferences
     ) -> SettingsWindowController {
         selectedExecutableURL = preferences.selectedExecutableURL
+        language = preferences.language
         let state = SettingsFormState(
             preferences: preferences,
             discoveredQuotaIDs: discoveredQuotaProvider()
@@ -384,8 +391,10 @@ public final class SettingsWindowCoordinator {
             return
         }
         weak let presentingController = activeWindowController
+        let prompt = SettingsStrings(language: language).selectCodexAction
         let selectedURL = await executableSelector.selectExecutable(
-            attachedTo: presentingController?.window
+            attachedTo: presentingController?.window,
+            prompt: prompt
         )
         guard canCommitExecutableSelection(selectedURL, generation: generation) else {
             finishExecutableSelection(generation: generation)
@@ -485,6 +494,9 @@ public final class SettingsWindowCoordinator {
     }
 
     private func settingsFormValuesChanged(_ values: SettingsFormValues) {
+        if language != values.language {
+            updateLanguage(values.language)
+        }
         onSettingsFormValuesChanged(values)
         enqueueSave(values)
     }

@@ -4,16 +4,39 @@ public actor AppPreferencesRepository {
     public static let storageKey = "io.github.symflee.codex-gauge.preferences"
 
     private let userDefaults: UserDefaults
+    private let defaultPreferences: AppPreferences
 
-    public init(userDefaults: UserDefaults) {
+    public init(
+        userDefaults: UserDefaults,
+        defaultLanguage: AppLanguage = PreferredAppLanguageResolver().resolve(
+            preferredLanguages: Locale.preferredLanguages
+        )
+    ) {
         self.userDefaults = userDefaults
+        defaultPreferences = AppPreferences(language: defaultLanguage)
     }
 
     public func load() -> AppPreferences {
-        guard let data = userDefaults.data(forKey: Self.storageKey) else {
-            return .default
+        guard let storedValue = userDefaults.object(forKey: Self.storageKey) else {
+            persistDefaultPreferences()
+            return defaultPreferences
         }
-        return PreferencesCodec.decode(data)
+        guard let data = storedValue as? Data else {
+            return defaultPreferences
+        }
+        let requiresMigration = PreferencesCodec.isKnownLegacySchema(data)
+        let preferences = PreferencesCodec.decode(
+            data,
+            defaultLanguage: defaultPreferences.language
+        )
+        if requiresMigration {
+            try? save(preferences)
+        }
+        return preferences
+    }
+
+    private func persistDefaultPreferences() {
+        try? save(defaultPreferences)
     }
 
     public func save(_ preferences: AppPreferences) throws {
@@ -28,7 +51,8 @@ public actor AppPreferencesRepository {
             refreshProfile: values.refreshProfile,
             launchAtLoginIntent: values.launchAtLoginIntent,
             selectedExecutableURL: current.selectedExecutableURL,
-            hasCompletedFirstLaunch: current.hasCompletedFirstLaunch
+            hasCompletedFirstLaunch: current.hasCompletedFirstLaunch,
+            language: values.language
         )
         try save(merged)
     }
@@ -40,7 +64,8 @@ public actor AppPreferencesRepository {
             refreshProfile: current.refreshProfile,
             launchAtLoginIntent: current.launchAtLoginIntent,
             selectedExecutableURL: url,
-            hasCompletedFirstLaunch: current.hasCompletedFirstLaunch
+            hasCompletedFirstLaunch: current.hasCompletedFirstLaunch,
+            language: current.language
         )
         try save(merged)
     }
@@ -69,7 +94,8 @@ private extension AppPreferences {
             refreshProfile: refreshProfile,
             launchAtLoginIntent: launchAtLoginIntent,
             selectedExecutableURL: selectedExecutableURL,
-            hasCompletedFirstLaunch: isCompleted
+            hasCompletedFirstLaunch: isCompleted,
+            language: language
         )
         return merged
     }

@@ -5,6 +5,7 @@ final class CodexGaugeFirstLaunchUITests: XCTestCase {
     private let settingsMenuIdentifier = "codex-gauge.menu.action.settings"
     private let settingsWindowIdentifier = "codex-gauge.settings.window"
     private let settingsCloseIdentifier = "codex-gauge.settings.close"
+    private let settingsLanguageIdentifier = "codex-gauge.settings.language"
     private let statusAccessibilityLabel =
         "Codex 5시간 한도 남은 사용량 83퍼센트"
 
@@ -23,6 +24,7 @@ final class CodexGaugeFirstLaunchUITests: XCTestCase {
             settingsWindow.waitForExistence(timeout: 10),
             "Expected the first-launch settings window"
         )
+        selectKoreanLanguage(in: settingsWindow, application: application)
         assertSyntheticStatus(in: application)
 
         application.terminate()
@@ -68,6 +70,22 @@ final class CodexGaugeFirstLaunchUITests: XCTestCase {
             "Expected status item \(statusItemIdentifier) to publish "
                 + "accessibility label \(statusAccessibilityLabel) within 10 seconds"
         )
+    }
+
+    @MainActor
+    private func selectKoreanLanguage(
+        in settingsWindow: XCUIElement,
+        application: XCUIApplication
+    ) {
+        let language = settingsWindow.popUpButtons[settingsLanguageIdentifier]
+        XCTAssertTrue(
+            language.waitForExistence(timeout: 5),
+            "Expected the application language selector"
+        )
+        language.click()
+        let korean = application.menuItems["한국어"]
+        XCTAssertTrue(korean.waitForExistence(timeout: 5))
+        korean.click()
     }
 
     @MainActor
