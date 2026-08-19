@@ -1,4 +1,5 @@
 import CodexGaugeCore
+import CodexGaugeSettings
 import Foundation
 
 public struct StatusAccessibilityVocabulary: Equatable, Sendable {
@@ -34,6 +35,14 @@ public struct StatusAccessibilityFormatter: Sendable {
         self.init(
             vocabulary: Self.localizedVocabulary(),
             durationVocabulary: Self.localizedDurationVocabulary()
+        )
+    }
+
+    public init(language: AppLanguage) {
+        let localization = AppLocalization(language: language)
+        self.init(
+            vocabulary: Self.localizedVocabulary(localization),
+            durationVocabulary: Self.localizedDurationVocabulary(localization)
         )
     }
 
@@ -112,6 +121,31 @@ public struct StatusAccessibilityFormatter: Sendable {
         )
     }
 
+    private static func localizedVocabulary(
+        _ localization: AppLocalization
+    ) -> StatusAccessibilityVocabulary {
+        StatusAccessibilityVocabulary(
+            quotaFormat: localization.string(
+                "status.accessibility.quota.format"
+            ),
+            freshValueFormat: localization.string(
+                "status.accessibility.value.fresh"
+            ),
+            staleValueFormat: localization.string(
+                "status.accessibility.value.stale"
+            ),
+            loadingValue: localization.string(
+                "status.accessibility.value.loading"
+            ),
+            unavailableValue: localization.string(
+                "status.accessibility.value.unavailable"
+            ),
+            comparisonSeparator: localization.string(
+                "status.accessibility.comparison.separator"
+            )
+        )
+    }
+
     private static func localizedDurationVocabulary(
     ) -> SettingsDurationAccessibilityVocabulary {
         SettingsDurationAccessibilityVocabulary(
@@ -122,6 +156,34 @@ public struct StatusAccessibilityFormatter: Sendable {
             days: localized("status.accessibility.duration.days"),
             oneWeek: localized("status.accessibility.duration.one-week"),
             weeks: localized("status.accessibility.duration.weeks")
+        )
+    }
+
+    private static func localizedDurationVocabulary(
+        _ localization: AppLocalization
+    ) -> SettingsDurationAccessibilityVocabulary {
+        SettingsDurationAccessibilityVocabulary(
+            unknown: localization.string(
+                "status.accessibility.duration.unknown"
+            ),
+            oneHour: localization.string(
+                "status.accessibility.duration.one-hour"
+            ),
+            hours: localization.string(
+                "status.accessibility.duration.hours"
+            ),
+            oneDay: localization.string(
+                "status.accessibility.duration.one-day"
+            ),
+            days: localization.string(
+                "status.accessibility.duration.days"
+            ),
+            oneWeek: localization.string(
+                "status.accessibility.duration.one-week"
+            ),
+            weeks: localization.string(
+                "status.accessibility.duration.weeks"
+            )
         )
     }
 

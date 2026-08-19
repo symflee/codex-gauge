@@ -30,10 +30,10 @@ public final class CodexGaugeApplicationCoordinator {
 
     private let activityReducer = ApplicationActivityReducer()
     private let presentationAdapter = RefreshPresentationAdapter()
-    private let menuModelBuilder = QuotaDetailsMenuModelBuilder()
     private let connectionStatusResolver = ConnectionStatusResolver()
 
-    private var preferences = AppPreferences.default
+    private var menuModelBuilder: QuotaDetailsMenuModelBuilder
+    private var preferences: AppPreferences
     private var pendingFormValues: SettingsFormValues?
     private var pendingSelectedExecutableURL: URL?
     private var activityState = ApplicationActivityState.active
@@ -65,6 +65,9 @@ public final class CodexGaugeApplicationCoordinator {
         preferencesLoader: any ApplicationPreferencesLoading,
         workspace: any CodexApplicationWorkspacing,
         terminator: any ApplicationTerminating,
+        initialLanguage: AppLanguage = PreferredAppLanguageResolver().resolve(
+            preferredLanguages: Locale.preferredLanguages
+        ),
         now: @escaping @MainActor () -> Date = { Date() },
         startupHook: @escaping StartupHook = { _ in }
     ) {
@@ -83,8 +86,12 @@ public final class CodexGaugeApplicationCoordinator {
         self.workspace = workspace
         self.canOpenCodexApplication = workspace.applicationURL != nil
         self.terminator = terminator
+        menuModelBuilder = .bundled(language: initialLanguage)
+        preferences = AppPreferences(language: initialLanguage)
         self.now = now
         self.startupHook = startupHook
+        statusRuntime.updateLanguage(initialLanguage)
+        settingsRuntime.updateLanguage(initialLanguage)
     }
 
     public var connectionStatus: CodexConnectionStatus {
@@ -241,6 +248,7 @@ public final class CodexGaugeApplicationCoordinator {
         pendingFormValues = nil
         pendingSelectedExecutableURL = nil
         hasLoadedPreferences = true
+        updateLanguage(preferences.language)
         presentCurrentPublication(publishDeadlines: false)
         await installAndStartRefreshCoordinator()
     }
@@ -362,8 +370,15 @@ public final class CodexGaugeApplicationCoordinator {
         from previous: SettingsFormValues,
         to current: SettingsFormValues
     ) {
-        if previous.displayPreference != current.displayPreference {
+        let displayChanged = previous.displayPreference != current.displayPreference
+        let languageChanged = previous.language != current.language
+        if languageChanged {
+            updateLanguage(current.language)
+        }
+        if displayChanged || languageChanged {
             presentCurrentPublication(publishDeadlines: false)
+        }
+        if displayChanged {
             enqueueRefreshOperation { refresh in
                 await refresh.updateDisplayPreference(current.displayPreference)
             }
@@ -373,6 +388,12 @@ public final class CodexGaugeApplicationCoordinator {
                 await refresh.updateProfile(current.refreshProfile)
             }
         }
+    }
+
+    private func updateLanguage(_ language: AppLanguage) {
+        menuModelBuilder = .bundled(language: language)
+        statusRuntime.updateLanguage(language)
+        settingsRuntime.updateLanguage(language)
     }
 
     private func enqueueLaunchAtLoginChange(_ enabled: Bool) {
@@ -597,7 +618,8 @@ private extension AppPreferences {
             refreshProfile: values.refreshProfile,
             launchAtLoginIntent: values.launchAtLoginIntent,
             selectedExecutableURL: selectedExecutableURL,
-            hasCompletedFirstLaunch: hasCompletedFirstLaunch
+            hasCompletedFirstLaunch: hasCompletedFirstLaunch,
+            language: values.language
         )
     }
 
@@ -607,7 +629,8 @@ private extension AppPreferences {
             refreshProfile: refreshProfile,
             launchAtLoginIntent: launchAtLoginIntent,
             selectedExecutableURL: url,
-            hasCompletedFirstLaunch: hasCompletedFirstLaunch
+            hasCompletedFirstLaunch: hasCompletedFirstLaunch,
+            language: language
         )
     }
 }

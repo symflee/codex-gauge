@@ -48,7 +48,7 @@ public final class StatusItemController {
     private static let horizontalPadding: CGFloat = 12
 
     private let presenter: StatusItemPresenting
-    private let renderer: StatusFrameRendering
+    private var renderer: StatusFrameRendering
     private let rotation: StatusFrameRotation
     private let prototypeBuilder = StatusWidthPrototypeBuilder()
 
@@ -62,6 +62,10 @@ public final class StatusItemController {
         rotation = StatusFrameRotation(scheduler: scheduler) { frame in
             presenter.present(frame)
         }
+    }
+
+    public func replaceRenderer(_ renderer: StatusFrameRendering) {
+        self.renderer = renderer
     }
 
     public func setFrames(

@@ -9,10 +9,18 @@ import Foundation
 public protocol ApplicationStatusRuntime: AnyObject {
     func present(frames: [DisplayFrame])
 
+    func updateLanguage(_ language: AppLanguage)
+
     func setRotationPaused(
         _ paused: Bool,
         for reason: StatusRotationPauseReason
     )
+}
+
+public extension ApplicationStatusRuntime {
+    func updateLanguage(_ language: AppLanguage) {
+        _ = language
+    }
 }
 
 @MainActor
@@ -25,6 +33,10 @@ public final class StatusItemRuntimeAdapter: ApplicationStatusRuntime {
 
     public func present(frames: [DisplayFrame]) {
         controller.setFrames(frames)
+    }
+
+    public func updateLanguage(_ language: AppLanguage) {
+        controller.replaceRenderer(StatusFrameRenderer(language: language))
     }
 
     public func setRotationPaused(
@@ -60,7 +72,14 @@ public protocol ApplicationSettingsRuntime: AnyObject {
     func updateDiscoveredQuotaIDs(_ identifiers: Set<QuotaSelectionID>)
     func updateConnectionStatus(_ status: CodexConnectionStatus)
     func updateLaunchAtLoginState(_ state: LaunchAtLoginSettingsState)
+    func updateLanguage(_ language: AppLanguage)
     func shutdown() async
+}
+
+public extension ApplicationSettingsRuntime {
+    func updateLanguage(_ language: AppLanguage) {
+        _ = language
+    }
 }
 
 @MainActor
@@ -92,6 +111,10 @@ public final class SettingsWindowRuntimeAdapter: ApplicationSettingsRuntime {
 
     public func updateLaunchAtLoginState(_ state: LaunchAtLoginSettingsState) {
         coordinator.updateLaunchAtLoginState(state)
+    }
+
+    public func updateLanguage(_ language: AppLanguage) {
+        coordinator.updateLanguage(language)
     }
 
     public func shutdown() async {

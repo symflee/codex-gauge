@@ -6,6 +6,21 @@ import Foundation
 @MainActor
 public protocol CodexExecutableSelecting: AnyObject {
     func selectExecutable(attachedTo window: NSWindow?) async -> URL?
+
+    func selectExecutable(
+        attachedTo window: NSWindow?,
+        prompt: String
+    ) async -> URL?
+}
+
+public extension CodexExecutableSelecting {
+    func selectExecutable(
+        attachedTo window: NSWindow?,
+        prompt: String
+    ) async -> URL? {
+        _ = prompt
+        return await selectExecutable(attachedTo: window)
+    }
 }
 
 @MainActor
@@ -22,21 +37,38 @@ public protocol CodexExecutablePanelPresenting: AnyObject {
 
 public typealias CodexExecutablePanelFactory = @MainActor () ->
     any CodexExecutablePanelPresenting
+public typealias PromptedCodexExecutablePanelFactory = @MainActor (String) ->
+    any CodexExecutablePanelPresenting
 
 @MainActor
 public final class NSOpenPanelCodexExecutableSelector: CodexExecutableSelecting {
-    private let panelFactory: CodexExecutablePanelFactory
+    private let panelFactory: PromptedCodexExecutablePanelFactory
 
     public init() {
-        panelFactory = { SystemCodexExecutablePanel() }
+        panelFactory = { prompt in SystemCodexExecutablePanel(prompt: prompt) }
     }
 
     public init(panelFactory: @escaping CodexExecutablePanelFactory) {
+        self.panelFactory = { _ in panelFactory() }
+    }
+
+    public init(panelFactory: @escaping PromptedCodexExecutablePanelFactory) {
         self.panelFactory = panelFactory
     }
 
     public func selectExecutable(attachedTo window: NSWindow?) async -> URL? {
-        let panel = panelFactory()
+        let language = PreferredAppLanguageResolver().resolve(
+            preferredLanguages: Locale.preferredLanguages
+        )
+        let prompt = SettingsStrings(language: language).selectCodexAction
+        return await selectExecutable(attachedTo: window, prompt: prompt)
+    }
+
+    public func selectExecutable(
+        attachedTo window: NSWindow?,
+        prompt: String
+    ) async -> URL? {
+        let panel = panelFactory(prompt)
         let session = CodexExecutablePanelSession(panel: panel)
         let response = await withTaskCancellationHandler {
             await session.response(attachedTo: window)
@@ -115,14 +147,14 @@ private final class SystemCodexExecutablePanel: CodexExecutablePanelPresenting {
         panel.url
     }
 
-    init() {
+    init(prompt: String) {
         let panel = NSOpenPanel()
         panel.allowsMultipleSelection = false
         panel.canChooseDirectories = false
         panel.canChooseFiles = true
         panel.canCreateDirectories = false
         panel.resolvesAliases = true
-        panel.prompt = SettingsStrings.selectCodexAction
+        panel.prompt = prompt
         self.panel = panel
     }
 

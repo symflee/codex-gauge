@@ -62,7 +62,8 @@ private func settingsFormReducerEditsPreferencesTest() -> TestCase {
         let identifier = settingsQuotaID(product: .spark, duration: 300)
         let initial = AppPreferences(
             selectedExecutableURL: executableURL,
-            hasCompletedFirstLaunch: true
+            hasCompletedFirstLaunch: true,
+            language: .english
         )
         let reducer = SettingsFormReducer()
         var state = SettingsFormState(
@@ -81,7 +82,8 @@ private func settingsFormReducerEditsPreferencesTest() -> TestCase {
             .quotaSelectionModeChanged(.manual),
             .quotaSelectionChanged(identifier, isSelected: true),
             .refreshProfileChanged(.fast),
-            .launchAtLoginIntentChanged(true)
+            .launchAtLoginIntentChanged(true),
+            .languageChanged(.korean)
         ]
         for event in events {
             state = reducer.reduce(state: state, event: event)
@@ -95,6 +97,7 @@ private func settingsFormReducerEditsPreferencesTest() -> TestCase {
         )
         try expect(formValues.refreshProfile == .fast, "Expected fast refresh")
         try expect(formValues.launchAtLoginIntent, "Expected login launch intent")
+        try expect(formValues.language == .korean, "Expected Korean language")
     }
 }
 
@@ -195,6 +198,7 @@ private func settingsFormReplacesDiscoveredQuotasTest() -> TestCase {
         )
 
         try expect(updated.formValues == initial.formValues, "Expected preferences unchanged")
+        try expect(updated.language == preferences.language, "Expected language unchanged")
         try expect(updated.quotaOptions.count == 2, "Expected discovery rows replaced")
         try expect(
             updated.quotaOptions.first?.availability == .discovered,
@@ -214,6 +218,7 @@ private func settingsFormValuesAreSendableTest() -> TestCase {
             state.formValues == SettingsFormValues(preferences: .default),
             "Expected stable form defaults"
         )
+        try expect(state.language == .english, "Expected default form language")
     }
 }
 

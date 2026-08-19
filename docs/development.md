@@ -126,6 +126,8 @@ SwiftPM의 `CodexGaugeStandardTests` test target은 Swift Testing의 `@Test`로 
 - workspace·power notification의 typed system activity event 변환과 observer 해제
 - VoiceOver KVO·accessibility display notification의 최초 상태, 변경 중복 제거와 observer 해제
 - versioned `UserDefaults` 기본값, round trip, field 복구와 v0 migration
+- 시스템 선호 언어의 첫 지원 언어 선택, English fallback과 최초 v2 저장
+- v0/v1 언어 migration, 잘못된 language field 복구와 모든 원자 merge의 언어 보존
 - manual selection의 표시 제품 교집합 정규화, 빈 교집합 자동 복구와 결정적 encoding
 - programmatic 생성·save/load·v0/v1 불일치 payload 정규화와 빈 frame 방어
 - file URL 제한과 defaults suite 격리
@@ -160,6 +162,9 @@ SwiftPM의 `CodexGaugeStandardTests` test target은 Swift Testing의 `@Test`로 
 - window 생성 실패·표시 전 cancellation·shutdown 이후 요청의 무-application-activation 경계
 - executable commit 중 close/reopen한 현재 window의 checking 전환과 새 URL diagnostics
 - 한국어·영어 비공식·비제휴·experimental App Server 안내 parity
+- 열린 설정 창 identity·상태를 보존한 한국어·영어 즉시 전환과 전체 control·접근성 재현지화
+- 언어 변경 뒤 상태 접근성·cached 메뉴·날짜 locale 전환과 provider·timer I/O 부재
+- 현재 앱 언어를 사용하는 executable panel prompt와 UI fixture·first-launch reset의 언어 보존
 - form 변경의 runtime 적용 callback과 repository 저장 동시 전달
 - 초기 조회 뒤 discovery row 갱신의 무저장·무-runtime-callback 동작
 - status-first 시작, publication 단일 투영과 저장된 로그인 실행 의도 reconcile

@@ -13,6 +13,34 @@ public final class SettingsFormViewController: NSViewController {
         quotaButtons.map(\.title)
     }
 
+    public var renderedQuotaAccessibilityLabels: [String] {
+        quotaAccessibilityLabels
+    }
+
+    public var renderedSectionTitles: [String] {
+        sectionLabels.map(\.stringValue)
+    }
+
+    public var renderedLanguageOptionTitles: [String] {
+        languageControl.itemTitles
+    }
+
+    public var renderedProductOptionTitles: [String] {
+        segmentTitles(productControl)
+    }
+
+    public var renderedSelectionOptionTitles: [String] {
+        segmentTitles(selectionControl)
+    }
+
+    public var renderedRefreshOptionTitles: [String] {
+        refreshControl.itemTitles
+    }
+
+    public var renderedLaunchAtLoginTitle: String {
+        launchAtLoginButton.title
+    }
+
     public var renderedConnectionDetailTexts: [String] {
         [connectionPathLabel, connectionVersionLabel, connectionStatusLabel].map(\.stringValue)
     }
@@ -60,8 +88,17 @@ public final class SettingsFormViewController: NSViewController {
     private let productModes = DisplayProductMode.allCases
     private let selectionModes: [SettingsQuotaSelectionMode] = [.automatic, .manual]
     private let refreshProfiles = RefreshProfile.allCases
+    private let languages = AppLanguage.allCases
+    private var strings: SettingsStrings
     private var quotaButtons: [NSButton] = []
+    private var quotaAccessibilityLabels: [String] = []
 
+    private lazy var languageSectionLabel = makeSectionTitle(strings.languageSection)
+    private lazy var displaySectionLabel = makeSectionTitle(strings.displaySection)
+    private lazy var quotaSectionLabel = makeSectionTitle(strings.quotaSection)
+    private lazy var refreshSectionLabel = makeSectionTitle(strings.refreshSection)
+    private lazy var connectionSectionLabel = makeSectionTitle(strings.connectionSection)
+    private lazy var languageControl = makeLanguageControl()
     private lazy var productControl = makeProductControl()
     private lazy var selectionControl = makeSelectionControl()
     private lazy var quotaStack = makeQuotaStack()
@@ -69,7 +106,7 @@ public final class SettingsFormViewController: NSViewController {
     private lazy var launchAtLoginButton = makeLaunchAtLoginButton()
     private lazy var launchAtLoginDetailLabel = makeLaunchAtLoginDetailLabel()
     private lazy var launchAtLoginRecoveryButton = makeConnectionActionButton(
-        title: SettingsStrings.openLaunchAtLoginSystemSettings,
+        title: strings.openLaunchAtLoginSystemSettings,
         action: #selector(openLaunchAtLoginSystemSettings(_:))
     )
     private lazy var launchAtLoginStack = makeLaunchAtLoginStack()
@@ -77,11 +114,11 @@ public final class SettingsFormViewController: NSViewController {
     private lazy var connectionVersionLabel = makeConnectionDetailLabel()
     private lazy var connectionStatusLabel = makeConnectionDetailLabel()
     private lazy var selectCodexButton = makeConnectionActionButton(
-        title: SettingsStrings.selectCodexAction,
+        title: strings.selectCodexAction,
         action: #selector(selectCodex(_:))
     )
     private lazy var copyDiagnosticsButton = makeConnectionActionButton(
-        title: SettingsStrings.copyDiagnosticsAction,
+        title: strings.copyDiagnosticsAction,
         action: #selector(copyDiagnostics(_:))
     )
     private lazy var projectNoticeLabel = makeProjectNoticeLabel()
@@ -101,6 +138,7 @@ public final class SettingsFormViewController: NSViewController {
         self.formState = formState
         self.connectionDiagnostics = connectionDiagnostics
         self.launchAtLoginState = launchAtLoginState
+        strings = SettingsStrings(language: formState.language)
         self.onSelectCodex = onSelectCodex
         self.onCopyDiagnostics = onCopyDiagnostics
         self.onOpenLaunchAtLoginSystemSettings = onOpenLaunchAtLoginSystemSettings
@@ -129,12 +167,32 @@ public final class SettingsFormViewController: NSViewController {
     }
 
     public func apply(_ event: SettingsFormEvent) {
-        formState = reducer.reduce(state: formState, event: event)
+        let nextState = reducer.reduce(state: formState, event: event)
+        replaceFormState(nextState)
         if isViewLoaded {
             render()
         }
         onFormValuesChanged(formState.formValues)
         forwardLaunchAtLoginRequest(event)
+    }
+
+    public func updateLanguage(_ language: AppLanguage) {
+        guard formState.language != language else {
+            return
+        }
+        let nextState = reducer.reduce(state: formState, event: .languageChanged(language))
+        replaceFormState(nextState)
+        guard isViewLoaded else {
+            return
+        }
+        render()
+    }
+
+    private func replaceFormState(_ state: SettingsFormState) {
+        if state.language != formState.language {
+            strings = SettingsStrings(language: state.language)
+        }
+        formState = state
     }
 
     public func applyConnectionDiagnostics(
@@ -197,15 +255,17 @@ public final class SettingsFormViewController: NSViewController {
 
     private func makeContentStack() -> NSStackView {
         let stack = NSStackView(views: [
-            makeSectionTitle(SettingsStrings.displaySection),
+            languageSectionLabel,
+            languageControl,
+            displaySectionLabel,
             productControl,
             selectionControl,
-            makeSectionTitle(SettingsStrings.quotaSection),
+            quotaSectionLabel,
             makeQuotaScrollView(),
-            makeSectionTitle(SettingsStrings.refreshSection),
+            refreshSectionLabel,
             refreshControl,
             launchAtLoginStack,
-            makeSectionTitle(SettingsStrings.connectionSection),
+            connectionSectionLabel,
             connectionPathLabel,
             connectionVersionLabel,
             connectionStatusLabel,
@@ -214,8 +274,9 @@ public final class SettingsFormViewController: NSViewController {
         ])
         stack.orientation = .vertical
         stack.alignment = .leading
-        stack.spacing = 12
+        stack.spacing = 8
         stack.translatesAutoresizingMaskIntoConstraints = false
+        languageControl.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         productControl.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         selectionControl.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         refreshControl.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
@@ -224,27 +285,49 @@ public final class SettingsFormViewController: NSViewController {
         return stack
     }
 
+    private var sectionLabels: [NSTextField] {
+        [
+            languageSectionLabel,
+            displaySectionLabel,
+            quotaSectionLabel,
+            refreshSectionLabel,
+            connectionSectionLabel
+        ]
+    }
+
+    private func makeLanguageControl() -> NSPopUpButton {
+        let control = NSPopUpButton()
+        control.addItems(withTitles: languages.map(strings.languageName))
+        control.target = self
+        control.action = #selector(languageChanged(_:))
+        control.setAccessibilityIdentifier(
+            CodexGaugeAccessibilityIdentifier.settingsLanguage
+        )
+        control.setAccessibilityLabel(strings.languageAccessibilityLabel)
+        return control
+    }
+
     private func makeProductControl() -> NSSegmentedControl {
-        let labels = productModes.map(SettingsStrings.productName)
+        let labels = productModes.map(strings.productName)
         let control = NSSegmentedControl(
             labels: labels,
             trackingMode: .selectOne,
             target: self,
             action: #selector(productModeChanged(_:))
         )
-        control.setAccessibilityLabel(SettingsStrings.productAccessibilityLabel)
+        control.setAccessibilityLabel(strings.productAccessibilityLabel)
         return control
     }
 
     private func makeSelectionControl() -> NSSegmentedControl {
-        let labels = selectionModes.map(SettingsStrings.selectionModeName)
+        let labels = selectionModes.map(strings.selectionModeName)
         let control = NSSegmentedControl(
             labels: labels,
             trackingMode: .selectOne,
             target: self,
             action: #selector(selectionModeChanged(_:))
         )
-        control.setAccessibilityLabel(SettingsStrings.selectionAccessibilityLabel)
+        control.setAccessibilityLabel(strings.selectionAccessibilityLabel)
         return control
     }
 
@@ -282,16 +365,16 @@ public final class SettingsFormViewController: NSViewController {
 
     private func makeRefreshControl() -> NSPopUpButton {
         let control = NSPopUpButton()
-        control.addItems(withTitles: refreshProfiles.map(SettingsStrings.refreshProfileName))
+        control.addItems(withTitles: refreshProfiles.map(strings.refreshProfileName))
         control.target = self
         control.action = #selector(refreshProfileChanged(_:))
-        control.setAccessibilityLabel(SettingsStrings.refreshAccessibilityLabel)
+        control.setAccessibilityLabel(strings.refreshAccessibilityLabel)
         return control
     }
 
     private func makeLaunchAtLoginButton() -> NSButton {
         let button = NSButton(
-            checkboxWithTitle: SettingsStrings.launchAtLogin,
+            checkboxWithTitle: strings.launchAtLogin,
             target: self,
             action: #selector(launchAtLoginChanged(_:))
         )
@@ -340,7 +423,7 @@ public final class SettingsFormViewController: NSViewController {
     }
 
     private func makeProjectNoticeLabel() -> NSTextField {
-        let label = NSTextField(wrappingLabelWithString: SettingsStrings.projectNotice)
+        let label = NSTextField(wrappingLabelWithString: strings.projectNotice)
         label.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         label.textColor = .secondaryLabelColor
         label.maximumNumberOfLines = 0
@@ -354,6 +437,10 @@ public final class SettingsFormViewController: NSViewController {
     }
 
     private func render() {
+        renderLocalizedStrings()
+        languageControl.selectItem(
+            at: languages.firstIndex(of: formState.language) ?? 0
+        )
         productControl.selectedSegment = productModes.firstIndex(of: formState.productMode) ?? 0
         selectionControl.selectedSegment = selectionModes.firstIndex(
             of: formState.quotaSelectionMode
@@ -366,10 +453,77 @@ public final class SettingsFormViewController: NSViewController {
         renderConnectionDiagnostics()
     }
 
+    private func renderLocalizedStrings() {
+        renderSectionTitles()
+        renderLanguageControl()
+        renderSegmentTitles(productControl, titles: productModes.map(strings.productName))
+        renderSegmentTitles(selectionControl, titles: selectionModes.map(strings.selectionModeName))
+        renderRefreshControl()
+        renderActionTitles()
+        renderAccessibilityLabels()
+    }
+
+    private func renderSectionTitles() {
+        let titles = [
+            strings.languageSection,
+            strings.displaySection,
+            strings.quotaSection,
+            strings.refreshSection,
+            strings.connectionSection
+        ]
+        zip(sectionLabels, titles).forEach { label, title in
+            label.stringValue = title
+        }
+    }
+
+    private func renderLanguageControl() {
+        replaceItems(in: languageControl, with: languages.map(strings.languageName))
+    }
+
+    private func renderRefreshControl() {
+        replaceItems(in: refreshControl, with: refreshProfiles.map(strings.refreshProfileName))
+    }
+
+    private func replaceItems(
+        in control: NSPopUpButton,
+        with titles: [String]
+    ) {
+        control.removeAllItems()
+        control.addItems(withTitles: titles)
+    }
+
+    private func renderActionTitles() {
+        launchAtLoginButton.title = strings.launchAtLogin
+        launchAtLoginRecoveryButton.title = strings.openLaunchAtLoginSystemSettings
+        selectCodexButton.title = strings.selectCodexAction
+        copyDiagnosticsButton.title = strings.copyDiagnosticsAction
+        projectNoticeLabel.stringValue = strings.projectNotice
+    }
+
+    private func renderAccessibilityLabels() {
+        languageControl.setAccessibilityLabel(strings.languageAccessibilityLabel)
+        productControl.setAccessibilityLabel(strings.productAccessibilityLabel)
+        selectionControl.setAccessibilityLabel(strings.selectionAccessibilityLabel)
+        refreshControl.setAccessibilityLabel(strings.refreshAccessibilityLabel)
+    }
+
+    private func renderSegmentTitles(
+        _ control: NSSegmentedControl,
+        titles: [String]
+    ) {
+        titles.enumerated().forEach { index, title in
+            control.setLabel(title, forSegment: index)
+        }
+    }
+
+    private func segmentTitles(_ control: NSSegmentedControl) -> [String] {
+        (0..<control.segmentCount).map { control.label(forSegment: $0) ?? "" }
+    }
+
     private func renderLaunchAtLogin() {
         launchAtLoginButton.state = launchAtLoginButtonState
         launchAtLoginButton.isEnabled = launchAtLoginState.allowsChanges
-        launchAtLoginDetailLabel.stringValue = SettingsStrings.launchAtLoginDetail(
+        launchAtLoginDetailLabel.stringValue = strings.launchAtLoginDetail(
             launchAtLoginState
         )
         launchAtLoginRecoveryButton.isHidden = !launchAtLoginState
@@ -388,11 +542,11 @@ public final class SettingsFormViewController: NSViewController {
     }
 
     private func renderConnectionDiagnostics() {
-        connectionPathLabel.stringValue = SettingsStrings.connectionPath(connectionDiagnostics)
-        connectionVersionLabel.stringValue = SettingsStrings.connectionVersion(
+        connectionPathLabel.stringValue = strings.connectionPath(connectionDiagnostics)
+        connectionVersionLabel.stringValue = strings.connectionVersion(
             connectionDiagnostics.cliVersion?.value
         )
-        connectionStatusLabel.stringValue = SettingsStrings.connectionStatus(
+        connectionStatusLabel.stringValue = strings.connectionStatus(
             connectionDiagnostics.connectionStatus
         )
     }
@@ -406,6 +560,9 @@ public final class SettingsFormViewController: NSViewController {
         quotaButtons = presentation.quotaRows.enumerated().map { index, option in
             makeQuotaButton(option: option, index: index, enabled: presentation.quotaChoicesEnabled)
         }
+        quotaAccessibilityLabels = presentation.quotaRows.map(
+            strings.quotaAccessibilityLabel
+        )
         quotaButtons.forEach(quotaStack.addArrangedSubview)
     }
 
@@ -415,6 +572,7 @@ public final class SettingsFormViewController: NSViewController {
             subview.removeFromSuperview()
         }
         quotaButtons = []
+        quotaAccessibilityLabels = []
     }
 
     private func makeQuotaButton(
@@ -423,19 +581,19 @@ public final class SettingsFormViewController: NSViewController {
         enabled: Bool
     ) -> NSButton {
         let button = NSButton(
-            checkboxWithTitle: SettingsStrings.quotaTitle(option),
+            checkboxWithTitle: strings.quotaTitle(option),
             target: self,
             action: #selector(quotaSelectionChanged(_:))
         )
         button.tag = index
         button.state = option.isSelected ? .on : .off
         button.isEnabled = enabled
-        button.setAccessibilityLabel(SettingsStrings.quotaAccessibilityLabel(option))
+        button.setAccessibilityLabel(strings.quotaAccessibilityLabel(option))
         return button
     }
 
     private func makeEmptyQuotaLabel() -> NSTextField {
-        let label = NSTextField(wrappingLabelWithString: SettingsStrings.noQuotas)
+        let label = NSTextField(wrappingLabelWithString: strings.noQuotas)
         label.textColor = .secondaryLabelColor
         return label
     }
@@ -445,6 +603,13 @@ public final class SettingsFormViewController: NSViewController {
             return
         }
         apply(.productModeChanged(productModes[sender.selectedSegment]))
+    }
+
+    @objc private func languageChanged(_ sender: NSPopUpButton) {
+        guard languages.indices.contains(sender.indexOfSelectedItem) else {
+            return
+        }
+        apply(.languageChanged(languages[sender.indexOfSelectedItem]))
     }
 
     @objc private func selectionModeChanged(_ sender: NSSegmentedControl) {
@@ -504,60 +669,89 @@ public enum SettingsConnectionAction: Equatable, Sendable {
     case copyDiagnostics
 }
 
-enum SettingsStrings {
-    static let windowTitle = localized("settings.window.title")
-    static let displaySection = localized("settings.section.display")
-    static let quotaSection = localized("settings.section.quotas")
-    static let refreshSection = localized("settings.section.refresh")
-    static let launchAtLogin = localized("settings.launch-at-login")
-    static let openLaunchAtLoginSystemSettings = localized(
-        "settings.launch-at-login.open-system-settings"
-    )
-    static let noQuotas = localized("settings.quota.empty")
-    static let productAccessibilityLabel = localized("settings.product.accessibility")
-    static let selectionAccessibilityLabel = localized("settings.selection.accessibility")
-    static let refreshAccessibilityLabel = localized("settings.refresh.accessibility")
-    static let connectionSection = localized("settings.section.connection")
-    static let selectCodexAction = localized("settings.connection.select")
-    static let copyDiagnosticsAction = localized("settings.connection.copy-diagnostics")
-    static let projectNotice = localized("settings.project-notice")
+struct SettingsStrings {
+    let localization: AppLocalization
 
-    private static let durationFormatter = SettingsDurationAccessibilityFormatter(
-        vocabulary: SettingsDurationAccessibilityVocabulary(
-            unknown: localized("settings.duration.unknown"),
-            oneHour: localized("settings.duration.one-hour"),
-            hours: localized("settings.duration.hours"),
-            oneDay: localized("settings.duration.one-day"),
-            days: localized("settings.duration.days"),
-            oneWeek: localized("settings.duration.one-week"),
-            weeks: localized("settings.duration.weeks")
+    private let durationFormatter: SettingsDurationAccessibilityFormatter
+
+    init(language: AppLanguage) {
+        let localization = AppLocalization(language: language)
+        self.localization = localization
+        durationFormatter = SettingsDurationAccessibilityFormatter(
+            vocabulary: SettingsDurationAccessibilityVocabulary(
+                unknown: localization.string("settings.duration.unknown"),
+                oneHour: localization.string("settings.duration.one-hour"),
+                hours: localization.string("settings.duration.hours"),
+                oneDay: localization.string("settings.duration.one-day"),
+                days: localization.string("settings.duration.days"),
+                oneWeek: localization.string("settings.duration.one-week"),
+                weeks: localization.string("settings.duration.weeks")
+            )
         )
-    )
+    }
 
-    static func productName(_ mode: DisplayProductMode) -> String {
+    var windowTitle: String { localized("settings.window.title") }
+    var languageSection: String { localized("settings.section.language") }
+    var displaySection: String { localized("settings.section.display") }
+    var quotaSection: String { localized("settings.section.quotas") }
+    var refreshSection: String { localized("settings.section.refresh") }
+    var launchAtLogin: String { localized("settings.launch-at-login") }
+    var openLaunchAtLoginSystemSettings: String {
+        localized("settings.launch-at-login.open-system-settings")
+    }
+    var noQuotas: String { localized("settings.quota.empty") }
+    var languageAccessibilityLabel: String {
+        localized("settings.language.accessibility")
+    }
+    var productAccessibilityLabel: String {
+        localized("settings.product.accessibility")
+    }
+    var selectionAccessibilityLabel: String {
+        localized("settings.selection.accessibility")
+    }
+    var refreshAccessibilityLabel: String {
+        localized("settings.refresh.accessibility")
+    }
+    var connectionSection: String { localized("settings.section.connection") }
+    var selectCodexAction: String { localized("settings.connection.select") }
+    var copyDiagnosticsAction: String {
+        localized("settings.connection.copy-diagnostics")
+    }
+    var projectNotice: String { localized("settings.project-notice") }
+
+    func languageName(_ language: AppLanguage) -> String {
+        switch language {
+        case .korean:
+            localized("settings.language.korean")
+        case .english:
+            localized("settings.language.english")
+        }
+    }
+
+    func productName(_ mode: DisplayProductMode) -> String {
         localized("settings.product.\(mode.rawValue)")
     }
 
-    static func connectionPath(
+    func connectionPath(
         _ diagnostics: ConnectionDiagnosticsSnapshot
     ) -> String {
         guard let sourceValue = diagnostics.executableSource else {
-            return String(
-                format: localized("settings.connection.path.format"),
+            return formatted(
+                "settings.connection.path.format",
                 localized("settings.connection.unavailable")
             )
         }
         let source = localized("settings.connection.source.\(sourceValue.rawValue)")
         let location = connectionLocation(diagnostics.path)
-        let value = String(
-            format: localized("settings.connection.path.value.format"),
+        let value = formatted(
+            "settings.connection.path.value.format",
             source,
             location
         )
-        return String(format: localized("settings.connection.path.format"), value)
+        return formatted("settings.connection.path.format", value)
     }
 
-    private static func connectionLocation(_ path: CodexPathSummary?) -> String {
+    private func connectionLocation(_ path: CodexPathSummary?) -> String {
         guard let path else {
             return localized("settings.connection.unavailable")
         }
@@ -566,19 +760,19 @@ enum SettingsStrings {
         )
     }
 
-    static func connectionVersion(_ version: String?) -> String {
-        String(
-            format: localized("settings.connection.version.format"),
+    func connectionVersion(_ version: String?) -> String {
+        formatted(
+            "settings.connection.version.format",
             version ?? localized("settings.connection.unavailable")
         )
     }
 
-    static func connectionStatus(_ status: CodexConnectionStatus) -> String {
+    func connectionStatus(_ status: CodexConnectionStatus) -> String {
         let value = localized("settings.connection.status.\(status.rawValue)")
-        return String(format: localized("settings.connection.status.format"), value)
+        return formatted("settings.connection.status.format", value)
     }
 
-    static func selectionModeName(_ mode: SettingsQuotaSelectionMode) -> String {
+    func selectionModeName(_ mode: SettingsQuotaSelectionMode) -> String {
         switch mode {
         case .automatic:
             localized("settings.selection.automatic")
@@ -587,11 +781,11 @@ enum SettingsStrings {
         }
     }
 
-    static func refreshProfileName(_ profile: RefreshProfile) -> String {
+    func refreshProfileName(_ profile: RefreshProfile) -> String {
         localized("settings.refresh.\(profile.rawValue)")
     }
 
-    static func launchAtLoginDetail(
+    func launchAtLoginDetail(
         _ state: LaunchAtLoginSettingsState
     ) -> String {
         if let failure = state.failure {
@@ -600,7 +794,7 @@ enum SettingsStrings {
         return localized("settings.launch-at-login.status.\(state.status.localizationKey)")
     }
 
-    private static func launchAtLoginFailure(
+    private func launchAtLoginFailure(
         _ failure: LaunchAtLoginError
     ) -> String {
         switch failure {
@@ -613,39 +807,47 @@ enum SettingsStrings {
         }
     }
 
-    static func quotaTitle(_ option: SettingsQuotaOption) -> String {
-        let base = String(
-            format: localized("settings.quota.format"),
+    func quotaTitle(_ option: SettingsQuotaOption) -> String {
+        let base = formatted(
+            "settings.quota.format",
             productName(option.identifier.product),
             DurationBadge(windowDurationMinutes: option.identifier.rawDurationMinutes).label
         )
         guard option.availability == .currentlyUnavailable else {
             return base
         }
-        return String(format: localized("settings.quota.unavailable.format"), base)
+        return formatted("settings.quota.unavailable.format", base)
     }
 
-    static func quotaAccessibilityLabel(_ option: SettingsQuotaOption) -> String {
-        let base = String(
-            format: localized("settings.quota.accessibility.format"),
+    func quotaAccessibilityLabel(_ option: SettingsQuotaOption) -> String {
+        let base = formatted(
+            "settings.quota.accessibility.format",
             productName(option.identifier.product),
             durationFormatter.format(option.identifier.rawDurationMinutes)
         )
         guard option.availability == .currentlyUnavailable else {
             return base
         }
-        return String(
-            format: localized("settings.quota.accessibility.unavailable.format"),
+        return formatted(
+            "settings.quota.accessibility.unavailable.format",
             base
         )
     }
 
-    static func productName(_ product: UsageProduct) -> String {
+    func productName(_ product: UsageProduct) -> String {
         localized("settings.product.\(product.rawValue)")
     }
 
-    private static func localized(_ key: String) -> String {
-        NSLocalizedString(key, bundle: .module, comment: "")
+    private func formatted(_ key: String, _ arguments: CVarArg...) -> String {
+        String(
+            format: localized(key),
+            locale: localization.locale,
+            arguments: arguments
+        )
+    }
+
+    private func localized(_ key: String) -> String {
+        localization.string(key)
     }
 }
 

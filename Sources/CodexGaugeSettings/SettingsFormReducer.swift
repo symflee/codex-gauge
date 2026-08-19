@@ -8,6 +8,7 @@ public enum SettingsFormEvent: Equatable, Sendable {
     case quotaSelectionChanged(QuotaSelectionID, isSelected: Bool)
     case refreshProfileChanged(RefreshProfile)
     case launchAtLoginIntentChanged(Bool)
+    case languageChanged(AppLanguage)
 }
 
 public struct SettingsFormReducer: Sendable {
@@ -30,6 +31,8 @@ public struct SettingsFormReducer: Sendable {
             replacing(state, refreshProfile: profile)
         case .launchAtLoginIntentChanged(let enabled):
             replacing(state, launchAtLoginIntent: enabled)
+        case .languageChanged(let language):
+            replacing(state, language: language)
         }
     }
 
@@ -60,6 +63,7 @@ public struct SettingsFormReducer: Sendable {
         rememberedQuotaIDs: Set<QuotaSelectionID>? = nil,
         refreshProfile: RefreshProfile? = nil,
         launchAtLoginIntent: Bool? = nil,
+        language: AppLanguage? = nil,
         discoveredQuotaIDs: Set<QuotaSelectionID>? = nil
     ) -> SettingsFormState {
         SettingsFormState(
@@ -68,6 +72,7 @@ public struct SettingsFormReducer: Sendable {
             rememberedQuotaIDs: rememberedQuotaIDs ?? state.rememberedQuotaIDs,
             refreshProfile: refreshProfile ?? state.refreshProfile,
             launchAtLoginIntent: launchAtLoginIntent ?? state.launchAtLoginIntent,
+            language: language ?? state.language,
             discoveredQuotaIDs: discoveredQuotaIDs ?? state.discoveredQuotaIDs
         )
     }

@@ -38,6 +38,10 @@
 "menu.action.settings" = "설정…";
 "menu.quit" = "Codex Gauge 종료";
 "settings.window.title" = "Codex Gauge 설정";
+"settings.section.language" = "언어";
+"settings.language.accessibility" = "애플리케이션 언어";
+"settings.language.korean" = "한국어";
+"settings.language.english" = "English";
 "settings.section.display" = "표시 대상";
 "settings.product.codex" = "Codex";
 "settings.product.spark" = "Spark";

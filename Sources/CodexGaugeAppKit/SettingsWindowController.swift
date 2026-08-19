@@ -31,7 +31,10 @@ public final class SettingsWindowController: NSWindowController, NSWindowDelegat
             onFormValuesChanged: onFormValuesChanged
         )
         self.onClose = onClose
-        let window = Self.makeWindow(contentViewController: settingsViewController)
+        let window = Self.makeWindow(
+            contentViewController: settingsViewController,
+            language: formState.language
+        )
         super.init(window: window)
         window.delegate = self
     }
@@ -48,6 +51,11 @@ public final class SettingsWindowController: NSWindowController, NSWindowDelegat
         closure?(self)
     }
 
+    public func updateLanguage(_ language: AppLanguage) {
+        settingsViewController.updateLanguage(language)
+        window?.title = SettingsStrings(language: language).windowTitle
+    }
+
     private func releaseWindowGraph(_ closingWindow: NSWindow?) {
         closingWindow?.delegate = nil
         closingWindow?.contentViewController = nil
@@ -56,7 +64,8 @@ public final class SettingsWindowController: NSWindowController, NSWindowDelegat
     }
 
     private static func makeWindow(
-        contentViewController: NSViewController
+        contentViewController: NSViewController,
+        language: AppLanguage
     ) -> NSWindow {
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 440, height: 720),
@@ -64,7 +73,7 @@ public final class SettingsWindowController: NSWindowController, NSWindowDelegat
             backing: .buffered,
             defer: false
         )
-        window.title = SettingsStrings.windowTitle
+        window.title = SettingsStrings(language: language).windowTitle
         window.setAccessibilityIdentifier(
             CodexGaugeAccessibilityIdentifier.settingsWindow
         )

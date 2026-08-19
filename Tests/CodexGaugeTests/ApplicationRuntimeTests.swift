@@ -14,6 +14,7 @@ func applicationRuntimeTests() -> [TestCase] {
         applicationRuntimeDefersInitialWakeBaselineTest(),
         applicationRuntimePublishesOnePresentationTransactionTest(),
         applicationRuntimeRoutesMenuAndSettingsTest(),
+        applicationRuntimeRelocalizesWithoutRefreshingTest(),
         applicationRuntimePublishesLaunchAtLoginStateTest(),
         applicationRuntimeReplacesRefreshGenerationTest(),
         applicationRuntimePreservesPendingWakeAcrossReplacementTest(),
@@ -25,6 +26,66 @@ func applicationRuntimeTests() -> [TestCase] {
         applicationRuntimeStopsStartThatResumesDuringShutdownTest(),
         applicationRuntimeDrainsReplacementOnShutdownTest()
     ]
+}
+
+private func applicationRuntimeRelocalizesWithoutRefreshingTest() -> TestCase {
+    TestCase(name: "application runtime relocalizes cached UI without refreshing") {
+        try await applicationRuntimeRelocalizesWithoutRefreshingScenario()
+    }
+}
+
+@MainActor
+private func applicationRuntimeRelocalizesWithoutRefreshingScenario() async throws {
+    let preferences = AppPreferences(language: .korean)
+    let harness = RuntimeHarness(
+        preferencesLoader: RuntimePreferencesLoader(preferences: preferences)
+    )
+    harness.coordinator.start()
+    await harness.coordinator.waitForPendingOperations()
+
+    try expect(harness.status.languages.last == .korean, "Expected stored Korean status")
+    try expect(harness.settings.languages.last == .korean, "Expected stored Korean settings")
+    try expect(
+        menuActionTitle(.refresh, in: harness.menu.models.last) == "새로 고침",
+        "Expected stored Korean menu"
+    )
+    let refreshEventsBeforeChange = await harness.refreshBuilder.coordinators[0].events
+    let deadlineCountBeforeChange = harness.deadlineScheduler.productStates.count
+
+    harness.coordinator.settingsFormValuesDidChange(
+        SettingsFormValues(
+            displayPreference: preferences.displayPreference,
+            refreshProfile: preferences.refreshProfile,
+            launchAtLoginIntent: preferences.launchAtLoginIntent,
+            language: .english
+        )
+    )
+
+    try expect(harness.status.languages.last == .english, "Expected English status")
+    try expect(harness.settings.languages.last == .english, "Expected English settings")
+    try expect(
+        menuActionTitle(.refresh, in: harness.menu.models.last) == "Refresh",
+        "Expected English cached menu"
+    )
+    let refreshEventsAfterChange = await harness.refreshBuilder.coordinators[0].events
+    try expect(
+        refreshEventsAfterChange == refreshEventsBeforeChange,
+        "Expected no provider or refresh command for language changes"
+    )
+    try expect(
+        harness.deadlineScheduler.productStates.count == deadlineCountBeforeChange,
+        "Expected no deadline publication for language changes"
+    )
+}
+
+private func menuActionTitle(
+    _ action: QuotaMenuAction,
+    in model: QuotaDetailsMenuModel?
+) -> String? {
+    model?.actionGroups
+        .flatMap { $0 }
+        .first { $0.action == action }?
+        .title
 }
 
 private func applicationRuntimePublishesLaunchAtLoginStateTest() -> TestCase {
@@ -735,6 +796,7 @@ private final class RuntimeApplicationSpy: CodexGaugeApplicationRunning {
 private final class RuntimeStatusSpy: ApplicationStatusRuntime {
     private(set) var presentedFrames = [[DisplayFrame]]()
     private(set) var pauseValues = [StatusRotationPauseReason: Bool]()
+    private(set) var languages = [AppLanguage]()
 
     func present(frames: [DisplayFrame]) {
         presentedFrames.append(frames)
@@ -742,6 +804,10 @@ private final class RuntimeStatusSpy: ApplicationStatusRuntime {
 
     func setRotationPaused(_ paused: Bool, for reason: StatusRotationPauseReason) {
         pauseValues[reason] = paused
+    }
+
+    func updateLanguage(_ language: AppLanguage) {
+        languages.append(language)
     }
 }
 
@@ -762,6 +828,7 @@ private final class RuntimeSettingsSpy: ApplicationSettingsRuntime {
     private(set) var selectionRequestCount = 0
     private(set) var showCount = 0
     private(set) var shutdownCount = 0
+    private(set) var languages = [AppLanguage]()
 
     func showSettings() async -> Bool {
         showCount += 1
@@ -782,6 +849,10 @@ private final class RuntimeSettingsSpy: ApplicationSettingsRuntime {
 
     func updateLaunchAtLoginState(_ state: LaunchAtLoginSettingsState) {
         launchAtLoginStates.append(state)
+    }
+
+    func updateLanguage(_ language: AppLanguage) {
+        languages.append(language)
     }
 
     func shutdown() async {

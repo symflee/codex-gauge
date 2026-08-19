@@ -97,7 +97,10 @@ private func applicationUITestFixtureForcesCodexDisplayInMemoryScenario() async 
     guard let repositoryDefaults = UserDefaults(suiteName: suiteName) else {
         throw TestFailure(description: "Unable to inject UI fixture defaults")
     }
-    let repository = AppPreferencesRepository(userDefaults: repositoryDefaults)
+    let repository = AppPreferencesRepository(
+        userDefaults: repositoryDefaults,
+        defaultLanguage: .english
+    )
     let stored = AppPreferences(
         displayPreference: DisplayPreference(
             productMode: .spark,
@@ -106,7 +109,8 @@ private func applicationUITestFixtureForcesCodexDisplayInMemoryScenario() async 
         refreshProfile: .eco,
         launchAtLoginIntent: true,
         selectedExecutableURL: URL(fileURLWithPath: "/Synthetic/ignored/codex"),
-        hasCompletedFirstLaunch: true
+        hasCompletedFirstLaunch: true,
+        language: .korean
     )
     try await repository.save(stored)
     let loader = UITestFixtureApplicationPreferencesLoader(repository: repository)
@@ -124,6 +128,7 @@ private func applicationUITestFixtureForcesCodexDisplayInMemoryScenario() async 
         loaded.selectedExecutableURL == stored.selectedExecutableURL,
         "Expected selected executable preserved in memory"
     )
+    try expect(loaded.language == .korean, "Expected stored language preserved in memory")
     try expect(persisted == stored, "Expected stored preferences untouched")
 }
 

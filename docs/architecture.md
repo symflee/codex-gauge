@@ -50,6 +50,8 @@ factory는 launch argument를 시스템 adapter 생성 전에 판정한다. Debu
 
 하나의 `RefreshPublication` callback은 같은 main-actor transaction에서 상태 frame, menu model, discovered quota ID, 연결 상태와 deadline 후보를 모두 갱신한다. application-open capability는 root 생성 때 한 번 읽어 캐시하며, display 변경과 validity deadline은 메모리 publication을 다시 투영할 뿐 provider 또는 workspace I/O를 만들지 않는다. profile, 수동 조회, quota reset, power와 system resume 명령은 직렬 operation chain을 통해 현재 refresh generation에만 전달된다.
 
+UI 언어는 `AppPreferences.language`의 concrete 한국어 또는 영어 값이다. 저장값이 없거나 v0/v1 schema를 처음 읽을 때만 주입된 시스템 선호 언어 목록에서 첫 지원 언어를 결정해 v2로 저장한다. application root는 선택 언어의 명시적 `ko.lproj` 또는 `en.lproj` resolver로 status 접근성 formatter와 menu builder·날짜 locale을 교체하고, settings runtime을 갱신한 뒤 cached publication을 I/O 없이 다시 투영한다. `AppleLanguages`나 전역 defaults override를 사용하지 않는다.
+
 사용자가 executable을 바꾸면 generation을 즉시 올리고 loading presentation으로 전환한 뒤 이전 coordinator의 `stop()` 완료를 기다린다. 그 후 최신 preferences로 provider를 새로 만들며 이전 generation의 늦은 publication은 버린다. 이전 coordinator에 5초 system-resume timer가 대기 중이면 그 phase를 stop 전에 읽고 새 coordinator에 `suspend()`와 `resumeAfterSystemWake()`를 순서대로 적용한다. 따라서 executable 교체가 wake 지연을 즉시 startup 조회로 우회하지 않는다. 실제 application bundle 탐색과 열기는 `NSWorkspaceCodexApplicationAdapter`만 담당하고 shell을 사용하지 않는다.
 
 sleep·wake가 preferences load 또는 executable 교체의 `stop()`과 겹치면 새 coordinator를 request 없는 suspended 상태로 만든 뒤 동일한 직렬 chain의 resume만 적용한다. 따라서 교체 coordinator가 중간에 startup child를 만들지 않는다. 종료는 generation을 먼저 무효화하고 monitor·deadline을 멈춘 뒤 현재 refresh를 한 번 중단하고 진행 중 operation chain을 drain한다. 그 뒤 같은 refresh를 terminal하게 다시 중단하고 chain이 만든 늦은 coordinator도 정리한 다음 settings shutdown을 기다린다. 첫 stop과 경쟁하던 `start()` 또는 갱신이 늦게 재개해 child를 되살려도 두 번째 stop 이후에는 남지 않는다. 중복 `shutdown()` 호출은 이 하나의 shared task 완료를 기다린다.
@@ -247,6 +249,8 @@ frame이 하나면 scheduler에 timer 생성이나 취소 command를 보내지 �
 
 `SettingsWindowCoordinator`는 창을 요청할 때만 약 440pt 폭의 독립 `NSWindowController`를 만들고 한 번에 하나만 보유한다. 변경된 `SettingsFormValues`는 actor repository에 순서대로 전달하며 repository가 저장 시점의 최신 executable URL과 최초 실행 field에 원자적으로 merge한다. 따라서 창이 열린 동안 다른 owner가 갱신한 숨은 field를 오래된 form state가 덮어쓰지 않는다. 창을 닫은 뒤 다시 열 때는 진행 중인 저장을 먼저 마치고 `UserDefaults`를 새로 읽는다. window close callback은 coordinator의 강한 참조와 AppKit content graph를 제거한다. 로그인 실행 UI는 intent만 저장하며 `SMAppService` 호출은 launch adapter 경계에 남긴다. quota snapshot이나 오류 원문은 저장하지 않는다.
 
+언어 popup은 `한국어`와 `English` autonym을 제공한다. 변경 시 기존 settings window/controller/view identity, form state, diagnostics와 진행 중 task를 유지하고 앱이 소유한 title·label·button·accessibility 문자열만 선택 lproj로 다시 그린다. executable panel을 새로 열 때의 prompt도 현재 앱 언어를 사용하되 macOS가 소유한 panel chrome은 시스템 언어를 따른다.
+
 `SettingsWindowForegroundPresenter`는 최초 실행, 메뉴와 실행 파일 선택이 모두 통과하는 coordinator의 단일 표시 seam이다. `NSApplicationSettingsWindowActivator`를 protocol 뒤에 주입하고, window 존재와 terminal lifecycle을 먼저 확인한 요청에만 `activate(ignoringOtherApps: true) → showWindow → makeKeyAndOrderFront` 순서를 적용한다. 이미 보유한 창을 재표시할 때도 같은 seam을 한 번 통과한다. window가 만들어지지 않았거나 pending show가 cancellation·shutdown에 의해 폐기되면 controller graph를 해제하고 application activation과 diagnostics 시작을 생략한다. 이 분리는 `LSUIElement`·accessory 앱의 foreground UX를 보장하면서 settings coordinator가 전역 `NSApplication.shared`에 직접 결합되는 것을 막는다.
 
 로그인 실행 checkbox event는 generic form save와 `onLaunchAtLoginIntentRequested`로 분기한다. 전자는 저장된 의도만 merge하고 후자는 같은 boolean이 반복되어도 application root에 사용자 요청을 전달한다. 따라서 registration·unregistration 실패 뒤 저장 의도는 이미 원하는 값이어도 실제 상태와의 mismatch를 재시도할 수 있다. 결과는 반대 방향의 `LaunchAtLoginSettingsState` publication으로만 열린 창에 들어오며 view나 settings coordinator가 `SMAppService`를 직접 호출하지 않는다.
@@ -303,10 +307,11 @@ Quit 또는 Command-Q가 들어오면 AppDelegate는 `.terminateLater`를 반환
 - 로그인 시 실행 의도
 - 사용자가 선택한 Codex 실행 파일 경로
 - 최초 실행 완료 여부
+- UI 언어
 
 `AppPreferencesRepository` actor만 주입받은 `UserDefaults`에 접근한다. 전체 값을 `io.github.symflee.codex-gauge.preferences`라는 하나의 namespaced key에 versioned JSON `Data`로 저장해 같은 defaults domain의 다른 key를 건드리지 않는다. 일반적인 전체 `load`·`save` 외에 설정 form, 선택 executable과 최초 실행 완료 저장은 각각 담당 field만 받아 최신 전체 값에 actor 내부에서 read-modify-write한다. 세 연산에는 suspension point가 없어 동시 호출도 직렬화되며 서로의 최신 값을 잃지 않는다. 최초 실행 완료 저장은 true에서 no-op인 단방향·멱등 연산이다.
 
-저장 envelope에는 schema version을 별도로 포함한다. 현재 version 1은 display 설정을 중첩하고 나머지 허용 필드를 top-level에 둔다. version 0은 `displayProductMode`, `displayQuotaSelection`, `manualQuotaSelections`가 분리된 초기 flat schema이며 순수 decoder에서 현재 `AppPreferences`로 migration한다. `AppPreferences`는 생성 경로와 schema version에 관계없이 manual selection을 표시 제품과의 교집합으로 제한하고, 교집합이 비면 automatic으로 정규화한다. manual selection은 제품 raw value 오름차순, 같은 제품 안에서는 양수 raw duration 오름차순과 기간 미상 마지막 순서로 정렬해 항상 같은 byte를 만든다.
+저장 envelope에는 schema version을 별도로 포함한다. 현재 version 2는 display 설정을 중첩하고 concrete `language`와 나머지 허용 필드를 top-level에 둔다. version 1은 같은 중첩 display schema에 language가 없고, version 0은 `displayProductMode`, `displayQuotaSelection`, `manualQuotaSelections`가 분리된 초기 flat schema다. 저장값이 전혀 없거나 알려진 v0/v1을 처음 읽으면 주입된 시스템 언어에서 결정한 값을 포함한 v2를 즉시 저장한다. malformed·missing-version·future schema는 load 중 덮어쓰지 않는다. `AppPreferences`는 생성 경로와 schema version에 관계없이 manual selection을 표시 제품과의 교집합으로 제한하고, 교집합이 비면 automatic으로 정규화한다. manual selection은 제품 raw value 오름차순, 같은 제품 안에서는 양수 raw duration 오름차순과 기간 미상 마지막 순서로 정렬해 항상 같은 byte를 만든다.
 
 version이나 root가 해석되지 않거나 미래 version이면 전체 기본값을 사용한다. 현재 또는 version 0 schema의 개별 enum, boolean, manual item과 URL이 잘못되면 해당 field만 기본값으로 복구하고 나머지는 유지한다. 선택한 executable은 file URL만 받는다. quota snapshot, used/remaining percent, reset, account/error와 raw response는 schema에 없으며 repository는 payload나 경로를 log 또는 description에 넣지 않는다.
 

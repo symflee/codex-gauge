@@ -10,19 +10,22 @@ public struct AppPreferences: Equatable, Sendable {
     public let launchAtLoginIntent: Bool
     public let selectedExecutableURL: URL?
     public let hasCompletedFirstLaunch: Bool
+    public let language: AppLanguage
 
     public init(
         displayPreference: DisplayPreference = .default,
         refreshProfile: RefreshProfile = .default,
         launchAtLoginIntent: Bool = false,
         selectedExecutableURL: URL? = nil,
-        hasCompletedFirstLaunch: Bool = false
+        hasCompletedFirstLaunch: Bool = false,
+        language: AppLanguage = .english
     ) {
         self.displayPreference = Self.normalize(displayPreference)
         self.refreshProfile = refreshProfile
         self.launchAtLoginIntent = launchAtLoginIntent
         self.selectedExecutableURL = Self.fileURL(selectedExecutableURL)
         self.hasCompletedFirstLaunch = hasCompletedFirstLaunch
+        self.language = language
     }
 
     private static func normalize(

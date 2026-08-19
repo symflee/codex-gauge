@@ -5,11 +5,13 @@ import Foundation
 
 func appPreferencesTests() -> [TestCase] {
     [
+        preferredAppLanguageResolverTest(),
         appPreferencesDefaultsTest(),
         appPreferencesRoundTripTest(),
         appPreferencesDeterministicEncodingTest(),
         appPreferencesMalformedSchemaTest(),
         appPreferencesFieldRecoveryTest(),
+        appPreferencesVersionOneMigrationTest(),
         appPreferencesVersionZeroMigrationTest(),
         appPreferencesEmptyManualSelectionTest(),
         appPreferencesManualProductNormalizationTest(),
@@ -23,20 +25,64 @@ func appPreferencesTests() -> [TestCase] {
     ]
 }
 
+private func preferredAppLanguageResolverTest() -> TestCase {
+    TestCase(name: "preferred language resolver selects Korean or English deterministically") {
+        let resolver = PreferredAppLanguageResolver()
+
+        try expect(
+            resolver.resolve(preferredLanguages: ["ko-KR", "en-US"]) == .korean,
+            "Expected Korean system preference"
+        )
+        try expect(
+            resolver.resolve(preferredLanguages: ["en_KR", "ko-KR"]) == .english,
+            "Expected first supported preference"
+        )
+        try expect(
+            resolver.resolve(preferredLanguages: ["ja-JP", "ko_KR"]) == .korean,
+            "Expected unsupported preferences to be skipped"
+        )
+        try expect(
+            resolver.resolve(preferredLanguages: ["ja-JP", "fr-FR"]) == .english,
+            "Expected English fallback"
+        )
+        try expect(
+            resolver.resolve(preferredLanguages: []) == .english,
+            "Expected empty preference fallback"
+        )
+    }
+}
+
 private func appPreferencesDefaultsTest() -> TestCase {
     TestCase(name: "preferences load safe defaults from an empty suite") {
         let store = try PreferencesTestStore()
         defer { store.cleanUp() }
-        let repository = try store.repository()
+        let repository = try store.repository(defaultLanguage: .korean)
 
         let preferences = await repository.load()
 
-        try expect(preferences == .default, "Expected default preferences")
+        try expect(
+            preferences == AppPreferences(language: .korean),
+            "Expected injected default preferences"
+        )
+        try expect(preferences.language == .korean, "Expected Korean default language")
         try expect(preferences.displayPreference == .default, "Expected default display")
         try expect(preferences.refreshProfile == .balanced, "Expected balanced refresh")
         try expect(!preferences.launchAtLoginIntent, "Expected login launch disabled")
         try expect(preferences.selectedExecutableURL == nil, "Expected no selected executable")
         try expect(!preferences.hasCompletedFirstLaunch, "Expected incomplete first launch")
+
+        let persisted = try preferencesJSONObject(
+            from: storedPreferencesData(in: store.userDefaults)
+        )
+        try expect(persisted["version"] as? Int == 2, "Expected initial v2 persistence")
+        try expect(persisted["language"] as? String == "ko", "Expected concrete language")
+
+        let secondRepository = try store.repository(defaultLanguage: .english)
+        let secondLoad = await secondRepository.load()
+        try expect(
+            secondLoad.language == .korean,
+            "Expected persisted language to ignore later system changes"
+        )
     }
 }
 
@@ -53,33 +99,37 @@ private func appPreferencesRoundTripTest() -> TestCase {
 
         for productMode in DisplayProductMode.allCases {
             for refreshProfile in RefreshProfile.allCases {
-                let automatic = AppPreferences(
-                    displayPreference: DisplayPreference(
-                        productMode: productMode,
-                        quotaSelection: .automatic
-                    ),
-                    refreshProfile: refreshProfile,
-                    launchAtLoginIntent: false,
-                    selectedExecutableURL: nil,
-                    hasCompletedFirstLaunch: true
-                )
-                try await repository.save(automatic)
-                let loadedAutomatic = await repository.load()
-                try expect(loadedAutomatic == automatic, "Expected automatic round trip")
+                for language in AppLanguage.allCases {
+                    let automatic = AppPreferences(
+                        displayPreference: DisplayPreference(
+                            productMode: productMode,
+                            quotaSelection: .automatic
+                        ),
+                        refreshProfile: refreshProfile,
+                        launchAtLoginIntent: false,
+                        selectedExecutableURL: nil,
+                        hasCompletedFirstLaunch: true,
+                        language: language
+                    )
+                    try await repository.save(automatic)
+                    let loadedAutomatic = await repository.load()
+                    try expect(loadedAutomatic == automatic, "Expected automatic round trip")
 
-                let manual = AppPreferences(
-                    displayPreference: DisplayPreference(
-                        productMode: productMode,
-                        quotaSelection: .manual(identifiers)
-                    ),
-                    refreshProfile: refreshProfile,
-                    launchAtLoginIntent: true,
-                    selectedExecutableURL: syntheticExecutableURL,
-                    hasCompletedFirstLaunch: true
-                )
-                try await repository.save(manual)
-                let loadedManual = await repository.load()
-                try expect(loadedManual == manual, "Expected manual round trip")
+                    let manual = AppPreferences(
+                        displayPreference: DisplayPreference(
+                            productMode: productMode,
+                            quotaSelection: .manual(identifiers)
+                        ),
+                        refreshProfile: refreshProfile,
+                        launchAtLoginIntent: true,
+                        selectedExecutableURL: syntheticExecutableURL,
+                        hasCompletedFirstLaunch: true,
+                        language: language
+                    )
+                    try await repository.save(manual)
+                    let loadedManual = await repository.load()
+                    try expect(loadedManual == manual, "Expected manual round trip")
+                }
             }
         }
     }
@@ -89,7 +139,7 @@ private func appPreferencesDeterministicEncodingTest() -> TestCase {
     TestCase(name: "manual preference encoding is deterministic") {
         let store = try PreferencesTestStore()
         defer { store.cleanUp() }
-        let repository = try store.repository()
+        let repository = try store.repository(defaultLanguage: .korean)
         let firstIdentifier = QuotaSelectionID(
             product: .spark,
             rawDurationMinutes: nil
@@ -135,40 +185,62 @@ private func appPreferencesMalformedSchemaTest() -> TestCase {
     TestCase(name: "preferences recover from malformed and future schemas") {
         let store = try PreferencesTestStore()
         defer { store.cleanUp() }
-        let repository = try store.repository()
+        let repository = try store.repository(defaultLanguage: .korean)
 
         store.userDefaults.set("not-data", forKey: AppPreferencesRepository.storageKey)
         let wrongStorageType = await repository.load()
-        try expect(wrongStorageType == .default, "Expected non-Data fallback")
+        try expect(wrongStorageType.language == .korean, "Expected non-Data language fallback")
+        try expect(
+            store.userDefaults.string(forKey: AppPreferencesRepository.storageKey) == "not-data",
+            "Expected non-Data payload preserved"
+        )
 
-        store.userDefaults.set(Data([0xFF, 0x00]), forKey: AppPreferencesRepository.storageKey)
+        let malformedData = Data([0xFF, 0x00])
+        store.userDefaults.set(malformedData, forKey: AppPreferencesRepository.storageKey)
         let malformed = await repository.load()
-        try expect(malformed == .default, "Expected malformed data fallback")
+        try expect(malformed.language == .korean, "Expected malformed language fallback")
+        try expect(
+            store.userDefaults.data(forKey: AppPreferencesRepository.storageKey) == malformedData,
+            "Expected malformed payload preserved"
+        )
 
-        store.userDefaults.set(try preferencesJSON(["not", "an", "object"]), forKey: AppPreferencesRepository.storageKey)
+        let wrongShapeData = try preferencesJSON(["not", "an", "object"])
+        store.userDefaults.set(wrongShapeData, forKey: AppPreferencesRepository.storageKey)
         let wrongShape = await repository.load()
-        try expect(wrongShape == .default, "Expected non-object fallback")
-
-        store.userDefaults.set(
-            try preferencesJSON(["version": 999, "refreshProfile": "fast"]),
-            forKey: AppPreferencesRepository.storageKey
+        try expect(wrongShape.language == .korean, "Expected non-object language fallback")
+        try expect(
+            store.userDefaults.data(forKey: AppPreferencesRepository.storageKey) == wrongShapeData,
+            "Expected non-object payload preserved"
         )
+
+        let futureData = try preferencesJSON(["version": 999, "refreshProfile": "fast"])
+        store.userDefaults.set(futureData, forKey: AppPreferencesRepository.storageKey)
         let future = await repository.load()
-        try expect(future == .default, "Expected future schema fallback")
-
-        store.userDefaults.set(
-            try preferencesJSON(["refreshProfile": "fast"]),
-            forKey: AppPreferencesRepository.storageKey
+        try expect(future.language == .korean, "Expected future schema language fallback")
+        try expect(
+            store.userDefaults.data(forKey: AppPreferencesRepository.storageKey) == futureData,
+            "Expected future payload preserved"
         )
+
+        let missingVersionData = try preferencesJSON(["refreshProfile": "fast"])
+        store.userDefaults.set(missingVersionData, forKey: AppPreferencesRepository.storageKey)
         let missingVersion = await repository.load()
-        try expect(missingVersion == .default, "Expected missing version fallback")
+        try expect(missingVersion.language == .korean, "Expected missing version language fallback")
+        try expect(
+            store.userDefaults.data(forKey: AppPreferencesRepository.storageKey)
+                == missingVersionData,
+            "Expected missing-version payload preserved"
+        )
 
         store.userDefaults.set(
             try preferencesJSON(["version": UInt64(Int64.max) + 1]),
             forKey: AppPreferencesRepository.storageKey
         )
         let overflowingVersion = await repository.load()
-        try expect(overflowingVersion == .default, "Expected overflowing version fallback")
+        try expect(
+            overflowingVersion.language == .korean,
+            "Expected overflowing version language fallback"
+        )
     }
 }
 
@@ -176,9 +248,9 @@ private func appPreferencesFieldRecoveryTest() -> TestCase {
     TestCase(name: "preferences recover malformed fields independently") {
         let store = try PreferencesTestStore()
         defer { store.cleanUp() }
-        let repository = try store.repository()
+        let repository = try store.repository(defaultLanguage: .korean)
         let payload: [String: Any] = [
-            "version": 1,
+            "version": 2,
             "display": [
                 "productMode": "future-product",
                 "selection": [
@@ -194,6 +266,7 @@ private func appPreferencesFieldRecoveryTest() -> TestCase {
             "launchAtLoginIntent": true,
             "selectedExecutableURL": "https://example.invalid/codex",
             "hasCompletedFirstLaunch": "invalid",
+            "language": "future-language",
             "futureField": ["ignored": true]
         ]
         store.userDefaults.set(
@@ -215,9 +288,10 @@ private func appPreferencesFieldRecoveryTest() -> TestCase {
         try expect(preferences.launchAtLoginIntent, "Expected valid login intent")
         try expect(preferences.selectedExecutableURL == nil, "Expected invalid URL rejection")
         try expect(!preferences.hasCompletedFirstLaunch, "Expected boolean fallback")
+        try expect(preferences.language == .korean, "Expected invalid language fallback")
 
         let unknownSelectionPayload: [String: Any] = [
-            "version": 1,
+            "version": 2,
             "display": [
                 "productMode": "spark",
                 "selection": [
@@ -225,7 +299,8 @@ private func appPreferencesFieldRecoveryTest() -> TestCase {
                     "items": [["product": "spark", "rawDurationMinutes": 300]]
                 ]
             ],
-            "refreshProfile": "manual"
+            "refreshProfile": "manual",
+            "language": "en"
         ]
         store.userDefaults.set(
             try preferencesJSON(unknownSelectionPayload),
@@ -244,6 +319,56 @@ private func appPreferencesFieldRecoveryTest() -> TestCase {
             unknownSelection.refreshProfile == .manual,
             "Expected valid manual refresh profile"
         )
+        try expect(unknownSelection.language == .english, "Expected valid language sibling")
+    }
+}
+
+private func appPreferencesVersionOneMigrationTest() -> TestCase {
+    TestCase(name: "preferences migrate version one with the injected system language") {
+        let store = try PreferencesTestStore()
+        defer { store.cleanUp() }
+        let repository = try store.repository(defaultLanguage: .korean)
+        let payload: [String: Any] = [
+            "version": 1,
+            "display": [
+                "productMode": "spark",
+                "selection": ["mode": "automatic"]
+            ],
+            "refreshProfile": "fast",
+            "launchAtLoginIntent": true,
+            "hasCompletedFirstLaunch": true
+        ]
+        store.userDefaults.set(
+            try preferencesJSON(payload),
+            forKey: AppPreferencesRepository.storageKey
+        )
+
+        let preferences = await repository.load()
+
+        try expect(preferences.language == .korean, "Expected injected migration language")
+        try expect(preferences.displayPreference.productMode == .spark, "Expected display sibling")
+        try expect(preferences.refreshProfile == .fast, "Expected refresh sibling")
+        try expect(preferences.launchAtLoginIntent, "Expected login sibling")
+        try expect(preferences.hasCompletedFirstLaunch, "Expected first-launch sibling")
+
+        let automaticallyMigrated = try preferencesJSONObject(
+            from: storedPreferencesData(in: store.userDefaults)
+        )
+        try expect(
+            automaticallyMigrated["version"] as? Int == 2,
+            "Expected version one migrated during load"
+        )
+        try expect(
+            automaticallyMigrated["language"] as? String == "ko",
+            "Expected migrated language fixed during load"
+        )
+
+        try await repository.save(preferences)
+        let migrated = try preferencesJSONObject(
+            from: storedPreferencesData(in: store.userDefaults)
+        )
+        try expect(migrated["version"] as? Int == 2, "Expected version two save")
+        try expect(migrated["language"] as? String == "ko", "Expected language persisted")
     }
 }
 
@@ -251,7 +376,7 @@ private func appPreferencesVersionZeroMigrationTest() -> TestCase {
     TestCase(name: "preferences migrate the flattened version zero schema") {
         let store = try PreferencesTestStore()
         defer { store.cleanUp() }
-        let repository = try store.repository()
+        let repository = try store.repository(defaultLanguage: .korean)
         let payload: [String: Any] = [
             "version": 0,
             "displayProductMode": "both",
@@ -285,11 +410,25 @@ private func appPreferencesVersionZeroMigrationTest() -> TestCase {
         try expect(preferences.launchAtLoginIntent, "Expected migrated login intent")
         try expect(preferences.selectedExecutableURL == syntheticExecutableURL, "Expected migrated URL")
         try expect(preferences.hasCompletedFirstLaunch, "Expected migrated first launch")
+        try expect(preferences.language == .korean, "Expected migrated system language")
+
+        let automaticallyMigrated = try preferencesJSONObject(
+            from: storedPreferencesData(in: store.userDefaults)
+        )
+        try expect(
+            automaticallyMigrated["version"] as? Int == 2,
+            "Expected version zero migrated during load"
+        )
+        try expect(
+            automaticallyMigrated["language"] as? String == "ko",
+            "Expected v0 language fixed during load"
+        )
 
         try await repository.save(preferences)
         let migratedData = try storedPreferencesData(in: store.userDefaults)
         let migratedObject = try preferencesJSONObject(from: migratedData)
-        try expect(migratedObject["version"] as? Int == 1, "Expected current schema on save")
+        try expect(migratedObject["version"] as? Int == 2, "Expected current schema on save")
+        try expect(migratedObject["language"] as? String == "ko", "Expected language on save")
 
         let malformedPayload: [String: Any] = [
             "version": 0,
@@ -319,6 +458,7 @@ private func appPreferencesVersionZeroMigrationTest() -> TestCase {
         try expect(!recovered.launchAtLoginIntent, "Expected v0 boolean fallback")
         try expect(recovered.selectedExecutableURL == nil, "Expected v0 URL fallback")
         try expect(recovered.hasCompletedFirstLaunch, "Expected valid v0 sibling preserved")
+        try expect(recovered.language == .korean, "Expected v0 language fallback")
     }
 }
 
@@ -509,6 +649,7 @@ private func appPreferencesExecutableSelectionMergeTest() -> TestCase {
         )
         try expect(saved.hasCompletedFirstLaunch, "Expected first launch preserved")
         try expect(saved.selectedExecutableURL == selected, "Expected selected executable saved")
+        try expect(saved.language == initial.language, "Expected language preserved")
     }
 }
 
@@ -525,7 +666,8 @@ private func appPreferencesFirstLaunchAtomicMergeTest() -> TestCase {
                 quotaSelection: .manual([identifier])
             ),
             refreshProfile: .eco,
-            launchAtLoginIntent: true
+            launchAtLoginIntent: true,
+            language: .korean
         )
         let executableURL = URL(fileURLWithPath: "/Synthetic/Selected/codex")
 
@@ -540,11 +682,17 @@ private func appPreferencesFirstLaunchAtomicMergeTest() -> TestCase {
         try expect(saved.launchAtLoginIntent, "Expected login intent")
         try expect(saved.selectedExecutableURL == executableURL, "Expected executable")
         try expect(saved.hasCompletedFirstLaunch, "Expected first launch completion")
+        try expect(saved.language == .korean, "Expected form language")
 
         let firstData = try storedPreferencesData(in: store.userDefaults)
         try await repository.markFirstLaunchCompleted()
         let secondData = try storedPreferencesData(in: store.userDefaults)
         try expect(firstData == secondData, "Expected idempotent completion bytes")
+
+        try await repository.resetFirstLaunchCompletionForUITesting()
+        let reset = await repository.load()
+        try expect(!reset.hasCompletedFirstLaunch, "Expected first launch reset")
+        try expect(reset.language == .korean, "Expected reset to preserve language")
     }
 }
 
@@ -627,7 +775,8 @@ private func appPreferencesSafePayloadTest() -> TestCase {
             "refreshProfile",
             "launchAtLoginIntent",
             "selectedExecutableURL",
-            "hasCompletedFirstLaunch"
+            "hasCompletedFirstLaunch",
+            "language"
         ])
         try expect(Set(object.keys) == expectedRootKeys, "Expected settings-only root schema")
     }
@@ -637,6 +786,7 @@ private func appPreferencesSendabilityTest() -> TestCase {
     TestCase(name: "application preferences are immutable sendable values") {
         requirePreferencesSendable(AppPreferences.default)
         try expect(AppPreferences.default == AppPreferences(), "Expected stable defaults")
+        try expect(AppPreferences.default.language == .english, "Expected stable English fallback")
     }
 }
 
@@ -653,11 +803,16 @@ private struct PreferencesTestStore {
         self.userDefaults = userDefaults
     }
 
-    func repository() throws -> AppPreferencesRepository {
+    func repository(
+        defaultLanguage: AppLanguage = .english
+    ) throws -> AppPreferencesRepository {
         guard let repositoryDefaults = UserDefaults(suiteName: suiteName) else {
             throw TestFailure(description: "Unable to inject defaults suite")
         }
-        return AppPreferencesRepository(userDefaults: repositoryDefaults)
+        return AppPreferencesRepository(
+            userDefaults: repositoryDefaults,
+            defaultLanguage: defaultLanguage
+        )
     }
 
     func cleanUp() {
@@ -680,7 +835,8 @@ private func manualPreferences(
         refreshProfile: .fast,
         launchAtLoginIntent: true,
         selectedExecutableURL: syntheticExecutableURL,
-        hasCompletedFirstLaunch: true
+        hasCompletedFirstLaunch: true,
+        language: .english
     )
 }
 

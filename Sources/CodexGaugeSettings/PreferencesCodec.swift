@@ -4,7 +4,7 @@ import CoreFoundation
 import Foundation
 
 enum PreferencesCodec {
-    private static let currentVersion = 1
+    private static let currentVersion = 2
 
     static func encode(_ preferences: AppPreferences) throws -> Data {
         let object: [String: Any] = [
@@ -13,7 +13,8 @@ enum PreferencesCodec {
             "refreshProfile": preferences.refreshProfile.rawValue,
             "launchAtLoginIntent": preferences.launchAtLoginIntent,
             "selectedExecutableURL": encodeURL(preferences.selectedExecutableURL),
-            "hasCompletedFirstLaunch": preferences.hasCompletedFirstLaunch
+            "hasCompletedFirstLaunch": preferences.hasCompletedFirstLaunch,
+            "language": preferences.language.rawValue
         ]
         return try JSONSerialization.data(
             withJSONObject: object,
@@ -21,24 +22,52 @@ enum PreferencesCodec {
         )
     }
 
-    static func decode(_ data: Data) -> AppPreferences {
+    static func decode(
+        _ data: Data,
+        defaultLanguage: AppLanguage = .english
+    ) -> AppPreferences {
+        let fallback = AppPreferences(language: defaultLanguage)
         guard let object = try? JSONSerialization.jsonObject(with: data) else {
-            return .default
+            return fallback
         }
         guard let dictionary = object as? [String: Any] else {
-            return .default
+            return fallback
         }
         guard let version = integer(dictionary["version"]) else {
-            return .default
+            return fallback
         }
         switch version {
         case 0:
-            return decodeVersionZero(dictionary)
+            return decodeVersionZero(
+                dictionary,
+                defaultLanguage: defaultLanguage
+            )
+        case 1:
+            return decodeVersionOne(
+                dictionary,
+                defaultLanguage: defaultLanguage
+            )
         case currentVersion:
-            return decodeCurrent(dictionary)
+            return decodeCurrent(
+                dictionary,
+                defaultLanguage: defaultLanguage
+            )
         default:
-            return .default
+            return fallback
         }
+    }
+
+    static func isKnownLegacySchema(_ data: Data) -> Bool {
+        guard let object = try? JSONSerialization.jsonObject(with: data) else {
+            return false
+        }
+        guard let dictionary = object as? [String: Any] else {
+            return false
+        }
+        guard let version = integer(dictionary["version"]) else {
+            return false
+        }
+        return version == 0 || version == 1
     }
 
     private static func encodeDisplay(
@@ -103,7 +132,28 @@ enum PreferencesCodec {
     }
 
     private static func decodeCurrent(
-        _ dictionary: [String: Any]
+        _ dictionary: [String: Any],
+        defaultLanguage: AppLanguage
+    ) -> AppPreferences {
+        decodeVersionOne(
+            dictionary,
+            language: decodeLanguage(
+                dictionary["language"],
+                defaultLanguage: defaultLanguage
+            )
+        )
+    }
+
+    private static func decodeVersionOne(
+        _ dictionary: [String: Any],
+        defaultLanguage: AppLanguage
+    ) -> AppPreferences {
+        decodeVersionOne(dictionary, language: defaultLanguage)
+    }
+
+    private static func decodeVersionOne(
+        _ dictionary: [String: Any],
+        language: AppLanguage
     ) -> AppPreferences {
         AppPreferences(
             displayPreference: decodeDisplay(dictionary["display"]),
@@ -118,7 +168,8 @@ enum PreferencesCodec {
             ),
             hasCompletedFirstLaunch: boolean(
                 dictionary["hasCompletedFirstLaunch"]
-            ) ?? false
+            ) ?? false,
+            language: language
         )
     }
 
@@ -135,7 +186,8 @@ enum PreferencesCodec {
     }
 
     private static func decodeVersionZero(
-        _ dictionary: [String: Any]
+        _ dictionary: [String: Any],
+        defaultLanguage: AppLanguage
     ) -> AppPreferences {
         let display = DisplayPreference(
             productMode: decodeProductMode(
@@ -156,8 +208,19 @@ enum PreferencesCodec {
             ),
             hasCompletedFirstLaunch: boolean(
                 dictionary["hasCompletedFirstLaunch"]
-            ) ?? false
+            ) ?? false,
+            language: defaultLanguage
         )
+    }
+
+    private static func decodeLanguage(
+        _ value: Any?,
+        defaultLanguage: AppLanguage
+    ) -> AppLanguage {
+        guard let rawValue = string(value) else {
+            return defaultLanguage
+        }
+        return AppLanguage(rawValue: rawValue) ?? defaultLanguage
     }
 
     private static func decodeVersionZeroSelection(
