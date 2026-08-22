@@ -7,6 +7,18 @@ public typealias SettingsFormValuesSaver = @Sendable (SettingsFormValues) async 
 
 @MainActor
 public final class SettingsWindowCoordinator {
+    @usableFromInline
+    nonisolated static let defaultConnectionDiagnosticsProvider:
+        SettingsConnectionDiagnosticsProvider = { selectedExecutableURL, status in
+            ConnectionDiagnosticsSnapshot(
+                executableSource: selectedExecutableURL == nil ? .automatic : .userSelected,
+                path: nil,
+                cliVersion: nil,
+                cliVersionIssue: nil,
+                connectionStatus: status
+            )
+        }
+
     public private(set) var activeWindowController: SettingsWindowController?
 
     private let repository: AppPreferencesRepository
@@ -46,16 +58,8 @@ public final class SettingsWindowCoordinator {
         discoveredQuotaProvider: @escaping @MainActor () -> Set<QuotaSelectionID>,
         foregroundPresenter: any SettingsWindowForegroundPresenting =
             SettingsWindowForegroundPresenter(),
-        connectionDiagnosticsProvider: @escaping SettingsConnectionDiagnosticsProvider = {
-            selectedExecutableURL, status in
-            ConnectionDiagnosticsSnapshot(
-                executableSource: selectedExecutableURL == nil ? .automatic : .userSelected,
-                path: nil,
-                cliVersion: nil,
-                cliVersionIssue: nil,
-                connectionStatus: status
-            )
-        },
+        connectionDiagnosticsProvider: @escaping SettingsConnectionDiagnosticsProvider =
+            SettingsWindowCoordinator.defaultConnectionDiagnosticsProvider,
         connectionStatusProvider: @escaping @MainActor () -> CodexConnectionStatus = {
             .checking
         },
