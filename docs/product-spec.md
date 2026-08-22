@@ -208,13 +208,42 @@ Debug 구성의 통합 XCUITest는 정확한 `--codex-gauge-ui-test-fixture-83` 
 
 이 경계 전환은 다음 polling 성공을 기다리지 않는다. wall-clock one-shot이 presentation invalidation을 요청해 cached frame을 현재 시각으로 다시 만들며, reset과 제품별 24시간 경계가 같으면 timer 하나에서 두 typed reason을 중복 없이 처리한다.
 
-## 8. v0.1 제외 범위
+## 8. 배포와 업데이트
+
+### 8.1 설치
+
+- macOS 13 이상에서 동작하는 Apple Silicon·Intel universal application을 제공한다.
+- 기본 채널은 GitHub Releases의 `CodexGauge.dmg`다.
+- DMG에는 application bundle 하나와 `/Applications` symbolic link 하나만 둔다.
+- 사용자는 DMG에서 Codex Gauge를 Applications로 드래그한다.
+- Apple Developer Program, Developer ID 배포 서명과 Apple notarization을 사용하지 않는다.
+- application은 Apple 인증서 없이 ad-hoc code signing하지만 이를 개발자 신원이나 Gatekeeper 승인으로 표현하지 않는다.
+- macOS가 최초 실행을 차단하면 사용자가 System Settings의 공식 `그래도 열기` 절차로 직접 승인한다.
+- 앱, DMG와 설치 안내는 quarantine attribute 제거, Gatekeeper 비활성화 또는 `--no-quarantine`을 사용하지 않는다.
+- SHA-256은 artifact 일치와 전송 손상을 확인하지만 개발자 신원이나 Apple 검증을 의미하지 않는다.
+- PKG, privileged helper와 installer script를 만들지 않는다.
+
+자체 Homebrew Cask는 같은 versioned GitHub Release DMG와 정확한 SHA-256을 사용한다. `app` artifact만 사용하며 postflight script나 macOS 보안 설정 변경을 추가하지 않는다. Homebrew 설치에서도 최초 실행 승인이 필요할 수 있다.
+
+### 8.2 자동 업데이트
+
+Sparkle 2 기반 자동 업데이트는 DMG와 GitHub Release 기반을 검증한 뒤 별도 task로 도입한다. HTTPS appcast와 EdDSA 서명을 사용하며 Developer ID가 없는 환경의 구버전→신버전 교체와 Gatekeeper 동작을 실제 설치본에서 검증한다.
+
+- 메뉴에 `업데이트 확인…`을 제공한다.
+- 자동 확인은 기본 켜짐이고 하루 한 번 실행한다.
+- 자동 다운로드와 설치는 기본 꺼짐이다.
+- quota polling과 update schedule을 결합하지 않는다.
+- 익명 system profiling과 telemetry를 사용하지 않는다.
+- 첫 안정 공개 버전 전에 updater를 포함해 기존 사용자가 한 번 수동 설치해야 하는 전환을 피하는 것을 목표로 한다.
+
+구체적인 artifact와 신뢰 경계는 [배포 문서](distribution.md)를 따른다.
+
+## 9. v0.1 제외 범위
 
 - token 통계, 히스토리와 그래프
 - 낮은 사용량 알림
-- 자동 업데이트
 - 다중 계정 동시 표시
-- App Store, DMG와 Homebrew 배포
+- App Store 배포
 - private Codex IPC 재사용
 - 서버가 주지 않은 월간 의미 추론
 - SwiftUI, Electron, Tauri와 WebView

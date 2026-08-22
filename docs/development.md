@@ -16,7 +16,7 @@ xcodebuild -version
 xcrun swift --version
 ```
 
-Codex Gauge는 외부 Swift package나 런타임을 사용하지 않는다. 새 의존성은 크기, cold start, idle memory, 공급망 위험을 측정한 별도 architecture decision 없이는 추가하지 않는다.
+현재 Codex Gauge runtime은 외부 Swift package를 사용하지 않는다. Sparkle 2는 자동 업데이트 전용의 유일한 승인 후보이며 별도 updater task에서 정확한 version pin, license, key 관리, 크기, cold start, idle memory와 공급망 위험을 검증한 뒤에만 추가한다. 다른 새 의존성은 별도 architecture decision 없이는 추가하지 않는다.
 
 ## 2. 빌드와 테스트
 
@@ -315,7 +315,11 @@ feat(menubar): render quota status frames
 10. 로그인 시 실행과 접근성
 11. SwiftPM Debug·test·Release CI
 12. Xcode application wrapper, UI test와 universal Release 검증
-13. resource baseline과 v0.1 문서 마무리
+13. distribution policy와 universal DMG packaging
+14. tag 기반 GitHub Release workflow
+15. 자체 Homebrew Cask
+16. Sparkle updater와 signed appcast
+17. 구버전→신버전 update·resource baseline과 v0.1 문서 마무리
 
 각 task는 독립적으로 테스트 가능하고 Conventional Commit 하나로 main에 들어가야 한다.
 
@@ -324,12 +328,15 @@ feat(menubar): render quota status frames
 - 현재 `.github/workflows/ci.yml`은 pull request, main push와 수동 실행에서 동일한 `build-test` job을 실행한다. branch ruleset의 필수 check 이름도 `build-test`로 고정한다.
 - runner는 floating `macos-latest`가 아닌 `macos-26`을 사용하고 `DEVELOPER_DIR=/Applications/Xcode_26.6.app/Contents/Developer`로 toolchain을 고정한다.
 - gate는 package describe, warnings-as-errors 및 explicit dependency import check를 적용한 SwiftPM Debug build, strict concurrency·warnings-as-errors를 적용한 `swift test`, `swift run codex-gauge-tests`, 동일한 strict Release build와 Xcode unit smoke다. main push와 수동 실행에서는 최초 실행과 설정 menu lifecycle UI smoke도 수행한다.
-- Xcode UI smoke는 별도 인증서나 secret 없이 ad-hoc signing으로 실행한다. Release는 signing을 비활성화하고 exact `arm64 x86_64`로 빌드한 뒤 `lipo`에서 두 architecture와 bundle의 `LSUIElement=true`를 검증한다. ad-hoc test signing과 unsigned build로 배포 서명·공증이나 실제 macOS 13 실행을 대신 주장하지 않는다.
+- Xcode UI smoke는 별도 인증서나 secret 없이 ad-hoc signing으로 실행한다. 일반 CI의 Release는 signing을 비활성화하고 exact `arm64 x86_64`로 빌드한 뒤 `lipo`에서 두 architecture와 bundle의 `LSUIElement=true`를 검증한다. 이 build는 사용자 설치용 artifact가 아니다. 공개 DMG는 Developer ID 서명·Apple 공증을 사용하지 않는다는 사실을 명시하고 별도 release 검증을 통과해야 한다.
 - job timeout은 30분이며 같은 workflow와 ref의 이전 실행은 취소한다.
-- workflow `GITHUB_TOKEN`은 `contents: read`만 허용하고 checkout credential을 작업 copy에 유지하지 않는다. checkout 이외의 action, cache, Codecov와 secret을 사용하지 않는다.
+- 일반 CI의 `GITHUB_TOKEN`은 `contents: read`만 허용하고 checkout credential을 작업 copy에 유지하지 않는다. checkout 이외의 action, cache, Codecov와 secret을 사용하지 않는다. 별도 tag release workflow만 draft Release 생성에 필요한 `contents: write`를 사용한다.
 - 테스트는 synthetic fixture와 fake 경계만 사용한다. build·test 단계에는 Codex executable, Codex 로그인, OpenAI API key, 사용자 인증 파일 또는 애플리케이션 네트워크 요청이 필요하지 않다.
 - `.github/dependabot.yml`은 GitHub Actions reference를 매주 확인한다. action update PR에서는 release tag뿐 아니라 full commit SHA와 version comment가 함께 바뀌었는지 검토한다.
 - CI는 `.app` bundle, unit smoke, main의 UI smoke와 universal binary를 검증한다. Instruments resource baseline은 실제 macOS hardware의 opt-in performance gate로 유지한다.
 - main은 force push, branch 삭제와 merge commit을 차단한다.
-- 첫 바이너리는 Developer ID 서명과 notarization을 준비한 뒤 공증된 universal ZIP으로만 배포한다.
-- 자동 업데이트, DMG와 Homebrew cask는 v0.1 이후 task다.
+- 첫 바이너리는 Apple 인증서 없는 ad-hoc signing을 적용하고 Developer ID 서명·Apple 공증 없이 universal DMG로 GitHub Releases에 배포한다. DMG, SHA-256과 미공증 안내를 함께 제공하고 Gatekeeper·quarantine을 비활성화하거나 제거하지 않는다.
+- 자체 Homebrew Cask는 같은 versioned GitHub Release DMG와 정확한 SHA-256을 사용한다. postflight installer나 macOS 보안 설정 변경은 금지한다.
+- Sparkle 2 자동 업데이트는 DMG·Release 기반 뒤 별도 task다. EdDSA 개인키는 repository와 일반 CI에 저장하지 않고 보호된 release 환경에서만 사용한다.
+- 안정 Release 전에는 tag·bundle version 일치, ad-hoc signature와 Hardened Runtime, `arm64 x86_64`, bundle identifier, macOS minimum, `LSUIElement`, DMG의 application 하나·Applications link 하나와 checksum을 자동 검증한다.
+- 새 macOS 사용자 계정에서 browser download, drag install, 공식 `그래도 열기`, 메뉴 막대 표시, 로그인 시 실행, 제거와 Cask install·uninstall을 수동 검증한다. Apple Silicon과 Intel 결과를 각각 기록한다.

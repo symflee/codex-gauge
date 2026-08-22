@@ -7,12 +7,14 @@ Codex Gauge는 AppKit 기반의 작은 메뉴 막대 프로세스로 유지한�
 핵심 제약:
 
 - Swift 6 language mode, macOS 13 이상
-- AppKit-only, 외부 패키지 0개
+- AppKit-only, 현재 runtime 외부 패키지 0개
 - `LSUIElement=YES`, Dock 아이콘 없음
 - App Sandbox 비활성화, Hardened Runtime 활성화
 - bundle identifier `io.github.symflee.codex-gauge`
 - 계정 snapshot은 메모리에만 유지
 - UI와 상태바 rotation timer는 main actor, polling timer와 blocking I/O는 main actor 밖에서 실행
+
+Sparkle 2는 자동 업데이트 전용의 유일한 승인 후보다. 별도 updater task에서 architecture·security 문서, 정확한 version pin, EdDSA key 경계와 자원 측정을 함께 갱신하기 전에는 dependency에 추가하지 않는다.
 
 ## 2. 데이터 흐름
 
@@ -222,6 +224,28 @@ reset 절대 시각과 제품별 24시간 만료는 wall clock `Date`이므로 p
 root `Package.swift`가 모든 domain, protocol, refresh, settings와 AppKit runtime source의 기준이다. `CodexGauge.xcodeproj`의 application target은 같은 domain/runtime source를 target membership으로 복제하지 않고 local package product `CodexGaugeAppKit`을 연결하며, `App/CodexGauge`의 `main.swift`, `Info.plist`와 `Assets.xcassets`만 직접 소유한다.
 
 application bundle은 macOS 13 이상, Swift 6 language mode, `LSUIElement=true`, Hardened Runtime 활성화와 App Sandbox 비활성화를 명시한다. Release는 standard architecture와 `ONLY_ACTIVE_ARCH=NO`로 Apple Silicon·Intel universal 산출물을 만든다. shared `CodexGauge` scheme은 package 경계를 확인하는 XCTest unit smoke와 최초 실행 설정 창 XCUITest를 함께 제공한다.
+
+Hardened Runtime build setting은 유지하고 공개 application은 Apple 인증서 없이 ad-hoc signing한다. Developer ID 배포 서명과 Apple notarization은 사용하지 않으며 ad-hoc signature와 Hardened Runtime을 Apple이 확인한 개발자 신원 또는 notarization 결과로 표현하지 않는다.
+
+### 배포 artifact 경계
+
+```text
+universal .app
+      │ dependency-free packaging
+      ▼
+CodexGauge.dmg
+      │ SHA-256 + release metadata validation
+      ▼
+GitHub Release
+      ├── browser download
+      └── own Homebrew Cask
+```
+
+DMG에는 application bundle 하나와 `/Applications` symbolic link 하나만 둔다. packaging은 quarantine attribute를 제거하거나 Gatekeeper 설정을 변경하지 않고 installer script 또는 privileged helper를 실행하지 않는다. Cask도 새 artifact를 만들지 않고 동일한 immutable version URL과 SHA-256을 재사용한다.
+
+release validation은 tag와 bundle version, bundle identifier, macOS minimum, `LSUIElement`, ad-hoc signature와 Hardened Runtime, main executable의 `arm64 x86_64`, DMG layout과 checksum을 확인한다. SHA-256은 artifact 일치 확인일 뿐 Apple code-signing identity가 아니다. 전체 배포 계약은 [배포 문서](distribution.md)를 따른다.
+
+향후 updater는 이 흐름에 HTTPS appcast와 Sparkle EdDSA 검증을 추가한다. updater scheduler는 quota provider와 `RefreshCoordinator`에서 분리하고 하루 단위로 동작한다. EdDSA 공개키만 앱에 포함하며 개인키는 release 환경 밖으로 노출하지 않는다. Sparkle 도입 뒤 idle RSS, CPU와 wake-up을 다시 측정한다.
 
 ### 상태 항목
 

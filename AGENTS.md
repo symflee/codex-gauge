@@ -6,7 +6,8 @@
 
 - macOS 13 이상을 지원하는 AppKit-only 메뉴 막대 앱이다.
 - Swift 6 language mode를 사용한다.
-- 외부 package, SwiftUI, WebView, Electron, Tauri, telemetry를 추가하지 않는다.
+- 외부 package는 기본적으로 추가하지 않는다. Sparkle 2는 별도 updater task에서 architecture·security 문서, 정확한 version pin과 자원 측정을 함께 갱신할 때만 허용한다.
+- SwiftUI, WebView, Electron, Tauri와 telemetry를 추가하지 않는다.
 - UI는 한국어 우선으로 작성하되 사용자 문자열을 localization 가능한 resource로 분리한다.
 - 서버가 주지 않은 기간 의미를 추측하지 않는다.
 - 오류를 `0%`로 표시하지 않는다.
@@ -27,6 +28,7 @@
 - raw JSONL, stderr, 이메일, 실제 quota와 절대 사용자 경로를 로그·fixture·문서에 넣지 않는다.
 - 진단 정보는 비식별 typed error와 환경 metadata로 제한한다.
 - executable은 shell을 거치지 않고 검증된 URL로 직접 실행한다.
+- 배포 artifact와 설치 안내는 Gatekeeper 또는 quarantine을 비활성화하거나 제거하지 않는다.
 - 보안 경계를 바꿔야 하면 구현 전에 `SECURITY.md`와 architecture 문서를 갱신하고 검토를 요청한다.
 
 ## 구현과 테스트

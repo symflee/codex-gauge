@@ -39,6 +39,20 @@ Codex Gauge는 macOS 메뉴 막대에서 Codex와 Spark의 남은 사용 한도�
 
 Codex Gauge는 별도의 OpenAI API key를 요구하지 않습니다. 설치된 Codex가 소유한 인증 경계를 그대로 사용합니다.
 
+## 설치 — 준비 중
+
+첫 공개 버전은 GitHub Releases의 universal `CodexGauge.dmg`로 제공합니다. GitHub가 자동 생성하는 `Source code.zip`은 설치 파일이 아닙니다. DMG를 연 뒤 Codex Gauge를 `Applications`로 드래그하면 일반적인 macOS 애플리케이션으로 설치됩니다.
+
+Codex Gauge는 Apple Developer Program을 사용하지 않으며 Developer ID 서명과 Apple 공증 없이 배포됩니다. macOS가 최초 실행을 차단하면 `시스템 설정 → 개인정보 보호 및 보안 → 그래도 열기`에서 사용자가 직접 승인합니다. Codex Gauge는 Gatekeeper 또는 quarantine을 비활성화하거나 자동으로 우회하지 않습니다.
+
+자체 Homebrew Cask가 공개된 뒤에는 다음 명령도 제공합니다. 현재는 tap과 Release artifact를 준비하는 단계이므로 아직 설치 명령으로 사용하지 마세요.
+
+```sh
+brew install --cask symflee/tap/codex-gauge
+```
+
+Homebrew 설치도 macOS의 최초 실행 승인이 필요할 수 있습니다. 설치·Release·checksum과 향후 업데이트 경계는 [배포 문서](docs/distribution.md)를 참고하세요.
+
 ## 개발 상태와 빌드
 
 v0.1을 개발 중입니다. 핵심 모듈과 AppKit 개발 호스트는 Swift Package Manager로 빌드하고 테스트할 수 있습니다.
@@ -68,7 +82,7 @@ xcodebuild -project CodexGauge.xcodeproj \
   test
 ```
 
-공개 CI는 SwiftPM 전체 테스트와 Xcode unit smoke, main·수동 실행의 UI smoke 및 signing-disabled universal Release 빌드를 검증합니다. 사용자 인증이나 실제 Codex 설치에 의존하지 않으며 protocol 테스트는 합성 fixture만 사용합니다. 실제 App Server smoke test는 개발자가 명시적으로 실행하는 로컬 테스트로만 제공합니다.
+공개 CI는 SwiftPM 전체 테스트와 Xcode unit smoke, main·수동 실행의 UI smoke 및 signing-disabled universal Release 빌드를 검증합니다. 이 CI build는 사용자 설치용 DMG가 아닙니다. 별도의 release workflow가 version, universal application, DMG layout과 SHA-256을 검증한 뒤 GitHub Release artifact를 만듭니다. 사용자 인증이나 실제 Codex 설치에 의존하지 않으며 protocol 테스트는 합성 fixture만 사용합니다. 실제 App Server smoke test는 개발자가 명시적으로 실행하는 로컬 테스트로만 제공합니다.
 
 Debug 구성의 XCUITest에서 실제 메뉴 막대·메뉴·설정 창 composition을 검증할 때는 정확한 `--codex-gauge-ui-test-fixture-83` 실행 인자를 사용합니다. 이 opt-in 모드는 메모리에 합성 Codex 5시간 한도 `83%`를 게시하며 Codex 탐색·프로세스·인증·네트워크와 로그인 항목 변경을 수행하지 않습니다. 최초 실행 완료 상태는 별도의 `--codex-gauge-ui-test-reset-first-launch` 인자로만 초기화하므로 후속 fixture 실행에서도 한 번만 표시되는 설정 창과 상태 메뉴에서 설정을 열고 닫은 뒤 다시 만드는 생명주기를 검증할 수 있습니다. Release 빌드는 fixture 인자를 무시하고 항상 production 경계를 사용하며, 일반 실행에도 이 인자를 전달하지 않습니다.
 
@@ -96,6 +110,7 @@ swift run codex-gauge-smoke
 - [아키텍처](docs/architecture.md)
 - [Codex 프로토콜](docs/codex-protocol.md)
 - [개발 및 테스트](docs/development.md)
+- [macOS 배포](docs/distribution.md)
 - [기여 안내](CONTRIBUTING.md)
 
 ## 라이선스
