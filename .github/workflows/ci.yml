@@ -62,8 +62,12 @@ jobs:
           --explicit-target-dependency-import-check error
           -Xswiftc -warnings-as-errors
 
-      - name: Test release packaging scripts
-        run: bash Tests/ReleasePackagingTests/test_release_packaging.sh
+      - name: Test release automation
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash Tests/ReleasePackagingTests/test_release_packaging.sh
+          bash Tests/ReleaseWorkflowTests/test_release_workflow.sh
 
       - name: Test Xcode unit target
         run: >-

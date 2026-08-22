@@ -66,6 +66,14 @@ Xcode application build 없이 packaging 경계를 검증하는 합성 fixture t
 bash Tests/ReleasePackagingTests/test_release_packaging.sh
 ```
 
+GitHub release workflow 자체의 tag, version, build 증가, 권한과 draft-only 계약은 별도 합성 Git 저장소를 사용하는 다음 테스트로 검증한다.
+
+```sh
+bash Tests/ReleaseWorkflowTests/test_release_workflow.sh
+```
+
+`.github/workflows/release.yml`을 수동 실행하면 현재 ref의 검증된 DMG를 7일 보관 workflow artifact로만 만든다. exact `vX.Y.Z` tag push에서는 tag commit이 `origin/main`에 포함되고 tag와 application version이 일치하며 build가 이전 release보다 증가할 때만 같은 artifact를 만든다. 별도 `publish-draft` job은 다운로드한 DMG를 다시 mount·검증하고 기존 Release가 없을 때 GitHub draft Release만 생성한다. 이 workflow는 tag, Release 공개 상태 또는 기존 asset을 변경하거나 덮어쓰지 않는다.
+
 shared scheme의 UI smoke는 `CodexGaugeUITests`를 명시해 실행한다. 최초 실행 테스트의 두 launch는 모두 `--codex-gauge-ui-test-fixture-83`으로 외부 경계를 격리하고, 첫 launch에만 `--codex-gauge-ui-test-reset-first-launch`를 더해 완료 flag만 초기화한다. 후속 launch는 접근성 identifier로 상태 항목의 cached menu를 열어 `설정…`을 선택하고, 설정 창을 닫은 뒤 같은 메뉴에서 다시 생성되는지 검증한다. 실제 Codex 설치나 인증을 요구하지 않는다.
 
 package build와 단위 테스트는 실제 Codex 설치, 사용자 계정 또는 애플리케이션 네트워크 요청에 의존하지 않는다. decoder 테스트는 합성 JSONL fixture를 사용한다. process session 통합 테스트는 `codex-gauge-tests` 실행 파일 자체를 test-only 합성 `app-server`로 다시 실행해 handshake, timeout, flood와 종료를 검증한다. production 환경 정책 테스트는 hostile parent PATH가 exact safe PATH로 교체되고 합성 `HOME`·secret 같은 나머지 parent environment가 보존되는지 child 안에서 확인한다. 별도 임시 fixture는 test executable 복사본을 custom interpreter로 사용한 `/usr/bin/env` wrapper로 handshake, account와 rate-limit 조회까지 수행한다. 이 mode는 합성 environment key로만 동작하며 account 이메일이나 원문 사용자 응답을 생성·기록하지 않는다.
