@@ -21,8 +21,6 @@ jobs:
       contents: read
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
-      XCODE_DERIVED_DATA: ${{ runner.temp }}/CodexGaugeReleaseTests
-      RELEASE_DIRECTORY: ${{ runner.temp }}/codex-gauge-release
     outputs:
       artifact_name: ${{ steps.metadata.outputs.artifact_name }}
       build: ${{ steps.metadata.outputs.build }}
@@ -106,7 +104,7 @@ jobs:
           -project CodexGauge.xcodeproj
           -scheme CodexGauge
           -destination 'platform=macOS,arch=arm64'
-          -derivedDataPath "$XCODE_DERIVED_DATA"
+          -derivedDataPath "$RUNNER_TEMP/CodexGaugeReleaseTests"
           -only-testing:CodexGaugeUnitTests
           CODE_SIGNING_ALLOWED=NO
           SWIFT_TREAT_WARNINGS_AS_ERRORS=YES
@@ -117,7 +115,7 @@ jobs:
           -project CodexGauge.xcodeproj
           -scheme CodexGauge
           -destination 'platform=macOS,arch=arm64'
-          -derivedDataPath "$XCODE_DERIVED_DATA"
+          -derivedDataPath "$RUNNER_TEMP/CodexGaugeReleaseTests"
           -only-testing:CodexGaugeUITests
           CODE_SIGN_IDENTITY=-
           DEVELOPMENT_TEAM=
@@ -126,7 +124,7 @@ jobs:
       - name: Build and verify release disk image
         run: >-
           Scripts/build-release-dmg.sh
-          --output-directory "$RELEASE_DIRECTORY"
+          --output-directory "$RUNNER_TEMP/codex-gauge-release"
           --version "${{ steps.metadata.outputs.version }}"
           --build "${{ steps.metadata.outputs.build }}"
 
@@ -134,17 +132,18 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cp .github/release-notes.md "$RELEASE_DIRECTORY/release-notes.md"
-          mkdir "$RELEASE_DIRECTORY/verification"
-          cp Scripts/verify-release-app.sh "$RELEASE_DIRECTORY/verification/"
-          cp Scripts/verify-release-dmg.sh "$RELEASE_DIRECTORY/verification/"
+          release_directory="$RUNNER_TEMP/codex-gauge-release"
+          cp .github/release-notes.md "$release_directory/release-notes.md"
+          mkdir "$release_directory/verification"
+          cp Scripts/verify-release-app.sh "$release_directory/verification/"
+          cp Scripts/verify-release-dmg.sh "$release_directory/verification/"
 
       - name: Upload verified release candidate
         # actions/upload-artifact v7.0.1
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: ${{ steps.metadata.outputs.artifact_name }}
-          path: ${{ env.RELEASE_DIRECTORY }}
+          path: ${{ runner.temp }}/codex-gauge-release
           if-no-files-found: error
           retention-days: 7
           compression-level: 0
@@ -161,31 +160,31 @@ jobs:
       contents: write
     env:
       GH_TOKEN: ${{ github.token }}
-      RELEASE_DIRECTORY: ${{ runner.temp }}/codex-gauge-release-candidate
     steps:
       - name: Download verified release candidate
         # actions/download-artifact v8.0.1
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: ${{ needs.build_package.outputs.artifact_name }}
-          path: ${{ env.RELEASE_DIRECTORY }}
+          path: ${{ runner.temp }}/codex-gauge-release-candidate
 
       - name: Reverify release candidate
         shell: bash
         run: |
           set -euo pipefail
-          test "$(find "$RELEASE_DIRECTORY" -type f | wc -l | tr -d '[:space:]')" = "5"
-          test -f "$RELEASE_DIRECTORY/CodexGauge.dmg"
-          test -f "$RELEASE_DIRECTORY/CodexGauge.dmg.sha256"
-          test -f "$RELEASE_DIRECTORY/release-notes.md"
-          test -f "$RELEASE_DIRECTORY/verification/verify-release-app.sh"
-          test -f "$RELEASE_DIRECTORY/verification/verify-release-dmg.sh"
+          release_directory="$RUNNER_TEMP/codex-gauge-release-candidate"
+          test "$(find "$release_directory" -type f | wc -l | tr -d '[:space:]')" = "5"
+          test -f "$release_directory/CodexGauge.dmg"
+          test -f "$release_directory/CodexGauge.dmg.sha256"
+          test -f "$release_directory/release-notes.md"
+          test -f "$release_directory/verification/verify-release-app.sh"
+          test -f "$release_directory/verification/verify-release-dmg.sh"
           chmod +x \
-            "$RELEASE_DIRECTORY/verification/verify-release-app.sh" \
-            "$RELEASE_DIRECTORY/verification/verify-release-dmg.sh"
-          bash "$RELEASE_DIRECTORY/verification/verify-release-dmg.sh" \
-            --dmg "$RELEASE_DIRECTORY/CodexGauge.dmg" \
-            --checksum "$RELEASE_DIRECTORY/CodexGauge.dmg.sha256" \
+            "$release_directory/verification/verify-release-app.sh" \
+            "$release_directory/verification/verify-release-dmg.sh"
+          bash "$release_directory/verification/verify-release-dmg.sh" \
+            --dmg "$release_directory/CodexGauge.dmg" \
+            --checksum "$release_directory/CodexGauge.dmg.sha256" \
             --version "${{ needs.build_package.outputs.version }}" \
             --build "${{ needs.build_package.outputs.build }}"
 
@@ -204,14 +203,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          release_directory="$RUNNER_TEMP/codex-gauge-release-candidate"
           gh release create "$GITHUB_REF_NAME" \
-            "$RELEASE_DIRECTORY/CodexGauge.dmg#Codex Gauge macOS universal installer" \
-            "$RELEASE_DIRECTORY/CodexGauge.dmg.sha256#SHA-256 checksum" \
+            "$release_directory/CodexGauge.dmg#Codex Gauge macOS universal installer" \
+            "$release_directory/CodexGauge.dmg.sha256#SHA-256 checksum" \
             --repo "$GITHUB_REPOSITORY" \
             --verify-tag \
             --draft \
             --title "Codex Gauge ${{ needs.build_package.outputs.version }}" \
-            --notes-file "$RELEASE_DIRECTORY/release-notes.md"
+            --notes-file "$release_directory/release-notes.md"
 
       - name: Verify draft release
         shell: bash

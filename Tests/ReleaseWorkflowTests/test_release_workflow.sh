@@ -59,15 +59,23 @@ commit_project_build() {
 trap cleanup EXIT
 
 validator="$repository_root/Scripts/validate-release-context.sh"
+ci_workflow="$repository_root/.github/workflows/ci.yml"
 workflow="$repository_root/.github/workflows/release.yml"
 release_notes="$repository_root/.github/release-notes.md"
 
 test -x "$validator" || fail "missing executable release context validator"
+test -f "$ci_workflow" || fail "missing CI workflow"
 test -f "$workflow" || fail "missing release workflow"
 test -f "$release_notes" || fail "missing release notes template"
 
 bash -n "$validator"
 ruby -e 'require "yaml"; YAML.load_file(ARGV.fetch(0))' "$workflow"
+
+if grep -E -q '^[[:space:]]+[A-Z][A-Z0-9_]*:[[:space:]]+\$\{\{[[:space:]]*runner\.temp' \
+    "$ci_workflow" \
+    "$workflow"; then
+    fail "runner context is unavailable in workflow env declarations"
+fi
 
 grep -q '^  workflow_dispatch:' "$workflow" \
     || fail "manual artifact builds are not configured"
