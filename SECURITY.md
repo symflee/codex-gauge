@@ -34,6 +34,20 @@ Codex Gauge는 다음 원칙을 지킵니다.
 - 설정에는 비밀이 아닌 preference만 저장
 - 진단 정보에서 사용자 경로와 계정 정보를 제거
 
+## 배포 신뢰 경계
+
+Codex Gauge는 Apple Developer Program, Developer ID 배포 서명과 Apple notarization을 사용하지 않는다. GitHub Release DMG와 자체 Homebrew Cask는 다음 경계를 지킨다.
+
+- application은 Apple 인증서 없는 ad-hoc signing을 사용하며 이를 개발자 신원이나 Gatekeeper 승인으로 표현하지 않음
+- DMG에는 application bundle과 `/Applications` symbolic link만 포함
+- installer script, privileged helper와 PKG를 사용하지 않음
+- `xattr`, `spctl` 설정 변경, `--no-quarantine` 또는 Gatekeeper 비활성화를 수행하거나 안내하지 않음
+- macOS가 차단하면 사용자가 System Settings의 공식 `그래도 열기` 절차로 직접 승인
+- SHA-256을 artifact 일치 확인에만 사용하고 개발자 신원이나 Apple 검증으로 표현하지 않음
+- release artifact와 CI log에 credential, 실제 quota와 사용자 경로를 포함하지 않음
+
+향후 Sparkle 2 updater를 도입할 때는 HTTPS appcast와 EdDSA로 update archive를 검증한다. 공개키만 앱에 포함하며 개인키는 repository, 일반 CI artifact와 Release asset에 저장하지 않는다. updater는 quota polling·인증 경계와 분리하고 Developer ID가 없는 설치본의 교체 및 Gatekeeper 동작을 실제 구버전→신버전 테스트로 확인한다.
+
 명시적 `swift run codex-gauge-smoke` 검증도 같은 실행 파일 검증과 App Server session 경계를 사용합니다. no-argument CLI는 앱 설정의 선택 경로나 `NSWorkspace` 결과를 읽지 않고 알려진 자동 후보만 검사합니다. handshake와 한도 조회를 한 번 수행하고 bounded cleanup 뒤 종료하며, 제품 availability와 typed 실패 범주만 출력합니다. 실제 퍼센트, reset 시각, 이메일, token, account identifier, raw JSONL, stderr, 절대 경로와 하위 오류 설명은 출력하지 않습니다. 이 명령은 앱 시작, test suite 또는 CI에서 자동으로 실행하지 않습니다.
 
 다음은 명시적으로 지원하지 않습니다.
