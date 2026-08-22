@@ -54,13 +54,19 @@ struct TestRunner {
     }
 
     private static func run(_ test: TestCase) async -> Int32 {
+        report("RUN \(test.name)")
         do {
             try await test.body()
-            print("PASS \(test.name)")
+            report("PASS \(test.name)")
             return 0
         } catch {
-            print("FAIL \(test.name): \(error)")
+            report("FAIL \(test.name): \(error)")
             return 1
         }
+    }
+
+    private static func report(_ message: String) {
+        print(message)
+        fflush(stdout)
     }
 }
