@@ -7,6 +7,9 @@ import Foundation
 public final class CodexGaugeApplicationCoordinator {
     public typealias StartupHook = @MainActor (AppPreferences) async -> Void
 
+    @usableFromInline
+    nonisolated static let noOpStartupHook: StartupHook = { _ in }
+
     public private(set) var publication = RefreshPublication.initial
     public private(set) var discoveredQuotaIDs = Set<QuotaSelectionID>()
     public private(set) var launchAtLoginState = LaunchAtLoginSettingsState(
@@ -69,7 +72,8 @@ public final class CodexGaugeApplicationCoordinator {
             preferredLanguages: Locale.preferredLanguages
         ),
         now: @escaping @MainActor () -> Date = { Date() },
-        startupHook: @escaping StartupHook = { _ in }
+        startupHook: @escaping StartupHook =
+            CodexGaugeApplicationCoordinator.noOpStartupHook
     ) {
         self.statusRuntime = statusRuntime
         self.menuRuntime = menuRuntime

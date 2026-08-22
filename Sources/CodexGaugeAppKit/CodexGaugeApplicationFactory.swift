@@ -21,9 +21,8 @@ public enum CodexGaugeApplicationFactory {
         workspace: NSWorkspace = .shared,
         application: NSApplication = .shared,
         launchArguments: [String] = ProcessInfo.processInfo.arguments,
-        startupHook: @escaping CodexGaugeApplicationCoordinator.StartupHook = {
-            _ in
-        }
+        startupHook: @escaping CodexGaugeApplicationCoordinator.StartupHook =
+            CodexGaugeApplicationCoordinator.noOpStartupHook
     ) -> CodexGaugeApplicationCoordinator {
         let launchOptions = CodexGaugeApplicationLaunchOptions(
             arguments: launchArguments
