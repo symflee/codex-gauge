@@ -22,3 +22,4 @@
 *.icns binary
 *.pdf binary
 *.zip binary
+*.dmg binary

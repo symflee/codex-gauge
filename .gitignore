@@ -15,6 +15,9 @@ build/
 *.ipa
 *.dSYM
 *.dSYM.zip
+dist/
+*.dmg
+*.dmg.sha256
 
 # Swift Package Manager
 .build/

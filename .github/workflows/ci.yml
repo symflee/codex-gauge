@@ -62,6 +62,9 @@ jobs:
           --explicit-target-dependency-import-check error
           -Xswiftc -warnings-as-errors
 
+      - name: Test release packaging scripts
+        run: bash Tests/ReleasePackagingTests/test_release_packaging.sh
+
       - name: Test Xcode unit target
         run: >-
           xcodebuild test
@@ -86,29 +89,20 @@ jobs:
           DEVELOPMENT_TEAM=
           SWIFT_TREAT_WARNINGS_AS_ERRORS=YES
 
-      - name: Build universal application
-        run: >-
-          xcodebuild build
-          -project CodexGauge.xcodeproj
-          -scheme CodexGauge
-          -configuration Release
-          -destination 'generic/platform=macOS'
-          -derivedDataPath "$XCODE_DERIVED_DATA"
-          CODE_SIGNING_ALLOWED=NO
-          ONLY_ACTIVE_ARCH=NO
-          ARCHS='arm64 x86_64'
-          SWIFT_TREAT_WARNINGS_AS_ERRORS=YES
-
-      - name: Verify universal application
+      - name: Build and verify release disk image
         shell: bash
         run: |
           set -euo pipefail
-          binary="$XCODE_DERIVED_DATA/Build/Products/Release/CodexGauge.app/Contents/MacOS/CodexGauge"
-          test -x "$binary"
-          architectures="$(lipo -archs "$binary")"
-          case "$architectures" in
-            "arm64 x86_64"|"x86_64 arm64") ;;
-            *) exit 1 ;;
-          esac
-          plist="$XCODE_DERIVED_DATA/Build/Products/Release/CodexGauge.app/Contents/Info.plist"
-          test "$(plutil -extract LSUIElement raw -o - "$plist")" = "true"
+          build_settings="$(xcodebuild \
+            -project CodexGauge.xcodeproj \
+            -target CodexGauge \
+            -configuration Release \
+            -showBuildSettings)"
+          version="$(awk '$1 == "MARKETING_VERSION" { value = $3 } END { print value }' <<< "$build_settings")"
+          build="$(awk '$1 == "CURRENT_PROJECT_VERSION" { value = $3 } END { print value }' <<< "$build_settings")"
+          test -n "$version"
+          test -n "$build"
+          Scripts/build-release-dmg.sh \
+            --output-directory "$RUNNER_TEMP/release" \
+            --version "$version" \
+            --build "$build"
