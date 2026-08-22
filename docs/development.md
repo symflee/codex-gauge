@@ -49,6 +49,23 @@ xcodebuild -project CodexGauge.xcodeproj \
   build
 ```
 
+사용자 배포용 ad-hoc signed universal application과 DMG는 전체 Xcode가 선택된 macOS에서 다음 명령으로 만든다. 출력 경로에 기존 `CodexGauge.dmg` 또는 checksum이 있으면 덮어쓰지 않고 실패한다.
+
+```sh
+Scripts/build-release-dmg.sh \
+  --output-directory dist \
+  --version 0.1.0 \
+  --build 1
+```
+
+스크립트는 임시 DerivedData에서 `arm64 x86_64` Release application을 빌드하고 ad-hoc signature, Hardened Runtime, bundle metadata와 localization을 확인한다. 이후 `Codex Gauge.app`과 `/Applications` link만 있는 HFS+ UDZO DMG를 만들고 read-only mount로 다시 검증한 뒤 `CodexGauge.dmg.sha256`을 생성한다. Apple Developer ID나 notarization credential은 사용하지 않고 macOS 보안 설정이나 quarantine attribute를 변경하지 않는다.
+
+Xcode application build 없이 packaging 경계를 검증하는 합성 fixture test는 다음과 같다.
+
+```sh
+bash Tests/ReleasePackagingTests/test_release_packaging.sh
+```
+
 shared scheme의 UI smoke는 `CodexGaugeUITests`를 명시해 실행한다. 최초 실행 테스트의 두 launch는 모두 `--codex-gauge-ui-test-fixture-83`으로 외부 경계를 격리하고, 첫 launch에만 `--codex-gauge-ui-test-reset-first-launch`를 더해 완료 flag만 초기화한다. 후속 launch는 접근성 identifier로 상태 항목의 cached menu를 열어 `설정…`을 선택하고, 설정 창을 닫은 뒤 같은 메뉴에서 다시 생성되는지 검증한다. 실제 Codex 설치나 인증을 요구하지 않는다.
 
 package build와 단위 테스트는 실제 Codex 설치, 사용자 계정 또는 애플리케이션 네트워크 요청에 의존하지 않는다. decoder 테스트는 합성 JSONL fixture를 사용한다. process session 통합 테스트는 `codex-gauge-tests` 실행 파일 자체를 test-only 합성 `app-server`로 다시 실행해 handshake, timeout, flood와 종료를 검증한다. production 환경 정책 테스트는 hostile parent PATH가 exact safe PATH로 교체되고 합성 `HOME`·secret 같은 나머지 parent environment가 보존되는지 child 안에서 확인한다. 별도 임시 fixture는 test executable 복사본을 custom interpreter로 사용한 `/usr/bin/env` wrapper로 handshake, account와 rate-limit 조회까지 수행한다. 이 mode는 합성 environment key로만 동작하며 account 이메일이나 원문 사용자 응답을 생성·기록하지 않는다.
@@ -327,13 +344,13 @@ feat(menubar): render quota status frames
 
 - 현재 `.github/workflows/ci.yml`은 pull request, main push와 수동 실행에서 동일한 `build-test` job을 실행한다. branch ruleset의 필수 check 이름도 `build-test`로 고정한다.
 - runner는 floating `macos-latest`가 아닌 `macos-26`을 사용하고 `DEVELOPER_DIR=/Applications/Xcode_26.6.app/Contents/Developer`로 toolchain을 고정한다.
-- gate는 package describe, warnings-as-errors 및 explicit dependency import check를 적용한 SwiftPM Debug build, strict concurrency·warnings-as-errors를 적용한 `swift test`, `swift run codex-gauge-tests`, 동일한 strict Release build와 Xcode unit smoke다. main push와 수동 실행에서는 최초 실행과 설정 menu lifecycle UI smoke도 수행한다.
-- Xcode UI smoke는 별도 인증서나 secret 없이 ad-hoc signing으로 실행한다. 일반 CI의 Release는 signing을 비활성화하고 exact `arm64 x86_64`로 빌드한 뒤 `lipo`에서 두 architecture와 bundle의 `LSUIElement=true`를 검증한다. 이 build는 사용자 설치용 artifact가 아니다. 공개 DMG는 Developer ID 서명·Apple 공증을 사용하지 않는다는 사실을 명시하고 별도 release 검증을 통과해야 한다.
+- gate는 package describe, warnings-as-errors 및 explicit dependency import check를 적용한 SwiftPM Debug build, strict concurrency·warnings-as-errors를 적용한 `swift test`, `swift run codex-gauge-tests`, 동일한 strict Release build, 합성 DMG packaging test와 Xcode unit smoke다. main push와 수동 실행에서는 최초 실행과 설정 menu lifecycle UI smoke도 수행한다.
+- Xcode UI smoke와 일반 CI의 Release application은 별도 인증서나 secret 없이 ad-hoc signing한다. 일반 CI도 exact `arm64 x86_64` application을 실제 DMG로 만들고 signature, Hardened Runtime, bundle metadata, localization, mount layout, 원본 executable 일치와 SHA-256을 검증하되 artifact를 게시하거나 보존하지 않는다. tag release workflow만 같은 packaging 계약을 다시 통과한 DMG를 draft Release에 첨부한다.
 - job timeout은 30분이며 같은 workflow와 ref의 이전 실행은 취소한다.
 - 일반 CI의 `GITHUB_TOKEN`은 `contents: read`만 허용하고 checkout credential을 작업 copy에 유지하지 않는다. checkout 이외의 action, cache, Codecov와 secret을 사용하지 않는다. 별도 tag release workflow만 draft Release 생성에 필요한 `contents: write`를 사용한다.
 - 테스트는 synthetic fixture와 fake 경계만 사용한다. build·test 단계에는 Codex executable, Codex 로그인, OpenAI API key, 사용자 인증 파일 또는 애플리케이션 네트워크 요청이 필요하지 않다.
 - `.github/dependabot.yml`은 GitHub Actions reference를 매주 확인한다. action update PR에서는 release tag뿐 아니라 full commit SHA와 version comment가 함께 바뀌었는지 검토한다.
-- CI는 `.app` bundle, unit smoke, main의 UI smoke와 universal binary를 검증한다. Instruments resource baseline은 실제 macOS hardware의 opt-in performance gate로 유지한다.
+- CI는 `.app` bundle, unit smoke, main의 UI smoke와 universal DMG packaging을 검증한다. Instruments resource baseline은 실제 macOS hardware의 opt-in performance gate로 유지한다.
 - main은 force push, branch 삭제와 merge commit을 차단한다.
 - 첫 바이너리는 Apple 인증서 없는 ad-hoc signing을 적용하고 Developer ID 서명·Apple 공증 없이 universal DMG로 GitHub Releases에 배포한다. DMG, SHA-256과 미공증 안내를 함께 제공하고 Gatekeeper·quarantine을 비활성화하거나 제거하지 않는다.
 - 자체 Homebrew Cask는 같은 versioned GitHub Release DMG와 정확한 SHA-256을 사용한다. postflight installer나 macOS 보안 설정 변경은 금지한다.
