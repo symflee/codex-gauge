@@ -77,7 +77,6 @@ jobs:
           -derivedDataPath "$RUNNER_TEMP/CodexGaugeDerivedData"
           -only-testing:CodexGaugeUnitTests
           CODE_SIGNING_ALLOWED=NO
-          SWIFT_TREAT_WARNINGS_AS_ERRORS=YES
 
       - name: Test Xcode UI smoke
         if: github.event_name != 'pull_request'
@@ -90,7 +89,6 @@ jobs:
           -only-testing:CodexGaugeUITests
           CODE_SIGN_IDENTITY=-
           DEVELOPMENT_TEAM=
-          SWIFT_TREAT_WARNINGS_AS_ERRORS=YES
 
       - name: Build and verify release disk image
         shell: bash

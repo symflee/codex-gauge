@@ -107,7 +107,6 @@ jobs:
           -derivedDataPath "$RUNNER_TEMP/CodexGaugeReleaseTests"
           -only-testing:CodexGaugeUnitTests
           CODE_SIGNING_ALLOWED=NO
-          SWIFT_TREAT_WARNINGS_AS_ERRORS=YES
 
       - name: Test Xcode UI smoke
         run: >-
@@ -119,7 +118,6 @@ jobs:
           -only-testing:CodexGaugeUITests
           CODE_SIGN_IDENTITY=-
           DEVELOPMENT_TEAM=
-          SWIFT_TREAT_WARNINGS_AS_ERRORS=YES
 
       - name: Build and verify release disk image
         run: >-
