@@ -116,6 +116,10 @@ bash -n "$build_script"
 bash -n "$verify_application_script"
 bash -n "$verify_dmg_script"
 
+if grep -q 'SWIFT_TREAT_WARNINGS_AS_ERRORS=YES' "$build_script"; then
+    fail "Xcode package builds cannot combine suppressed warnings with warnings as errors"
+fi
+
 if grep -E '\b(xattr|spctl)\b|no-quarantine|--noqtn|--norsrc|--noextattr|DITTONORSRC|COPYFILE_DISABLE' \
     "$create_script" \
     "$build_script" \

@@ -116,8 +116,7 @@ xcodebuild build \
     AD_HOC_CODE_SIGNING_ALLOWED=YES \
     DEVELOPMENT_TEAM= \
     ONLY_ACTIVE_ARCH=NO \
-    "ARCHS=arm64 x86_64" \
-    SWIFT_TREAT_WARNINGS_AS_ERRORS=YES
+    "ARCHS=arm64 x86_64"
 
 application_path="$derived_data_root/Build/Products/Release/CodexGauge.app"
 [ -d "$application_path" ] || fail "Xcode application output is missing"
