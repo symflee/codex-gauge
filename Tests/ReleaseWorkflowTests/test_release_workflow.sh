@@ -77,6 +77,12 @@ if grep -E -q '^[[:space:]]+[A-Z][A-Z0-9_]*:[[:space:]]+\$\{\{[[:space:]]*runner
     fail "runner context is unavailable in workflow env declarations"
 fi
 
+if grep -q 'SWIFT_TREAT_WARNINGS_AS_ERRORS=YES' \
+    "$ci_workflow" \
+    "$workflow"; then
+    fail "Xcode package tests cannot combine suppressed warnings with warnings as errors"
+fi
+
 grep -q '^  workflow_dispatch:' "$workflow" \
     || fail "manual artifact builds are not configured"
 grep -q -- "- 'v\*'" "$workflow" \
