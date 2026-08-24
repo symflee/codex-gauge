@@ -101,6 +101,18 @@ create_stage_artifact() {
             fail "could not invalidate a synthetic release fixture"
         fi
     fi
+    if [ "$layout_mode" = "relocated" ]; then
+        if ! osascript "$relocate_layout_script" "$layout_mount_path"; then
+            hdiutil detach "$layout_mount_path" >/dev/null || true
+            fail "could not relocate a synthetic release fixture"
+        fi
+    fi
+    if [ "$layout_mode" = "resized" ]; then
+        if ! osascript "$resize_layout_script" "$layout_mount_path"; then
+            hdiutil detach "$layout_mount_path" >/dev/null || true
+            fail "could not resize a synthetic release fixture"
+        fi
+    fi
     diskutil renameVolume "$layout_mount_path" "Codex Gauge" >/dev/null
     if ! hdiutil detach "$layout_mount_path" >/dev/null; then
         fail "could not detach a synthetic release fixture"
@@ -217,6 +229,9 @@ verify_dmg_script="$repository_root/Scripts/verify-release-dmg.sh"
 configure_layout_script="$repository_root/Scripts/configure-release-dmg.applescript"
 verify_layout_script="$repository_root/Scripts/verify-release-dmg-layout.applescript"
 invalidate_layout_script="$test_directory/set-invalid-dmg-layout.applescript"
+relocate_layout_script="$test_directory/relocate-dmg-window.applescript"
+resize_layout_script="$test_directory/resize-dmg-window.applescript"
+verify_background_safe_zone="$test_directory/verify-background-safe-zone.swift"
 background_generator="$repository_root/Scripts/generate-dmg-background.swift"
 guide_source="$repository_root/docs/installation.md"
 background_source="$repository_root/Distribution/DMG/background.png"
@@ -228,6 +243,9 @@ test -x "$verify_dmg_script" || fail "missing executable verify-release-dmg.sh"
 test -f "$configure_layout_script" || fail "missing Finder layout script"
 test -f "$verify_layout_script" || fail "missing Finder layout verification script"
 test -f "$invalidate_layout_script" || fail "missing invalid Finder layout fixture"
+test -f "$relocate_layout_script" || fail "missing relocated Finder layout fixture"
+test -f "$resize_layout_script" || fail "missing resized Finder layout fixture"
+test -f "$verify_background_safe_zone" || fail "missing background safe-zone verifier"
 test -f "$background_generator" || fail "missing DMG background generator"
 test -f "$guide_source" || fail "missing installation guide"
 test -f "$background_source" || fail "missing DMG background"
@@ -247,6 +265,10 @@ osacompile -o "$test_root/verify-release-dmg-layout.scpt" \
     "$verify_layout_script"
 osacompile -o "$test_root/set-invalid-dmg-layout.scpt" \
     "$invalidate_layout_script"
+osacompile -o "$test_root/relocate-dmg-window.scpt" \
+    "$relocate_layout_script"
+osacompile -o "$test_root/resize-dmg-window.scpt" \
+    "$resize_layout_script"
 
 background_width="$(sips -g pixelWidth "$background_source" \
     | awk '/pixelWidth:/ { print $2 }')"
@@ -261,6 +283,10 @@ xcrun swift \
     "$generated_background"
 cmp -s "$generated_background" "$background_source" \
     || fail "committed DMG background differs from its deterministic generator"
+xcrun swift \
+    -module-cache-path "$test_root/swift-module-cache" \
+    "$verify_background_safe_zone" \
+    "$background_source"
 grep -F -q 'Applications로 드래그 / Drag to Applications' \
     "$background_generator" \
     || fail "DMG background lacks the drag instruction"
@@ -376,6 +402,35 @@ expect_failure "$create_script" \
     --dmg "$artifact_path" \
     --checksum "$artifact_path.sha256" \
     --source-app "$fixture_application" \
+    --expected-guide "$guide_source" \
+    --version 0.1.0 \
+    --build 1
+
+relocated_layout_stage="$test_root/relocated-layout-stage"
+relocated_layout_artifact="$test_root/RelocatedLayout.dmg"
+prepare_release_stage "$relocated_layout_stage"
+create_stage_artifact \
+    "$relocated_layout_stage" \
+    "$relocated_layout_artifact" \
+    relocated
+"$verify_dmg_script" \
+    --dmg "$relocated_layout_artifact" \
+    --checksum "$relocated_layout_artifact.sha256" \
+    --expected-guide "$guide_source" \
+    --version 0.1.0 \
+    --build 1
+
+resized_layout_stage="$test_root/resized-layout-stage"
+resized_layout_artifact="$test_root/ResizedLayout.dmg"
+prepare_release_stage "$resized_layout_stage"
+create_stage_artifact \
+    "$resized_layout_stage" \
+    "$resized_layout_artifact" \
+    resized
+expect_failure_containing "Finder layout does not match" \
+    "$verify_dmg_script" \
+    --dmg "$resized_layout_artifact" \
+    --checksum "$resized_layout_artifact.sha256" \
     --expected-guide "$guide_source" \
     --version 0.1.0 \
     --build 1
