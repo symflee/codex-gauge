@@ -39,10 +39,13 @@ Codex Gauge는 다음 원칙을 지킵니다.
 Codex Gauge는 Apple Developer Program, Developer ID 배포 서명과 Apple notarization을 사용하지 않는다. GitHub Release DMG와 자체 Homebrew Cask는 다음 경계를 지킨다.
 
 - application은 Apple 인증서 없는 ad-hoc signing을 사용하며 이를 개발자 신원이나 Gatekeeper 승인으로 표현하지 않음
-- DMG에는 application bundle과 `/Applications` symbolic link만 포함
+- DMG의 사용자 표시 항목은 application bundle, `/Applications` symbolic link와 비실행 한·영 설치 안내 파일로 제한하고, 숨김 지원 항목은 640×420 배경의 `.background`와 Finder layout `.DS_Store`로 제한
 - installer script, privileged helper와 PKG를 사용하지 않음
-- `xattr`, `spctl` 설정 변경, `--no-quarantine` 또는 Gatekeeper 비활성화를 수행하거나 안내하지 않음
+- 앱, DMG, packaging script, workflow와 Cask는 quarantine 제거, Gatekeeper 설정 변경 또는 최초 실행 승인 자동화를 수행하지 않음
 - macOS가 차단하면 사용자가 System Settings의 공식 `그래도 열기` 절차로 직접 승인
+- 공식 Release와 정확한 설치 경로를 확인한 사용자가 공식 절차 이후 선택할 수 있도록 `/Applications/Codex Gauge.app` 하나의 quarantine marker를 제거하는 정확한 수동 명령만 문서화함
+- 수동 대안은 설치·권한 부여·Apple 검증이 아니며 해당 앱의 quarantine 기반 Gatekeeper 최초 평가를 우회한다는 사실을 숨기지 않음
+- `sudo`, 다른 앱이나 넓은 경로의 quarantine 제거, Gatekeeper 전역 비활성화, executable helper와 postflight script를 안내하거나 제공하지 않음
 - SHA-256을 artifact 일치 확인에만 사용하고 개발자 신원이나 Apple 검증으로 표현하지 않음
 - release artifact와 CI log에 credential, 실제 quota와 사용자 경로를 포함하지 않음
 
