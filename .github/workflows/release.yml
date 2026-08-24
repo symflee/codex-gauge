@@ -135,6 +135,7 @@ jobs:
           mkdir "$release_directory/verification"
           cp Scripts/verify-release-app.sh "$release_directory/verification/"
           cp Scripts/verify-release-dmg.sh "$release_directory/verification/"
+          cp Scripts/verify-release-dmg-layout.applescript "$release_directory/verification/"
 
       - name: Upload verified release candidate
         # actions/upload-artifact v7.0.1
@@ -171,12 +172,13 @@ jobs:
         run: |
           set -euo pipefail
           release_directory="$RUNNER_TEMP/codex-gauge-release-candidate"
-          test "$(find "$release_directory" -type f | wc -l | tr -d '[:space:]')" = "5"
+          test "$(find "$release_directory" -type f | wc -l | tr -d '[:space:]')" = "6"
           test -f "$release_directory/CodexGauge.dmg"
           test -f "$release_directory/CodexGauge.dmg.sha256"
           test -f "$release_directory/release-notes.md"
           test -f "$release_directory/verification/verify-release-app.sh"
           test -f "$release_directory/verification/verify-release-dmg.sh"
+          test -f "$release_directory/verification/verify-release-dmg-layout.applescript"
           chmod +x \
             "$release_directory/verification/verify-release-app.sh" \
             "$release_directory/verification/verify-release-dmg.sh"
