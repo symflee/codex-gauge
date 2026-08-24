@@ -69,11 +69,11 @@ v0.1을 개발 중입니다. 핵심 모듈과 AppKit 개발 호스트는 Swift P
 ```sh
 swift build
 swift test
-swift run codex-gauge-tests
+Scripts/run-exhaustive-tests.sh
 swift build -c release
 ```
 
-`swift test`는 Swift Testing으로 핵심 quota·선택·protocol·refresh 상태 머신·설정 schema migration 계약을 표준 도구에서 검증하고, `codex-gauge-tests`는 Command Line Tools에서도 동작하는 zero-dependency exhaustive runner로 전체 회귀 범위를 유지합니다.
+`swift test`는 Swift Testing으로 핵심 quota·선택·protocol·refresh 상태 머신·설정 schema migration 계약을 표준 도구에서 검증합니다. `Scripts/run-exhaustive-tests.sh`는 Command Line Tools에서도 동작하는 zero-dependency exhaustive runner를 실행한 뒤 terminal summary가 정확히 하나인지, 모든 `RUN`에 `PASS` 또는 `FAIL` 결과가 있는지, 실패가 없는지를 확인해 조기 종료를 성공으로 오인하지 않습니다.
 
 실제 `.app`은 root package의 `CodexGaugeAppKit` product를 연결한 얇은 Xcode application target으로 빌드합니다. shared `CodexGauge` scheme에는 application, unit test와 UI test target이 포함됩니다.
 

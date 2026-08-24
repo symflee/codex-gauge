@@ -26,7 +26,7 @@ xcrun swift --version
 swift package describe
 swift build --explicit-target-dependency-import-check error
 swift test --explicit-target-dependency-import-check error
-swift run codex-gauge-tests
+Scripts/run-exhaustive-tests.sh
 swift build -c release --explicit-target-dependency-import-check error
 ```
 
@@ -102,7 +102,7 @@ Java 전용 코딩 규칙은 이 Swift 프로젝트에 적용하지 않는다. J
 
 ### 단위 테스트
 
-SwiftPM의 `CodexGaugeStandardTests` test target은 Swift Testing의 `@Test`로 remaining 경계, duration·자동 선택, tolerant protocol·legacy fallback, refresh profile·reducer와 versioned preference migration의 대표 계약을 `swift test`에서 검증한다. 저장소의 `codex-gauge-tests` executable은 Apple 테스트 framework가 포함되지 않은 Command Line Tools에서도 실행되는 작은 zero-dependency exhaustive runner이며 아래 전체 회귀 범위를 계속 담당한다. Xcode wrapper의 unit target은 XCTest smoke와 Swift Testing의 exact fixture argument 계약을 함께 실행한다. 프레임워크 차이 때문에 TDD를 미루지 않는다.
+SwiftPM의 `CodexGaugeStandardTests` test target은 Swift Testing의 `@Test`로 remaining 경계, duration·자동 선택, tolerant protocol·legacy fallback, refresh profile·reducer와 versioned preference migration의 대표 계약을 `swift test`에서 검증한다. 저장소의 `codex-gauge-tests` executable은 Apple 테스트 framework가 포함되지 않은 Command Line Tools에서도 실행되는 작은 zero-dependency exhaustive runner이며 아래 전체 회귀 범위를 계속 담당한다. 공식 실행 경로인 `Scripts/run-exhaustive-tests.sh`는 runner 종료 코드뿐 아니라 terminal summary 하나, 모든 `RUN`의 결과와 실패 0건을 함께 확인한다. Xcode wrapper의 unit target은 XCTest smoke와 Swift Testing의 exact fixture argument 계약을 함께 실행한다. 프레임워크 차이 때문에 TDD를 미루지 않는다.
 
 - remaining percent의 0...100 경계, 100 미만 소수 사용률의 최소 1%와 100 이상에서만 0% 처리
 - duration badge와 unknown duration
@@ -235,7 +235,7 @@ UI 테스트에서 최초 실행 화면을 재현할 때는 정확한 `--codex-g
 swift run codex-gauge-smoke
 ```
 
-인자는 지원하지 않는다. 알 수 없는 인자를 전달하면 child를 시작하지 않고 `codex-gauge-smoke: failed reason=invalid_arguments`를 출력한 뒤 종료 코드 64를 반환한다. 일반 `swift build`, `swift run codex-gauge-tests`, Xcode test와 CI workflow는 이 명령을 호출하지 않는다.
+인자는 지원하지 않는다. 알 수 없는 인자를 전달하면 child를 시작하지 않고 `codex-gauge-smoke: failed reason=invalid_arguments`를 출력한 뒤 종료 코드 64를 반환한다. 일반 `swift build`, `Scripts/run-exhaustive-tests.sh`, Xcode test와 CI workflow는 이 명령을 호출하지 않는다.
 
 성공 출력은 `codex-gauge-smoke: ok codex=<state> spark=<state>` 한 줄이다. 각 제품 state는 다음 네 범주뿐이다.
 
@@ -354,7 +354,7 @@ feat(menubar): render quota status frames
 
 - 현재 `.github/workflows/ci.yml`은 pull request, main push와 수동 실행에서 동일한 `build-test` job을 실행한다. branch ruleset의 필수 check 이름도 `build-test`로 고정한다.
 - runner는 floating `macos-latest`가 아닌 `macos-26`을 사용하고 `DEVELOPER_DIR=/Applications/Xcode_26.6.app/Contents/Developer`로 toolchain을 고정한다.
-- gate는 package describe, warnings-as-errors 및 explicit dependency import check를 적용한 SwiftPM Debug build, strict concurrency·warnings-as-errors를 적용한 `swift test`, `swift run codex-gauge-tests`, 동일한 strict Release build, 합성 DMG packaging test와 Xcode unit smoke다. main push와 수동 실행에서는 최초 실행과 설정 menu lifecycle UI smoke도 수행한다.
+- gate는 package describe, warnings-as-errors 및 explicit dependency import check를 적용한 SwiftPM Debug build, strict concurrency·warnings-as-errors를 적용한 `swift test`, completion 검증을 포함한 `Scripts/run-exhaustive-tests.sh`, 동일한 strict Release build, 합성 DMG packaging test와 Xcode unit smoke다. main push와 수동 실행에서는 최초 실행과 설정 menu lifecycle UI smoke도 수행한다.
 - Xcode UI smoke와 일반 CI의 Release application은 별도 인증서나 secret 없이 ad-hoc signing한다. 일반 CI도 exact `arm64 x86_64` application을 실제 DMG로 만들고 signature, Hardened Runtime, bundle metadata, localization, mount layout, 원본 executable 일치와 SHA-256을 검증하되 artifact를 게시하거나 보존하지 않는다. tag release workflow만 같은 packaging 계약을 다시 통과한 DMG를 draft Release에 첨부한다.
 - job timeout은 30분이며 같은 workflow와 ref의 이전 실행은 취소한다.
 - 일반 CI의 `GITHUB_TOKEN`은 `contents: read`만 허용하고 checkout credential을 작업 copy에 유지하지 않는다. checkout 이외의 action, cache, Codecov와 secret을 사용하지 않는다. 별도 tag release workflow만 draft Release 생성에 필요한 `contents: write`를 사용한다.

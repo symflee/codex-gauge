@@ -1,19 +1,60 @@
+import AppKit
 import Darwin
 import Foundation
 
 @main
 struct TestRunner {
-    static func main() async {
+    @MainActor
+    static func main() {
         guard SyntheticAppServer.runIfRequested() == false else {
             return
         }
         guard SyntheticCLIVersionCommand.runIfRequested() == false else {
             return
         }
-        let failures = await run(allTests())
-        guard failures == 0 else {
+
+        let application = NSApplication.shared
+        var completionStatus: Int32?
+        Task { @MainActor in
+            completionStatus = await executeTests()
+            stop(application)
+        }
+        application.run()
+        exit(completionStatus ?? EXIT_FAILURE)
+    }
+
+    @MainActor
+    private static func executeTests() async -> Int32 {
+        let tests = allTests()
+        let failureCount = await run(tests)
+        let passCount = tests.count - Int(failureCount)
+        report(
+            "SUMMARY total=\(tests.count) pass=\(passCount) fail=\(failureCount)"
+        )
+        return failureCount == 0 ? EXIT_SUCCESS : EXIT_FAILURE
+    }
+
+    @MainActor
+    private static func stop(_ application: NSApplication) {
+        application.stop(nil)
+        guard let event = wakeEvent() else {
             exit(EXIT_FAILURE)
         }
+        application.postEvent(event, atStart: false)
+    }
+
+    private static func wakeEvent() -> NSEvent? {
+        NSEvent.otherEvent(
+            with: .applicationDefined,
+            location: .zero,
+            modifierFlags: [],
+            timestamp: ProcessInfo.processInfo.systemUptime,
+            windowNumber: 0,
+            context: nil,
+            subtype: 0,
+            data1: 0,
+            data2: 0
+        )
     }
 
     private static func allTests() -> [TestCase] {
