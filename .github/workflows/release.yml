@@ -83,7 +83,7 @@ jobs:
           -Xswiftc -warnings-as-errors
 
       - name: Run exhaustive custom tests
-        run: swift run codex-gauge-tests
+        run: Scripts/run-exhaustive-tests.sh
 
       - name: Build Release
         run: >-
@@ -95,6 +95,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          bash Tests/ExhaustiveRunnerTests/test_exhaustive_runner.sh
           bash Tests/ReleasePackagingTests/test_release_packaging.sh
           bash Tests/ReleaseWorkflowTests/test_release_workflow.sh
 

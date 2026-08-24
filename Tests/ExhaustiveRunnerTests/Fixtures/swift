@@ -1,0 +1,68 @@
+#!/bin/bash
+
+set -euo pipefail
+
+if [ "$#" -ne 2 ] || [ "$1" != "run" ] || [ "$2" != "codex-gauge-tests" ]; then
+    exit 64
+fi
+
+case "${CODEX_GAUGE_FAKE_TEST_CASE:-}" in
+    success)
+        printf '%s\n' \
+            "RUN fixture" \
+            "PASS fixture" \
+            "SUMMARY total=1 pass=1 fail=0"
+        ;;
+    missing-summary)
+        printf '%s\n' \
+            "RUN fixture" \
+            "PASS fixture"
+        ;;
+    missing-result)
+        printf '%s\n' \
+            "RUN fixture" \
+            "SUMMARY total=1 pass=0 fail=0"
+        ;;
+    mismatched-result)
+        printf '%s\n' \
+            "RUN expected fixture" \
+            "PASS different fixture" \
+            "SUMMARY total=1 pass=1 fail=0"
+        ;;
+    duplicate-summary)
+        printf '%s\n' \
+            "RUN fixture" \
+            "PASS fixture" \
+            "SUMMARY total=1 pass=1 fail=0" \
+            "SUMMARY total=1 pass=1 fail=0"
+        ;;
+    mismatched-summary)
+        printf '%s\n' \
+            "RUN fixture" \
+            "PASS fixture" \
+            "SUMMARY total=2 pass=2 fail=0"
+        ;;
+    reported-failure)
+        printf '%s\n' \
+            "RUN fixture" \
+            "FAIL fixture: expected failure" \
+            "SUMMARY total=1 pass=0 fail=1"
+        ;;
+    duplicate-result)
+        printf '%s\n' \
+            "RUN first fixture" \
+            "RUN second fixture" \
+            "PASS first fixture" \
+            "PASS first fixture" \
+            "SUMMARY total=2 pass=2 fail=0"
+        ;;
+    zero-tests)
+        printf '%s\n' "SUMMARY total=0 pass=0 fail=0"
+        ;;
+    nonzero-exit)
+        exit 7
+        ;;
+    *)
+        exit 64
+        ;;
+esac
