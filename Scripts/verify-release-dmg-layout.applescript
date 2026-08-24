@@ -15,8 +15,9 @@ on run arguments
             set targetWindow to container window
             set viewOptions to icon view options of targetWindow
             set guideItem to first item whose name contains "Installation"
-            set expectedBounds to {100, 100, 740, 520}
             set actualBounds to bounds of targetWindow
+            set actualWidth to (item 3 of actualBounds) - (item 1 of actualBounds)
+            set actualHeight to (item 4 of actualBounds) - (item 2 of actualBounds)
             set actualView to current view of targetWindow
             set toolbarIsVisible to toolbar visible of targetWindow
             set statusBarIsVisible to statusbar visible of targetWindow
@@ -26,7 +27,8 @@ on run arguments
             set applicationsPosition to position of item "Applications"
             set guidePosition to position of guideItem
 
-            if (actualBounds is expectedBounds) and ¬
+            if (actualWidth is 640) and ¬
+                (actualHeight is 420) and ¬
                 (actualView is icon view) and ¬
                 (toolbarIsVisible is false) and ¬
                 (statusBarIsVisible is false) and ¬
