@@ -231,6 +231,11 @@ test -f "$invalidate_layout_script" || fail "missing invalid Finder layout fixtu
 test -f "$background_generator" || fail "missing DMG background generator"
 test -f "$guide_source" || fail "missing installation guide"
 test -f "$background_source" || fail "missing DMG background"
+grep -F -q 'remove_transient_volume_metadata' "$create_script" \
+    || fail "DMG creation does not remove transient Finder metadata"
+grep -E -q '\.fseventsd.*\.Spotlight-V100.*\.TemporaryItems.*\.Trashes' \
+    "$create_script" \
+    || fail "DMG creation lacks the bounded transient metadata allowlist"
 
 bash -n "$create_script"
 bash -n "$build_script"

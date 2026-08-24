@@ -57,6 +57,53 @@ remove_partial_outputs() {
     fi
 }
 
+remove_transient_volume_metadata() {
+    local entry_path=""
+    local entry_name=""
+
+    while IFS= read -r -d '' entry_path; do
+        entry_name="$(basename "$entry_path")"
+        case "$entry_name" in
+            .background)
+                [ -d "$entry_path" ] && [ ! -L "$entry_path" ] \
+                    || fail "DMG background directory became invalid"
+                ;;
+            .DS_Store)
+                [ -f "$entry_path" ] && [ ! -L "$entry_path" ] \
+                    || fail "Finder layout metadata became invalid"
+                ;;
+            .fseventsd|.Spotlight-V100|.TemporaryItems|.Trashes)
+                remove_transient_directory "$entry_path" "$entry_name"
+                ;;
+            *)
+                fail "unexpected hidden metadata was created in the DMG"
+                ;;
+        esac
+    done < <(find "$mount_path" \
+        -mindepth 1 \
+        -maxdepth 1 \
+        -name '.*' \
+        -print0)
+}
+
+remove_transient_directory() {
+    local directory_path="$1"
+    local directory_name="$2"
+
+    case "$directory_path" in
+        "$mount_path/$directory_name") ;;
+        *) fail "transient metadata path escaped the mounted volume" ;;
+    esac
+    [ -d "$directory_path" ] && [ ! -L "$directory_path" ] \
+        || fail "transient DMG metadata is not a directory"
+    if find "$directory_path" -xdev -type l -print -quit | grep -q .; then
+        fail "transient DMG metadata contains a symbolic link"
+    fi
+    rm -rf -- "$directory_path"
+    [ ! -e "$directory_path" ] && [ ! -L "$directory_path" ] \
+        || fail "transient DMG metadata could not be removed"
+}
+
 cleanup() {
     local status="$?"
     local stage_safe_to_remove=1
@@ -224,6 +271,7 @@ configure_finder_layout
 [ -s "$mount_path/.DS_Store" ] \
     || fail "Finder layout metadata was not created"
 diskutil renameVolume "$mount_path" "Codex Gauge" >/dev/null
+remove_transient_volume_metadata
 detach_mounted_image
 
 hdiutil convert \
