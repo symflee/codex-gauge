@@ -3,7 +3,7 @@
 set -euo pipefail
 
 usage() {
-    echo "Usage: verify-release-dmg.sh --dmg <path> --checksum <path> [--source-app <path>] --version <X.Y.Z> --build <number>" >&2
+    echo "Usage: verify-release-dmg.sh --dmg <path> --checksum <path> [--source-app <path>] [--expected-guide <path>] --version <X.Y.Z> --build <number>" >&2
 }
 
 fail() {
@@ -14,17 +14,24 @@ fail() {
 dmg_path=""
 checksum_path=""
 source_application=""
+expected_guide=""
 expected_version=""
 expected_build=""
 mount_root=""
 mount_path=""
 mounted=0
+layout_process_id=0
 
 cleanup() {
     local status="$?"
     local leaf_name=""
 
     trap - EXIT
+    if [ "$layout_process_id" -gt 0 ] \
+        && kill -0 "$layout_process_id" 2>/dev/null; then
+        kill "$layout_process_id" 2>/dev/null || true
+        wait "$layout_process_id" 2>/dev/null || true
+    fi
     if [ "$mounted" -eq 1 ]; then
         if ! hdiutil detach "$mount_path" >/dev/null; then
             echo "release DMG verification cleanup failed: could not detach volume" >&2
@@ -47,6 +54,27 @@ cleanup() {
     exit "$status"
 }
 
+verify_finder_layout() {
+    local deadline=$((SECONDS + 30))
+
+    osascript "$layout_verification_script" "$mount_path" &
+    layout_process_id=$!
+    while kill -0 "$layout_process_id" 2>/dev/null; do
+        if [ "$SECONDS" -ge "$deadline" ]; then
+            kill "$layout_process_id" 2>/dev/null || true
+            wait "$layout_process_id" 2>/dev/null || true
+            layout_process_id=0
+            fail "Finder layout verification timed out after 30 seconds"
+        fi
+        sleep 1
+    done
+    if ! wait "$layout_process_id"; then
+        layout_process_id=0
+        fail "Finder layout does not match the release contract"
+    fi
+    layout_process_id=0
+}
+
 trap cleanup EXIT
 
 while [ "$#" -gt 0 ]; do
@@ -64,6 +92,11 @@ while [ "$#" -gt 0 ]; do
         --source-app)
             [ "$#" -ge 2 ] || { usage; exit 64; }
             source_application="$2"
+            shift 2
+            ;;
+        --expected-guide)
+            [ "$#" -ge 2 ] || { usage; exit 64; }
+            expected_guide="$2"
             shift 2
             ;;
         --version)
@@ -92,6 +125,15 @@ done
 if [ -n "$source_application" ]; then
     [ -d "$source_application" ] || fail "source application is missing"
 fi
+if [ -n "$expected_guide" ]; then
+    [ -f "$expected_guide" ] && [ ! -L "$expected_guide" ] \
+        || fail "expected installation guide is missing"
+fi
+
+script_directory="$(cd "$(dirname "$0")" && pwd)"
+layout_verification_script="$script_directory/verify-release-dmg-layout.applescript"
+[ -f "$layout_verification_script" ] \
+    || fail "Finder layout verification script is missing"
 
 checksum_line_count="$(wc -l < "$checksum_path" | tr -d '[:space:]')"
 [ "$checksum_line_count" = "1" ] || fail "checksum must contain one line"
@@ -117,21 +159,130 @@ hdiutil attach \
     >/dev/null
 mounted=1
 
-entry_count="$(find "$mount_path" -mindepth 1 -maxdepth 1 -print \
-    | wc -l \
-    | tr -d '[:space:]')"
-[ "$entry_count" = "2" ] || fail "DMG root must contain exactly two entries"
+volume_name="$(diskutil info -plist "$mount_path" \
+    | plutil -extract VolumeName raw -o - -)"
+[ "$volume_name" = "Codex Gauge" ] \
+    || fail "DMG volume name does not match the release contract"
+
+visible_entries="$(find "$mount_path" \
+    -mindepth 1 \
+    -maxdepth 1 \
+    ! -name '.*' \
+    -exec basename {} \; \
+    | ruby -e 'STDIN.each_line { |line| puts line.chomp.unicode_normalize(:nfc) }' \
+    | LC_ALL=C sort)"
+expected_visible_entries="$(printf '%s\n' \
+    Applications \
+    'Codex Gauge.app' \
+    '설치 안내 - Installation.txt' \
+    | LC_ALL=C sort)"
+[ "$visible_entries" = "$expected_visible_entries" ] \
+    || fail "DMG visible root entries do not match the release contract"
+
+hidden_entries="$(find "$mount_path" \
+    -mindepth 1 \
+    -maxdepth 1 \
+    -name '.*' \
+    -exec basename {} \; \
+    | LC_ALL=C sort)"
+expected_hidden_entries="$(printf '%s\n' .DS_Store .background | LC_ALL=C sort)"
+[ "$hidden_entries" = "$expected_hidden_entries" ] \
+    || fail "DMG hidden root entries do not match the release contract"
 
 mounted_application="$mount_path/Codex Gauge.app"
 applications_link="$mount_path/Applications"
+mounted_guide="$mount_path/설치 안내 - Installation.txt"
+background_directory="$mount_path/.background"
+mounted_background="$background_directory/background.png"
+finder_layout="$mount_path/.DS_Store"
 [ -d "$mounted_application" ] || fail "Codex Gauge application is missing"
 [ ! -L "$mounted_application" ] \
     || fail "Codex Gauge application must be a bundle copy"
 [ -L "$applications_link" ] || fail "Applications link is missing"
 [ "$(readlink "$applications_link")" = "/Applications" ] \
     || fail "Applications link has the wrong target"
+[ -f "$mounted_guide" ] && [ ! -L "$mounted_guide" ] \
+    || fail "installation guide must be a regular file"
+[ ! -x "$mounted_guide" ] || fail "installation guide must not be executable"
+ruby -e 'data = File.binread(ARGV.fetch(0)); exit(data.force_encoding(Encoding::UTF_8).valid_encoding? ? 0 : 1)' \
+    "$mounted_guide" \
+    || fail "installation guide must be valid UTF-8"
 
-script_directory="$(cd "$(dirname "$0")" && pwd)"
+[ -d "$background_directory" ] && [ ! -L "$background_directory" ] \
+    || fail "DMG background directory is invalid"
+background_entries="$(find "$background_directory" \
+    -mindepth 1 \
+    -maxdepth 1 \
+    -exec basename {} \; \
+    | LC_ALL=C sort)"
+[ "$background_entries" = "background.png" ] \
+    || fail "DMG background directory must contain one PNG"
+[ -f "$mounted_background" ] && [ ! -L "$mounted_background" ] \
+    || fail "DMG background must be a regular file"
+background_width="$(sips -g pixelWidth "$mounted_background" \
+    | awk '/pixelWidth:/ { print $2 }')"
+background_height="$(sips -g pixelHeight "$mounted_background" \
+    | awk '/pixelHeight:/ { print $2 }')"
+background_format="$(sips -g format "$mounted_background" \
+    | awk '/format:/ { print $2 }')"
+[ "$background_format" = "png" ] || fail "DMG background format must be PNG"
+[ "$background_width" = "640" ] || fail "DMG background width must be 640"
+[ "$background_height" = "420" ] || fail "DMG background height must be 420"
+
+[ -f "$finder_layout" ] && [ ! -L "$finder_layout" ] \
+    || fail "Finder layout metadata is missing"
+[ -s "$finder_layout" ] || fail "Finder layout metadata is empty"
+[ ! -x "$finder_layout" ] || fail "Finder layout metadata must not be executable"
+verify_finder_layout
+
+guide_korean_line="$(grep -n -m 1 -F \
+    '시스템 설정 → 개인정보 보호 및 보안 → 그래도 열기' \
+    "$mounted_guide" \
+    | cut -d: -f1 \
+    || true)"
+guide_fallback_line="$(grep -n -m 1 -F \
+    '/usr/bin/xattr -dr com.apple.quarantine "/Applications/Codex Gauge.app"' \
+    "$mounted_guide" \
+    | cut -d: -f1 \
+    || true)"
+[ -n "$guide_korean_line" ] || fail "installation guide lacks Open Anyway"
+[ -n "$guide_fallback_line" ] || fail "installation guide lacks fallback command"
+[ "$guide_korean_line" -lt "$guide_fallback_line" ] \
+    || fail "installation guide must present Open Anyway first"
+grep -F -q 'Codex Gauge 설치 / Installation' "$mounted_guide" \
+    || fail "installation guide is not bilingual"
+grep -F -q '/usr/bin/open "/Applications/Codex Gauge.app"' "$mounted_guide" \
+    || fail "installation guide lacks the relaunch command"
+grep -F -q 'Gatekeeper 최초 평가를 우회합니다' "$mounted_guide" \
+    || fail "installation guide lacks the quarantine risk explanation"
+if ! ruby - "$mounted_guide" <<'RUBY'
+path = ARGV.fetch(0)
+lines = File.readlines(path, chomp: true).map(&:strip)
+xattr_command = '/usr/bin/xattr -dr com.apple.quarantine "/Applications/Codex Gauge.app"'
+open_command = '/usr/bin/open "/Applications/Codex Gauge.app"'
+exit(1) unless lines.count(xattr_command) == 1
+exit(1) unless lines.count(open_command) == 1
+exit(1) unless lines.index(xattr_command) < lines.index(open_command)
+
+lines.each do |line|
+  next if line == xattr_command || line == open_command
+  exit(1) if line.match?(/\A(?:sudo\s+)?(?:\/usr\/bin\/)?xattr(?:\s|\z)/)
+  exit(1) if line.match?(/\A(?:sudo\s+)?(?:\/usr\/sbin\/)?spctl(?:\s|\z)/)
+  exit(1) if line.match?(/\A(?:sudo\s+)?(?:\/usr\/bin\/)?open(?:\s|\z)/)
+end
+RUBY
+then
+    fail "installation guide contains commands outside the approved fallback"
+fi
+if grep -E -q '^[[:space:]]*sudo[[:space:]]+(/usr/bin/)?xattr|^[[:space:]]*(sudo[[:space:]]+)?(/usr/sbin/)?spctl[[:space:]].*--master-disable' \
+    "$mounted_guide"; then
+    fail "installation guide contains a prohibited broad security command"
+fi
+if [ -n "$expected_guide" ]; then
+    cmp -s "$expected_guide" "$mounted_guide" \
+        || fail "installation guide differs from the canonical document"
+fi
+
 "$script_directory/verify-release-app.sh" \
     --app "$mounted_application" \
     --version "$expected_version" \

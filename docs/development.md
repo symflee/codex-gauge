@@ -55,10 +55,12 @@ xcodebuild -project CodexGauge.xcodeproj \
 Scripts/build-release-dmg.sh \
   --output-directory dist \
   --version 0.1.0 \
-  --build 1
+  --build 2
 ```
 
-스크립트는 임시 DerivedData에서 `arm64 x86_64` Release application을 빌드하고 ad-hoc signature, Hardened Runtime, bundle metadata와 localization을 확인한다. 이후 `Codex Gauge.app`과 `/Applications` link만 있는 HFS+ UDZO DMG를 만들고 read-only mount로 다시 검증한 뒤 `CodexGauge.dmg.sha256`을 생성한다. Apple Developer ID나 notarization credential은 사용하지 않고 macOS 보안 설정이나 quarantine attribute를 변경하지 않는다.
+스크립트는 임시 DerivedData에서 `arm64 x86_64` Release application을 빌드하고 ad-hoc signature, Hardened Runtime, bundle metadata와 localization을 확인한다. 이후 writable HFS+ image에 `Codex Gauge.app`, `/Applications` link, source `docs/installation.md`와 동일한 비실행 한·영 안내 및 640×420 배경을 배치한다. Finder로 640×420 icon-view layout을 적용하고 다시 읽어 확인한 뒤 최종 이름 `Codex Gauge`의 UDZO DMG로 변환한다. read-only mount에서 구조와 원본 executable을 다시 검증하고 `CodexGauge.dmg.sha256`을 생성한다. Apple Developer ID나 notarization credential은 사용하지 않고 macOS 보안 설정이나 quarantine attribute를 변경하지 않는다.
+
+Finder layout 적용은 최대 30초로 제한한다. CI에서 AppleEvent 권한 문제로 Finder 구성이 불가능하다는 사실이 확인되기 전에는 검증된 `.DS_Store` template fallback을 사용하지 않는다. fallback을 도입하더라도 동일한 layout 검증과 외부 package 금지 계약을 유지한다.
 
 Xcode application build 없이 packaging 경계를 검증하는 합성 fixture test는 다음과 같다.
 
@@ -360,8 +362,8 @@ feat(menubar): render quota status frames
 - `.github/dependabot.yml`은 GitHub Actions reference를 매주 확인한다. action update PR에서는 release tag뿐 아니라 full commit SHA와 version comment가 함께 바뀌었는지 검토한다.
 - CI는 `.app` bundle, unit smoke, main의 UI smoke와 universal DMG packaging을 검증한다. Instruments resource baseline은 실제 macOS hardware의 opt-in performance gate로 유지한다.
 - main은 force push, branch 삭제와 merge commit을 차단한다.
-- 첫 바이너리는 Apple 인증서 없는 ad-hoc signing을 적용하고 Developer ID 서명·Apple 공증 없이 universal DMG로 GitHub Releases에 배포한다. DMG, SHA-256과 미공증 안내를 함께 제공하고 Gatekeeper·quarantine을 비활성화하거나 제거하지 않는다.
+- 첫 바이너리는 Apple 인증서 없는 ad-hoc signing을 적용하고 Developer ID 서명·Apple 공증 없이 universal DMG로 GitHub Releases에 배포한다. DMG, SHA-256과 미공증 안내를 함께 제공하며 앱·DMG·packaging script·workflow·Cask는 Gatekeeper 설정을 변경하거나 quarantine을 자동 제거하지 않는다. 설치 안내는 공식 GUI 절차를 우선하고 사용자가 선택하는 exact app-scoped 수동 대안만 제공한다.
 - 자체 Homebrew Cask는 같은 versioned GitHub Release DMG와 정확한 SHA-256을 사용한다. postflight installer나 macOS 보안 설정 변경은 금지한다.
 - Sparkle 2 자동 업데이트는 DMG·Release 기반 뒤 별도 task다. EdDSA 개인키는 repository와 일반 CI에 저장하지 않고 보호된 release 환경에서만 사용한다.
-- 안정 Release 전에는 tag·bundle version 일치, ad-hoc signature와 Hardened Runtime, `arm64 x86_64`, bundle identifier, macOS minimum, `LSUIElement`, DMG의 application 하나·Applications link 하나와 checksum을 자동 검증한다.
-- 새 macOS 사용자 계정에서 browser download, drag install, 공식 `그래도 열기`, 메뉴 막대 표시, 로그인 시 실행, 제거와 Cask install·uninstall을 수동 검증한다. Apple Silicon과 Intel 결과를 각각 기록한다.
+- 안정 Release 전에는 tag·bundle version 일치, ad-hoc signature와 Hardened Runtime, `arm64 x86_64`, bundle identifier, macOS minimum, `LSUIElement`, DMG의 정확한 visible 3개·hidden 2개 항목, 안내 원본·Finder layout과 checksum을 자동 검증한다.
+- 새 macOS 사용자 계정에서 browser download, guided DMG layout, drag install, 공식 `그래도 열기`, 별도 clean copy의 app-scoped 수동 대안, 메뉴 막대 표시, 로그인 시 실행, 제거와 Cask install·uninstall을 수동 검증한다. Apple Silicon과 Intel 결과를 각각 기록한다.

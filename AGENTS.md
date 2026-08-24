@@ -28,7 +28,8 @@
 - raw JSONL, stderr, 이메일, 실제 quota와 절대 사용자 경로를 로그·fixture·문서에 넣지 않는다.
 - 진단 정보는 비식별 typed error와 환경 metadata로 제한한다.
 - executable은 shell을 거치지 않고 검증된 URL로 직접 실행한다.
-- 배포 artifact와 설치 안내는 Gatekeeper 또는 quarantine을 비활성화하거나 제거하지 않는다.
+- 앱, 배포 artifact, packaging script, workflow와 Cask는 Gatekeeper 설정을 변경하거나 quarantine을 자동 제거하지 않는다.
+- 설치 안내는 macOS의 공식 `그래도 열기` 절차를 우선한다. 사용자가 공식 Release를 신뢰하고 위험을 이해한 경우에만 정확한 `/Applications/Codex Gauge.app`의 quarantine을 직접 제거하는 수동 대안을 허용한다. `sudo`, 넓은 경로, 전역 보안 설정 변경과 실행 가능한 helper는 금지한다.
 - 보안 경계를 바꿔야 하면 구현 전에 `SECURITY.md`와 architecture 문서를 갱신하고 검토를 요청한다.
 
 ## 구현과 테스트
