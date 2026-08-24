@@ -30,6 +30,24 @@ expect_failure() {
     fi
 }
 
+verify_exhaustive_workflow() {
+    local workflow_path="$1"
+
+    ruby -e '
+        require "yaml"
+        document = YAML.load_file(ARGV.fetch(0))
+        runs = document.fetch("jobs").values.flat_map do |job|
+          job.fetch("steps", []).map { |step| step["run"] }.compact
+        end
+        wrapper = "Scripts/run-exhaustive-tests.sh"
+        direct = "swift run codex-gauge-tests"
+        contract = "bash Tests/ExhaustiveRunnerTests/test_exhaustive_runner.sh"
+        exit 1 unless runs.count { |run| run.strip == wrapper } == 1
+        exit 1 if runs.any? { |run| run.strip == direct }
+        exit 1 unless runs.any? { |run| run.include?(contract) }
+    ' "$workflow_path"
+}
+
 validate_fixture_repository() {
     (
         cd "$test_root/repository"
@@ -59,17 +77,22 @@ commit_project_build() {
 trap cleanup EXIT
 
 validator="$repository_root/Scripts/validate-release-context.sh"
+exhaustive_runner="$repository_root/Scripts/run-exhaustive-tests.sh"
 ci_workflow="$repository_root/.github/workflows/ci.yml"
 workflow="$repository_root/.github/workflows/release.yml"
 release_notes="$repository_root/.github/release-notes.md"
 
 test -x "$validator" || fail "missing executable release context validator"
+test -x "$exhaustive_runner" || fail "missing executable exhaustive test verifier"
 test -f "$ci_workflow" || fail "missing CI workflow"
 test -f "$workflow" || fail "missing release workflow"
 test -f "$release_notes" || fail "missing release notes template"
 
 bash -n "$validator"
-ruby -e 'require "yaml"; YAML.load_file(ARGV.fetch(0))' "$workflow"
+bash -n "$exhaustive_runner"
+ruby -e 'require "yaml"; ARGV.each { |path| YAML.load_file(path) }' \
+    "$ci_workflow" \
+    "$workflow"
 
 if grep -E -q '^[[:space:]]+[A-Z][A-Z0-9_]*:[[:space:]]+\$\{\{[[:space:]]*runner\.temp' \
     "$ci_workflow" \
@@ -114,8 +137,10 @@ grep -q 'chmod +x' "$workflow" \
     || fail "downloaded verification scripts cannot execute"
 grep -q 'swift test' "$workflow" \
     || fail "release workflow does not run the standard test suite"
-grep -q 'swift run codex-gauge-tests' "$workflow" \
-    || fail "release workflow does not run exhaustive tests"
+verify_exhaustive_workflow "$ci_workflow" \
+    || fail "CI workflow bypasses exhaustive completion verification"
+verify_exhaustive_workflow "$workflow" \
+    || fail "release workflow bypasses exhaustive completion verification"
 grep -q 'gh release create' "$workflow" \
     || fail "release workflow does not create a GitHub draft"
 grep -q -- '--draft' "$workflow" \
