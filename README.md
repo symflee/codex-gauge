@@ -39,11 +39,20 @@ Codex Gauge는 macOS 메뉴 막대에서 Codex와 Spark의 남은 사용 한도�
 
 Codex Gauge는 별도의 OpenAI API key를 요구하지 않습니다. 설치된 Codex가 소유한 인증 경계를 그대로 사용합니다.
 
-## 설치 — 준비 중
+## 설치
 
-첫 공개 버전은 GitHub Releases의 universal `CodexGauge.dmg`로 제공합니다. GitHub가 자동 생성하는 `Source code.zip`은 설치 파일이 아닙니다. DMG를 연 뒤 Codex Gauge를 `Applications`로 드래그하면 일반적인 macOS 애플리케이션으로 설치됩니다.
+첫 공개 버전은 GitHub Releases의 universal `CodexGauge.dmg`로 제공합니다. GitHub가 자동 생성하는 `Source code.zip`은 설치 파일이 아닙니다. DMG를 열면 Codex Gauge, `Applications` 바로가기와 한·영 설치 안내가 보이며, 앱을 `Applications`로 드래그하면 일반적인 macOS 애플리케이션으로 설치됩니다.
 
-Codex Gauge는 Apple Developer Program을 사용하지 않으며 Developer ID 서명과 Apple 공증 없이 배포됩니다. macOS가 최초 실행을 차단하면 `시스템 설정 → 개인정보 보호 및 보안 → 그래도 열기`에서 사용자가 직접 승인합니다. Codex Gauge는 Gatekeeper 또는 quarantine을 비활성화하거나 자동으로 우회하지 않습니다.
+Codex Gauge는 Apple Developer Program을 사용하지 않으며 Developer ID 서명과 Apple 공증 없이 배포됩니다. macOS가 최초 실행을 차단하면 먼저 `시스템 설정 → 개인정보 보호 및 보안 → 그래도 열기`에서 직접 승인합니다.
+
+공식 GitHub Release에서 받은 파일과 정확한 설치 경로를 확인했지만 공식 승인으로도 열리지 않을 때만 다음 수동 대안을 사용할 수 있습니다.
+
+```sh
+/usr/bin/xattr -dr com.apple.quarantine "/Applications/Codex Gauge.app"
+/usr/bin/open "/Applications/Codex Gauge.app"
+```
+
+첫 명령은 설치나 권한 부여가 아니라 이 앱 bundle의 quarantine 표시를 제거해 해당 앱의 quarantine 기반 Gatekeeper 최초 평가를 우회합니다. `sudo`, 다른 앱·넓은 경로, 전역 Gatekeeper 변경 또는 실행 가능한 helper를 사용하지 마세요. Codex Gauge 앱, DMG와 배포 자동화는 이 명령을 자동 실행하지 않습니다. 전체 한·영 절차와 중단 조건은 [설치 안내](docs/installation.md)를 먼저 읽어 주세요.
 
 자체 Homebrew Cask가 공개된 뒤에는 다음 명령도 제공합니다. 현재는 tap과 Release artifact를 준비하는 단계이므로 아직 설치 명령으로 사용하지 마세요.
 
@@ -82,7 +91,7 @@ xcodebuild -project CodexGauge.xcodeproj \
   test
 ```
 
-공개 CI는 SwiftPM 전체 테스트와 Xcode unit smoke, main·수동 실행의 UI smoke 및 ad-hoc signed universal application→DMG 전체 packaging을 검증합니다. 일반 CI의 DMG는 검증 뒤 게시하거나 보존하지 않습니다. 별도의 tag release workflow만 같은 계약을 다시 검증한 뒤 GitHub draft Release artifact를 만듭니다. 사용자 인증이나 실제 Codex 설치에 의존하지 않으며 protocol 테스트는 합성 fixture만 사용합니다. 실제 App Server smoke test는 개발자가 명시적으로 실행하는 로컬 테스트로만 제공합니다.
+공개 CI는 SwiftPM 전체 테스트와 Xcode unit smoke, main·수동 실행의 UI smoke 및 ad-hoc signed universal application→배경·한영 안내가 포함된 DMG 전체 packaging을 검증합니다. 일반 CI의 DMG는 검증 뒤 게시하거나 보존하지 않습니다. 별도의 tag release workflow만 같은 계약을 다시 검증한 뒤 GitHub draft Release artifact를 만듭니다. 사용자 인증이나 실제 Codex 설치에 의존하지 않으며 protocol 테스트는 합성 fixture만 사용합니다. 실제 App Server smoke test는 개발자가 명시적으로 실행하는 로컬 테스트로만 제공합니다.
 
 Debug 구성의 XCUITest에서 실제 메뉴 막대·메뉴·설정 창 composition을 검증할 때는 정확한 `--codex-gauge-ui-test-fixture-83` 실행 인자를 사용합니다. 이 opt-in 모드는 메모리에 합성 Codex 5시간 한도 `83%`를 게시하며 Codex 탐색·프로세스·인증·네트워크와 로그인 항목 변경을 수행하지 않습니다. 최초 실행 완료 상태는 별도의 `--codex-gauge-ui-test-reset-first-launch` 인자로만 초기화하므로 후속 fixture 실행에서도 한 번만 표시되는 설정 창과 상태 메뉴에서 설정을 열고 닫은 뒤 다시 만드는 생명주기를 검증할 수 있습니다. Release 빌드는 fixture 인자를 무시하고 항상 production 경계를 사용하며, 일반 실행에도 이 인자를 전달하지 않습니다.
 
@@ -110,6 +119,7 @@ swift run codex-gauge-smoke
 - [아키텍처](docs/architecture.md)
 - [Codex 프로토콜](docs/codex-protocol.md)
 - [개발 및 테스트](docs/development.md)
+- [설치 안내](docs/installation.md)
 - [macOS 배포](docs/distribution.md)
 - [기여 안내](CONTRIBUTING.md)
 

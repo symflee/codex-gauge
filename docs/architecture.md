@@ -241,7 +241,11 @@ GitHub Release
       └── own Homebrew Cask
 ```
 
-DMG에는 application bundle 하나와 `/Applications` symbolic link 하나만 둔다. packaging은 quarantine attribute를 제거하거나 Gatekeeper 설정을 변경하지 않고 installer script 또는 privileged helper를 실행하지 않는다. Cask도 새 artifact를 만들지 않고 동일한 immutable version URL과 SHA-256을 재사용한다.
+DMG의 사용자 표시 root에는 application bundle, `/Applications` symbolic link와 `docs/installation.md`를 그대로 복사한 비실행 한·영 안내 파일만 둔다. 숨김 root에는 640×420 배경을 가진 `.background`와 Finder layout용 `.DS_Store`만 허용한다. packaging은 quarantine attribute를 제거하거나 Gatekeeper 설정을 변경하지 않고 installer script 또는 privileged helper를 실행하지 않는다. Cask도 새 artifact를 만들지 않고 동일한 immutable version URL과 SHA-256을 재사용한다.
+
+packaging은 임시 writable HFS+ image를 고유한 임시 volume name으로 mount하고 Finder AppleScript로 icon view, 창 크기, 배경과 세 아이콘 위치를 설정한다. 최대 30초 안에 읽어 온 layout이 계약과 일치하지 않으면 실패하며, 성공한 image만 최종 volume name `Codex Gauge`로 바꿔 UDZO로 변환한다. Finder metadata fallback은 CI AppleEvent 실패가 실제로 확인된 뒤 동일한 검증을 통과한 `.DS_Store` template로만 도입할 수 있다.
+
+설치 안내는 System Settings의 공식 `그래도 열기` 절차를 먼저 제공한다. 공식 Release와 정확한 `/Applications/Codex Gauge.app` 경로를 확인한 사용자가 명시적으로 선택하는 경우에만 해당 app bundle의 quarantine marker를 제거하는 수동 대안을 제공한다. 이는 설치나 권한 부여가 아니라 해당 앱의 quarantine 기반 Gatekeeper 최초 평가를 우회하는 동작이다. 앱과 packaging automation은 이를 실행하지 않으며 `sudo`, 넓은 대상, 전역 Gatekeeper 변경과 executable helper를 사용하지 않는다.
 
 release validation은 tag와 bundle version, bundle identifier, macOS minimum, `LSUIElement`, ad-hoc signature와 Hardened Runtime, main executable의 `arm64 x86_64`, DMG layout과 checksum을 확인한다. SHA-256은 artifact 일치 확인일 뿐 Apple code-signing identity가 아니다. 전체 배포 계약은 [배포 문서](distribution.md)를 따른다.
 

@@ -99,6 +99,15 @@ grep -q 'fetch-depth: 0' "$workflow" \
     || fail "release ancestry cannot be validated from a shallow checkout"
 grep -q 'Scripts/build-release-dmg.sh' "$workflow" \
     || fail "release workflow does not use the verified packager"
+grep -q 'Scripts/verify-release-dmg-layout.applescript' "$workflow" \
+    || fail "release candidate lacks Finder layout verification"
+grep -F -q 'find "$release_directory" -type f | wc -l' "$workflow" \
+    || fail "release candidate file count is not verified"
+grep -F -q '= "6"' "$workflow" \
+    || fail "release candidate file count omits a verification file"
+grep -F -q '"$release_directory/verification/verify-release-dmg-layout.applescript"' \
+    "$workflow" \
+    || fail "downloaded candidate does not require the Finder layout verifier"
 grep -q 'Scripts/validate-release-context.sh' "$workflow" \
     || fail "release workflow does not validate tags and build numbers"
 grep -q 'chmod +x' "$workflow" \
@@ -116,6 +125,12 @@ grep -q "if: github.event_name == 'push'" "$workflow" \
 
 if grep -E -q -- '--clobber|--draft=false|gh release (edit|delete|upload)' "$workflow"; then
     fail "release workflow can overwrite or automatically publish a release"
+fi
+
+if grep -E -q 'xattr|spctl|privileged[ _-]?helper' \
+    "$ci_workflow" \
+    "$workflow"; then
+    fail "release automation can bypass macOS security policy"
 fi
 
 checkout_pin='actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1'

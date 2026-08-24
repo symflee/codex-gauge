@@ -127,11 +127,14 @@ application_path="$derived_data_root/Build/Products/Release/CodexGauge.app"
     --build "$expected_build"
 "$script_directory/create-release-dmg.sh" \
     --app "$application_path" \
+    --background "$repository_root/Distribution/DMG/background.png" \
+    --guide "$repository_root/docs/installation.md" \
     --output "$artifact_path"
 "$script_directory/verify-release-dmg.sh" \
     --dmg "$artifact_path" \
     --checksum "$artifact_path.sha256" \
     --source-app "$application_path" \
+    --expected-guide "$repository_root/docs/installation.md" \
     --version "$expected_version" \
     --build "$expected_build"
 

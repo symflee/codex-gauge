@@ -214,12 +214,15 @@ Debug 구성의 통합 XCUITest는 정확한 `--codex-gauge-ui-test-fixture-83` 
 
 - macOS 13 이상에서 동작하는 Apple Silicon·Intel universal application을 제공한다.
 - 기본 채널은 GitHub Releases의 `CodexGauge.dmg`다.
-- DMG에는 application bundle 하나와 `/Applications` symbolic link 하나만 둔다.
+- DMG의 사용자 표시 root에는 application bundle, `/Applications` symbolic link와 비실행 `설치 안내 - Installation.txt`를 둔다.
+- 숨김 root에는 640×420 Finder 배경용 `.background`와 layout metadata `.DS_Store`만 둔다.
 - 사용자는 DMG에서 Codex Gauge를 Applications로 드래그한다.
 - Apple Developer Program, Developer ID 배포 서명과 Apple notarization을 사용하지 않는다.
 - application은 Apple 인증서 없이 ad-hoc code signing하지만 이를 개발자 신원이나 Gatekeeper 승인으로 표현하지 않는다.
 - macOS가 최초 실행을 차단하면 사용자가 System Settings의 공식 `그래도 열기` 절차로 직접 승인한다.
-- 앱, DMG와 설치 안내는 quarantine attribute 제거, Gatekeeper 비활성화 또는 `--no-quarantine`을 사용하지 않는다.
+- 앱, DMG, packaging automation과 Cask는 quarantine 제거, Gatekeeper 설정 변경 또는 최초 실행 승인을 자동화하지 않는다.
+- 설치 안내는 공식 `그래도 열기` 절차를 우선하고, 공식 Release와 정확한 `/Applications/Codex Gauge.app` 경로를 확인한 사용자가 선택할 수 있도록 해당 앱 하나의 quarantine marker를 제거하는 정확한 수동 대안을 제공한다.
+- 수동 대안은 설치·권한 부여·Apple 검증이 아니라 해당 앱의 quarantine 기반 Gatekeeper 최초 평가를 우회하는 동작임을 밝힌다. `sudo`, 넓은 경로, 전역 Gatekeeper 변경과 executable helper는 제공하지 않는다.
 - SHA-256은 artifact 일치와 전송 손상을 확인하지만 개발자 신원이나 Apple 검증을 의미하지 않는다.
 - PKG, privileged helper와 installer script를 만들지 않는다.
 
