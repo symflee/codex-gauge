@@ -38,7 +38,6 @@ gradient?.draw(in: canvas, angle: -90)
 
 let accent = NSColor(calibratedRed: 0.12, green: 0.38, blue: 0.58, alpha: 1)
 let muted = NSColor(calibratedWhite: 0.29, alpha: 1)
-let guideBackground = NSColor(calibratedWhite: 1, alpha: 0.72)
 
 func drawCentered(_ text: String, y: CGFloat, font: NSFont, color: NSColor) {
     let attributes: [NSAttributedString.Key: Any] = [
@@ -54,6 +53,18 @@ drawCentered(
     "Applications로 드래그 / Drag to Applications",
     y: 350,
     font: .systemFont(ofSize: 21, weight: .semibold),
+    color: muted
+)
+drawCentered(
+    "실행이 차단되면 설치 안내를 여세요",
+    y: 317,
+    font: .systemFont(ofSize: 14, weight: .medium),
+    color: muted
+)
+drawCentered(
+    "If blocked, open the guide",
+    y: 298,
+    font: .systemFont(ofSize: 12, weight: .regular),
     color: muted
 )
 
@@ -72,27 +83,6 @@ arrowHead.line(to: NSPoint(x: 370, y: 237))
 arrowHead.line(to: NSPoint(x: 370, y: 207))
 arrowHead.close()
 arrowHead.fill()
-
-let guidePanel = NSBezierPath(
-    roundedRect: NSRect(x: 145, y: 35, width: 350, height: 58),
-    xRadius: 16,
-    yRadius: 16
-)
-guideBackground.setFill()
-guidePanel.fill()
-
-drawCentered(
-    "실행이 차단되면 설치 안내를 여세요",
-    y: 63,
-    font: .systemFont(ofSize: 14, weight: .medium),
-    color: muted
-)
-drawCentered(
-    "If blocked, open the guide",
-    y: 43,
-    font: .systemFont(ofSize: 12, weight: .regular),
-    color: muted
-)
 
 NSGraphicsContext.restoreGraphicsState()
 

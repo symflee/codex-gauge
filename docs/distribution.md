@@ -101,7 +101,7 @@ SHA-256은 다운로드 손상과 Cask artifact 일치를 확인하는 값이다
 - Apple 인증서, notarization credential과 Apple signing secret은 사용하지 않는다.
 - agent는 사용자의 별도 요청 없이 tag push 또는 GitHub Release 공개를 수행하지 않는다.
 
-첫 release 전에는 새 macOS 사용자 계정에서 browser download, DMG mount, 배경·아이콘·안내 파일 layout, Applications drag, 공식 최초 실행 승인, 메뉴 막대 표시와 제거를 수동으로 확인한다. 별도 clean copy에서는 문서화한 app-scoped 수동 대안과 재실행도 확인한다. Apple Silicon에서 실기 검증하고 Intel 결과는 별도 runner 또는 실제 기기로 확인한다.
+첫 release 전에는 새 macOS 사용자 계정에서 browser download, DMG mount, 배경·아이콘·안내 파일 layout, Applications drag, 공식 최초 실행 승인, 메뉴 막대 표시와 제거를 수동으로 확인한다. Finder 화면에서는 상단 한·영 안내, 앱과 Applications, 아래 중앙 안내 파일의 이름이 서로 겹치거나 창 밖으로 잘리지 않는지도 확인한다. 별도 clean copy에서는 문서화한 app-scoped 수동 대안과 재실행도 확인한다. Apple Silicon에서 실기 검증하고 Intel 결과는 별도 runner 또는 실제 기기로 확인한다.
 
 ## 6. 업데이트 방향
 

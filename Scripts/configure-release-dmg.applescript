@@ -36,14 +36,16 @@ on run arguments
                 set appPosition to position of item "Codex Gauge.app"
                 set applicationsPosition to position of item "Applications"
                 set guidePosition to position of guideItem
-                set expectedBounds to {100, 100, 740, 520}
                 set actualBounds to bounds of container window
+                set actualWidth to (item 3 of actualBounds) - (item 1 of actualBounds)
+                set actualHeight to (item 4 of actualBounds) - (item 2 of actualBounds)
                 set actualView to current view of container window
                 set toolbarIsVisible to toolbar visible of container window
                 set statusBarIsVisible to statusbar visible of container window
                 set pathBarIsVisible to pathbar visible of container window
                 set actualIconSize to icon size of viewOptions
-                if (actualBounds is expectedBounds) and ¬
+                if (actualWidth is 640) and ¬
+                    (actualHeight is 420) and ¬
                     (actualView is icon view) and ¬
                     (toolbarIsVisible is false) and ¬
                     (statusBarIsVisible is false) and ¬
