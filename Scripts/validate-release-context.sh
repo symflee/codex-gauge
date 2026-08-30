@@ -73,10 +73,11 @@ git rev-parse --verify --quiet "$main_ref^{commit}" >/dev/null \
 
 tag_commit="$(git rev-parse "refs/tags/$tag^{commit}")"
 head_commit="$(git rev-parse HEAD)"
+main_commit="$(git rev-parse "$main_ref^{commit}")"
 [ "$tag_commit" = "$head_commit" ] \
     || fail "checked out commit does not match the release tag"
-git merge-base --is-ancestor "$tag_commit" "$main_ref" \
-    || fail "release tag is not contained in main"
+[ "$tag_commit" = "$main_commit" ] \
+    || fail "release tag must match the trusted main commit"
 
 release_tags=()
 while IFS= read -r candidate; do

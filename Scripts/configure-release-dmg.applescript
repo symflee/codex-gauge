@@ -7,10 +7,29 @@ on run arguments
     set mountPath to item 2 of arguments
     set layoutVerified to false
     set mountedVolume to (POSIX file mountPath) as alias
+    set targetDisk to missing value
     set backgroundImage to (POSIX file (mountPath & "/.background/background.png")) as alias
 
+    repeat with attemptNumber from 1 to 30
+        try
+            tell application "Finder"
+                set candidateDisk to item mountedVolume
+                set candidateName to name of candidateDisk
+            end tell
+            set targetDisk to candidateDisk
+            exit repeat
+        on error
+            if attemptNumber is less than 30 then
+                delay 1
+            end if
+        end try
+    end repeat
+
+    if targetDisk is missing value then
+        error "Finder did not discover the mounted DMG within 30 seconds"
+    end if
+
     tell application "Finder"
-        set targetDisk to item mountedVolume
         tell targetDisk
             open
             set current view of container window to icon view

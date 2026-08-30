@@ -1,8 +1,8 @@
 # Codex Gauge 설치 / Installation
 
-Codex Gauge는 Apple Developer Program, Developer ID 서명 또는 Apple 공증 없이 배포됩니다. 아래 단계는 공식 GitHub Release에서 받은 `CodexGauge.dmg`에만 사용하세요.
+Codex Gauge는 Apple 배포 인증서와 공증 없이 ad-hoc signing으로 배포됩니다. 아래 단계는 공식 GitHub Release에서 받은 `CodexGauge.dmg`에만 사용하세요.
 
-Codex Gauge is distributed without Apple Developer Program membership, Developer ID signing, or Apple notarization. Follow these steps only for `CodexGauge.dmg` downloaded from the official GitHub Release.
+Codex Gauge is distributed with ad-hoc signing and without an Apple distribution certificate or notarization. Follow these steps only for `CodexGauge.dmg` downloaded from the official GitHub Release.
 
 ## 일반 설치 / Standard installation
 
@@ -26,6 +26,20 @@ Codex Gauge is distributed without Apple Developer Program membership, Developer
 SHA-256은 다운로드한 파일의 일치 여부만 확인합니다. Apple이 개발자 신원이나 악성 코드 부재를 확인했다는 의미가 아닙니다.
 
 SHA-256 only checks that the downloaded artifact matches. It does not provide Apple developer identity verification or confirm that software is free of malware.
+
+## 앱에서 업데이트 / In-app updates
+
+`v0.1.0`에는 updater가 없습니다. 첫 updater-bearing version인 `v0.2.0` build 3이 배포되면 기존 사용자는 그 DMG를 위 절차로 한 번 직접 설치해야 합니다. 그 이후에는 앱을 실행할 때마다 새 stable version을 한 번 확인합니다. 새 version이 있으면 메뉴의 `현재 버전: vX.Y.Z (최신 vA.B.C)`를 선택해 표준 update 창을 엽니다.
+
+`v0.1.0` does not contain an updater. When the first updater-bearing version, `v0.2.0` build 3, is released, existing users must manually install that DMG once using the steps above. After that, Codex Gauge checks once for a new stable version whenever the app launches. If one is available, choose `Current version: vX.Y.Z (latest vA.B.C)` from the menu to open the standard update window.
+
+새 version을 찾았다는 사실만으로 download나 installation이 시작되지 않습니다. Sparkle 표준 창에서 사용자가 `업데이트`를 선택한 경우에만 full DMG를 다운로드하고 EdDSA 서명을 검증한 뒤 앱을 교체합니다. beta, delta, 단계적·강제 update와 downgrade는 제공하지 않습니다. 취소하거나 network·signature 검증이 실패하면 현재 앱을 그대로 유지합니다.
+
+Finding a new version never starts a download or installation by itself. Only after the user chooses `Update` in Sparkle's standard window does Codex Gauge download the full DMG, verify its EdDSA signature, and replace the app. Beta, delta, phased, forced, and downgrade updates are not provided. Cancelling or failing network or signature validation leaves the current app in place.
+
+인앱 update는 공식 GitHub DMG에서 `/Applications/Codex Gauge.app`으로 직접 설치한 경우만 지원합니다. Homebrew가 관리하는 설치의 교체와 Cask 상태 동기화는 현재 보장하지 않습니다. update 뒤 macOS가 새 build를 다시 차단하면 위의 공식 `그래도 열기` 절차를 사용하세요. 프로젝트 소유 코드와 배포 자동화는 `xattr`, `spctl` 또는 Gatekeeper 전역 설정 변경을 실행하지 않습니다. 다만 bundled stock Sparkle은 사용자가 update를 승인한 뒤 표준 교체 과정에서 staged application의 quarantine metadata를 정리하고 macOS system scan을 실행할 수 있습니다.
+
+In-app updates are supported only for `/Applications/Codex Gauge.app` installed directly from the official GitHub DMG. Replacement and Cask-state synchronization are not currently guaranteed for Homebrew-managed installations. Use the standard `Open Anyway` procedure above if macOS blocks the new build. Project-owned code and release automation do not run `xattr`, `spctl`, or change global Gatekeeper settings. After the user approves an update, bundled stock Sparkle may clear quarantine metadata from the staged application and invoke the macOS system scan as part of its standard replacement process.
 
 ## 공식 승인으로도 열리지 않을 때 / Manual fallback
 
@@ -52,6 +66,6 @@ The first command does not copy or install the app and does not grant file permi
 - Do not change Gatekeeper globally with commands such as `spctl --master-disable`. This project does not provide an executable installation helper.
 - If the file did not come from the official Release, or macOS warns that it is damaged or may contain malware, do not use this fallback; delete the file.
 
-Codex Gauge 앱, DMG와 배포 자동화는 이 명령을 자동 실행하지 않습니다. 사용자가 위 위험을 이해하고 해당 앱 하나에 대해 직접 선택하는 수동 절차입니다.
+프로젝트 소유 Codex Gauge 코드, DMG와 배포 자동화는 이 명령을 자동 실행하지 않습니다. 사용자가 위 위험을 이해하고 해당 앱 하나에 대해 직접 선택하는 수동 절차입니다.
 
-The Codex Gauge app, DMG, and release automation never execute this command automatically. It is a manual, app-scoped choice for a user who understands the risk above.
+Project-owned Codex Gauge code, the DMG, and release automation never execute this command automatically. It is a manual, app-scoped choice for a user who understands the risk above.

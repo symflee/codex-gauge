@@ -3,7 +3,7 @@
 set -euo pipefail
 
 usage() {
-    echo "Usage: verify-release-dmg.sh --dmg <path> --checksum <path> [--source-app <path>] [--expected-guide <path>] --version <X.Y.Z> --build <number>" >&2
+    echo "Usage: verify-release-dmg.sh --dmg <path> --checksum <path> [--source-app <path>] [--expected-guide <path>] [--sparkle-public-ed-key <base64>] [--expected-third-party-notices <path>] --version <X.Y.Z> --build <number>" >&2
 }
 
 fail() {
@@ -17,6 +17,8 @@ source_application=""
 expected_guide=""
 expected_version=""
 expected_build=""
+expected_public_ed_key=""
+expected_third_party_notices=""
 mount_root=""
 mount_path=""
 mounted=0
@@ -99,6 +101,16 @@ while [ "$#" -gt 0 ]; do
             expected_guide="$2"
             shift 2
             ;;
+        --sparkle-public-ed-key)
+            [ "$#" -ge 2 ] || { usage; exit 64; }
+            expected_public_ed_key="$2"
+            shift 2
+            ;;
+        --expected-third-party-notices)
+            [ "$#" -ge 2 ] || { usage; exit 64; }
+            expected_third_party_notices="$2"
+            shift 2
+            ;;
         --version)
             [ "$#" -ge 2 ] || { usage; exit 64; }
             expected_version="$2"
@@ -128,6 +140,11 @@ fi
 if [ -n "$expected_guide" ]; then
     [ -f "$expected_guide" ] && [ ! -L "$expected_guide" ] \
         || fail "expected installation guide is missing"
+fi
+if [ -n "$expected_third_party_notices" ]; then
+    [ -f "$expected_third_party_notices" ] \
+        && [ ! -L "$expected_third_party_notices" ] \
+        || fail "expected third-party notices are missing"
 fi
 
 script_directory="$(cd "$(dirname "$0")" && pwd)"
@@ -283,16 +300,29 @@ if [ -n "$expected_guide" ]; then
         || fail "installation guide differs from the canonical document"
 fi
 
+application_verification_arguments=(
+    --version "$expected_version"
+    --build "$expected_build"
+)
+if [ -n "$expected_public_ed_key" ]; then
+    application_verification_arguments+=(
+        --sparkle-public-ed-key "$expected_public_ed_key"
+    )
+fi
+if [ -n "$expected_third_party_notices" ]; then
+    application_verification_arguments+=(
+        --expected-third-party-notices "$expected_third_party_notices"
+    )
+fi
+
 "$script_directory/verify-release-app.sh" \
     --app "$mounted_application" \
-    --version "$expected_version" \
-    --build "$expected_build"
+    "${application_verification_arguments[@]}"
 
 if [ -n "$source_application" ]; then
     "$script_directory/verify-release-app.sh" \
         --app "$source_application" \
-        --version "$expected_version" \
-        --build "$expected_build"
+        "${application_verification_arguments[@]}"
     source_executable="$(plutil -extract CFBundleExecutable raw -o - \
         "$source_application/Contents/Info.plist")"
     mounted_executable="$(plutil -extract CFBundleExecutable raw -o - \

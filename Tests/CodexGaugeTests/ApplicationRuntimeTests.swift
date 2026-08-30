@@ -14,6 +14,7 @@ func applicationRuntimeTests() -> [TestCase] {
         applicationRuntimeDefersInitialWakeBaselineTest(),
         applicationRuntimePublishesOnePresentationTransactionTest(),
         applicationRuntimeRoutesMenuAndSettingsTest(),
+        applicationRuntimeRoutesUpdatesWithoutQuotaRefreshTest(),
         applicationRuntimeRelocalizesWithoutRefreshingTest(),
         applicationRuntimeRestylesWithoutRefreshingTest(),
         applicationRuntimePublishesLaunchAtLoginStateTest(),
@@ -27,6 +28,66 @@ func applicationRuntimeTests() -> [TestCase] {
         applicationRuntimeStopsStartThatResumesDuringShutdownTest(),
         applicationRuntimeDrainsReplacementOnShutdownTest()
     ]
+}
+
+private func applicationRuntimeRoutesUpdatesWithoutQuotaRefreshTest() -> TestCase {
+    TestCase(name: "application runtime keeps updater state outside quota IO") {
+        try await applicationRuntimeRoutesUpdatesWithoutQuotaRefreshScenario()
+    }
+}
+
+@MainActor
+private func applicationRuntimeRoutesUpdatesWithoutQuotaRefreshScenario() async throws {
+    let harness = RuntimeHarness()
+    harness.coordinator.start()
+    await harness.coordinator.waitForPendingOperations()
+    let refreshEvents = await harness.refreshBuilder.coordinators[0].events
+    let statusCount = harness.status.presentedFrames.count
+    let deadlineCount = harness.deadlineScheduler.productStates.count
+
+    try expect(harness.update.startCount == 1, "Expected updater startup")
+    try expect(
+        menuAction(.checkForUpdates, in: harness.menu.models.last)?.isEnabled == true,
+        "Expected initial update action enabled"
+    )
+    let checking = ApplicationUpdateState(
+        currentVersion: "1.2.0",
+        status: .checking
+    )
+    harness.update.emit(checking)
+
+    try expect(
+        menuAction(.checkForUpdates, in: harness.menu.models.last)?.isEnabled == false,
+        "Expected cached menu state update"
+    )
+    try expect(
+        menuActionTitle(.checkForUpdates, in: harness.menu.models.last)
+            == "Current version: v1.2.0 (checking latest…)",
+        "Expected cached update title"
+    )
+    try expect(
+        harness.status.presentedFrames.count == statusCount,
+        "Expected updater state to leave the status frame untouched"
+    )
+    try expect(
+        harness.deadlineScheduler.productStates.count == deadlineCount,
+        "Expected updater state to leave quota deadlines untouched"
+    )
+    let finalRefreshEvents = await harness.refreshBuilder.coordinators[0].events
+    try expect(
+        finalRefreshEvents == refreshEvents,
+        "Expected updater state to make no quota request"
+    )
+
+    harness.update.emit(ApplicationUpdateState(
+        currentVersion: "1.2.0",
+        status: .updateAvailable(latestVersion: "1.3.0")
+    ))
+    harness.coordinator.performMenuAction(.checkForUpdates)
+    try expect(harness.update.checkCount == 1, "Expected update prompt routing")
+
+    await harness.coordinator.shutdown()
+    try expect(harness.update.stopCount == 1, "Expected updater observation shutdown")
 }
 
 private func applicationRuntimeRelocalizesWithoutRefreshingTest() -> TestCase {
@@ -150,6 +211,15 @@ private func menuActionTitle(
         .flatMap { $0 }
         .first { $0.action == action }?
         .title
+}
+
+private func menuAction(
+    _ action: QuotaMenuAction,
+    in model: QuotaDetailsMenuModel?
+) -> QuotaMenuActionItem? {
+    model?.actionGroups
+        .flatMap { $0 }
+        .first { $0.action == action }
 }
 
 private func applicationRuntimePublishesLaunchAtLoginStateTest() -> TestCase {
@@ -767,6 +837,7 @@ private final class RuntimeHarness {
     let status = RuntimeStatusSpy()
     let menu = RuntimeMenuSpy()
     let settings = RuntimeSettingsSpy()
+    let update = RuntimeUpdateSpy()
     let systemMonitor = RuntimeSystemMonitorSpy(initialLowPowerMode: true)
     let assistiveMonitor = RuntimeAssistiveMonitorSpy()
     let deadlineScheduler = RuntimeDeadlineSchedulerSpy()
@@ -796,6 +867,7 @@ private final class RuntimeHarness {
             statusRuntime: status,
             menuRuntime: menu,
             settingsRuntime: settings,
+            applicationUpdateRuntime: update,
             systemActivityMonitor: systemMonitor,
             assistiveDisplayMonitor: assistiveMonitor,
             deadlineSchedulerBuilder: ApplicationUsageDeadlineSchedulerBuilder { emitter in
@@ -942,6 +1014,40 @@ private final class RuntimeSettingsSpy: ApplicationSettingsRuntime {
 
     func shutdown() async {
         shutdownCount += 1
+    }
+}
+
+@MainActor
+private final class RuntimeUpdateSpy: ApplicationUpdateRuntime {
+    private(set) var state = ApplicationUpdateState(
+        currentVersion: "1.2.0",
+        status: .updateAvailable(latestVersion: "1.3.0")
+    )
+    private(set) var startCount = 0
+    private(set) var checkCount = 0
+    private(set) var stopCount = 0
+    private var handler: (@MainActor (ApplicationUpdateState) -> Void)?
+
+    func start(
+        stateHandler: @escaping @MainActor (ApplicationUpdateState) -> Void
+    ) {
+        startCount += 1
+        handler = stateHandler
+        stateHandler(state)
+    }
+
+    func checkForUpdates() {
+        checkCount += 1
+    }
+
+    func stop() {
+        stopCount += 1
+        handler = nil
+    }
+
+    func emit(_ state: ApplicationUpdateState) {
+        self.state = state
+        handler?(state)
     }
 }
 

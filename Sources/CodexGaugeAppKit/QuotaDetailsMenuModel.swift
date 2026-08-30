@@ -27,6 +27,7 @@ public enum QuotaMenuAction: String, CaseIterable, Equatable, Sendable {
     case refresh
     case openCodex
     case selectCodex
+    case checkForUpdates
     case settings
     case quit
 }
@@ -81,10 +82,16 @@ public struct QuotaMenuProductSection: Equatable, Sendable {
 public struct QuotaMenuActionItem: Equatable, Sendable {
     public let action: QuotaMenuAction
     public let title: String
+    public let isEnabled: Bool
 
-    public init(action: QuotaMenuAction, title: String) {
+    public init(
+        action: QuotaMenuAction,
+        title: String,
+        isEnabled: Bool = true
+    ) {
         self.action = action
         self.title = title
+        self.isEnabled = isEnabled
     }
 }
 
@@ -184,12 +191,18 @@ public struct QuotaDetailsMenuModelBuilder {
         )
     }
 
-    public func build(_ input: QuotaDetailsMenuInput) -> QuotaDetailsMenuModel {
+    public func build(
+        _ input: QuotaDetailsMenuInput,
+        applicationUpdateState: ApplicationUpdateState = .unavailable
+    ) -> QuotaDetailsMenuModel {
         QuotaDetailsMenuModel(
             productSections: UsageProduct.allCases.map {
                 productSection(for: $0, input: input)
             },
-            actionGroups: actionGroups(for: input.codexAvailability)
+            actionGroups: actionGroups(
+                for: input.codexAvailability,
+                applicationUpdateState: applicationUpdateState
+            )
         )
     }
 
@@ -389,7 +402,8 @@ public struct QuotaDetailsMenuModelBuilder {
     }
 
     private func actionGroups(
-        for availability: CodexMenuAvailability
+        for availability: CodexMenuAvailability,
+        applicationUpdateState: ApplicationUpdateState
     ) -> [[QuotaMenuActionItem]] {
         let connectionAction: QuotaMenuAction
         switch availability {
@@ -399,13 +413,51 @@ public struct QuotaDetailsMenuModelBuilder {
             connectionAction = .selectCodex
         }
         return [
-            [.refresh, connectionAction, .settings].map(actionItem),
-            [.quit].map(actionItem)
+            [.refresh, connectionAction].map { actionItem($0) },
+            [
+                updateActionItem(applicationUpdateState),
+                actionItem(.settings)
+            ],
+            [.quit].map { actionItem($0) }
         ]
     }
 
-    private func actionItem(_ action: QuotaMenuAction) -> QuotaMenuActionItem {
-        QuotaMenuActionItem(action: action, title: text(action.textKey))
+    private func actionItem(
+        _ action: QuotaMenuAction,
+        isEnabled: Bool = true
+    ) -> QuotaMenuActionItem {
+        QuotaMenuActionItem(
+            action: action,
+            title: text(action.textKey),
+            isEnabled: isEnabled
+        )
+    }
+
+    private func updateActionItem(
+        _ state: ApplicationUpdateState
+    ) -> QuotaMenuActionItem {
+        QuotaMenuActionItem(
+            action: .checkForUpdates,
+            title: updateTitle(state),
+            isEnabled: state.status.isUpdateAvailable
+        )
+    }
+
+    private func updateTitle(_ state: ApplicationUpdateState) -> String {
+        let values = ["current": state.currentVersion]
+        switch state.status {
+        case .unavailable:
+            return template(.updateUnavailable, values: values)
+        case .checking:
+            return template(.updateChecking, values: values)
+        case .current(let latestVersion), .updateAvailable(let latestVersion):
+            return template(
+                .updateVersions,
+                values: values.merging(["latest": latestVersion]) { _, new in new }
+            )
+        case .failed:
+            return template(.updateFailed, values: values)
+        }
     }
 
     private func text(_ key: QuotaMenuTextKey) -> String {
@@ -447,6 +499,10 @@ private enum QuotaMenuTextKey: String, CaseIterable {
     case actionRefresh = "menu.action.refresh"
     case actionOpenCodex = "menu.action.open_codex"
     case actionSelectCodex = "menu.action.select_codex"
+    case updateChecking = "menu.update.checking"
+    case updateVersions = "menu.update.versions"
+    case updateFailed = "menu.update.failed"
+    case updateUnavailable = "menu.update.unavailable"
     case actionSettings = "menu.action.settings"
     case actionQuit = "menu.quit"
 }
@@ -481,6 +537,8 @@ private extension QuotaMenuAction {
             .actionOpenCodex
         case .selectCodex:
             .actionSelectCodex
+        case .checkForUpdates:
+            .updateUnavailable
         case .settings:
             .actionSettings
         case .quit:

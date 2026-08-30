@@ -35,6 +35,10 @@
 "menu.action.refresh" = "새로 고침";
 "menu.action.open_codex" = "Codex 열기";
 "menu.action.select_codex" = "Codex 선택…";
+"menu.update.checking" = "현재 버전: v{current} (최신 확인 중…)";
+"menu.update.versions" = "현재 버전: v{current} (최신 v{latest})";
+"menu.update.failed" = "현재 버전: v{current} (최신 확인 실패)";
+"menu.update.unavailable" = "현재 버전: v{current} (최신 확인 불가)";
 "menu.action.settings" = "설정…";
 "menu.quit" = "Codex Gauge 종료";
 "settings.window.title" = "Codex Gauge 설정";

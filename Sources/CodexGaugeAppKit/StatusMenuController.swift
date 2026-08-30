@@ -10,6 +10,7 @@ public struct StatusMenuActions {
     private let refresh: @MainActor () -> Void
     private let openCodex: @MainActor () -> Void
     private let selectCodex: @MainActor () -> Void
+    private let checkForUpdates: @MainActor () -> Void
     private let settings: @MainActor () -> Void
     private let quit: @MainActor () -> Void
 
@@ -17,12 +18,14 @@ public struct StatusMenuActions {
         refresh: @escaping @MainActor () -> Void,
         openCodex: @escaping @MainActor () -> Void,
         selectCodex: @escaping @MainActor () -> Void,
+        checkForUpdates: @escaping @MainActor () -> Void,
         settings: @escaping @MainActor () -> Void,
         quit: @escaping @MainActor () -> Void
     ) {
         self.refresh = refresh
         self.openCodex = openCodex
         self.selectCodex = selectCodex
+        self.checkForUpdates = checkForUpdates
         self.settings = settings
         self.quit = quit
     }
@@ -35,6 +38,8 @@ public struct StatusMenuActions {
             openCodex()
         case .selectCodex:
             selectCodex()
+        case .checkForUpdates:
+            checkForUpdates()
         case .settings:
             settings()
         case .quit:
@@ -140,7 +145,7 @@ public final class StatusMenuController: NSObject, NSMenuDelegate {
         )
         item.target = self
         item.representedObject = model.action.rawValue
-        item.isEnabled = true
+        item.isEnabled = model.isEnabled
         item.setAccessibilityIdentifier(
             CodexGaugeAccessibilityIdentifier.menuAction(model.action.rawValue)
         )

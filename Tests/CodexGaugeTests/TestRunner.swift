@@ -84,6 +84,7 @@ struct TestRunner {
             + applicationRuntimeTests()
             + applicationTerminationTests()
             + applicationUITestFixtureTests()
+            + applicationUpdateRuntimeTests()
     }
 
     private static func run(_ tests: [TestCase]) async -> Int32 {

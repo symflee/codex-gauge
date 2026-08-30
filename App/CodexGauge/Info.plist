@@ -28,5 +28,25 @@
     <true/>
     <key>NSHumanReadableCopyright</key>
     <string>Copyright © 2026 Codex Gauge contributors</string>
+    <key>SUFeedURL</key>
+    <string>https://github.com/symflee/codex-gauge/releases/latest/download/appcast.xml</string>
+    <key>SUPublicEDKey</key>
+    <string>$(SPARKLE_PUBLIC_ED_KEY)</string>
+    <key>SUEnableAutomaticChecks</key>
+    <false/>
+    <key>SUAutomaticallyUpdate</key>
+    <false/>
+    <key>SUAllowsAutomaticUpdates</key>
+    <false/>
+    <key>SUEnableSystemProfiling</key>
+    <false/>
+    <key>SUShowReleaseNotes</key>
+    <false/>
+    <key>SUVerifyUpdateBeforeExtraction</key>
+    <true/>
+    <key>SURequireSignedFeed</key>
+    <true/>
+    <key>SUSignedFeedFailureExpirationInterval</key>
+    <integer>0</integer>
 </dict>
 </plist>

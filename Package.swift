@@ -26,7 +26,12 @@ let package = Package(
             targets: ["CodexGaugeSmokeExecutable"]
         )
     ],
-    dependencies: [],
+    dependencies: [
+        .package(
+            url: "https://github.com/sparkle-project/Sparkle",
+            exact: "2.9.6"
+        )
+    ],
     targets: [
         .target(
             name: "CodexGaugeCore"
@@ -56,7 +61,8 @@ let package = Package(
                 "CodexGaugeCore",
                 "CodexGaugeProtocol",
                 "CodexGaugeRefresh",
-                "CodexGaugeSettings"
+                "CodexGaugeSettings",
+                .product(name: "Sparkle", package: "Sparkle")
             ],
             resources: [
                 .process("Resources")
@@ -72,6 +78,7 @@ let package = Package(
             path: "App/CodexGauge",
             exclude: [
                 "Assets.xcassets",
+                "CodexGauge.entitlements",
                 "Info.plist"
             ]
         ),

@@ -15,10 +15,12 @@ public final class CodexGaugeApplicationCoordinator {
     public private(set) var launchAtLoginState = LaunchAtLoginSettingsState(
         status: .disabled
     )
+    public private(set) var applicationUpdateState: ApplicationUpdateState
 
     private let statusRuntime: any ApplicationStatusRuntime
     private let menuRuntime: any ApplicationMenuRuntime
     private let settingsRuntime: any ApplicationSettingsRuntime
+    private let applicationUpdateRuntime: any ApplicationUpdateRuntime
     private let systemActivityMonitor: any ApplicationSystemActivityMonitoring
     private let assistiveDisplayMonitor: any ApplicationAssistiveDisplayMonitoring
     private let deadlineSchedulerBuilder: ApplicationUsageDeadlineSchedulerBuilder
@@ -36,6 +38,7 @@ public final class CodexGaugeApplicationCoordinator {
     private let connectionStatusResolver = ConnectionStatusResolver()
 
     private var menuModelBuilder: QuotaDetailsMenuModelBuilder
+    private var currentMenuInput: QuotaDetailsMenuInput?
     private var preferences: AppPreferences
     private var pendingFormValues: SettingsFormValues?
     private var pendingSelectedExecutableURL: URL?
@@ -60,6 +63,8 @@ public final class CodexGaugeApplicationCoordinator {
         statusRuntime: any ApplicationStatusRuntime,
         menuRuntime: any ApplicationMenuRuntime,
         settingsRuntime: any ApplicationSettingsRuntime,
+        applicationUpdateRuntime: any ApplicationUpdateRuntime =
+            DisabledApplicationUpdateRuntime(),
         systemActivityMonitor: any ApplicationSystemActivityMonitoring,
         assistiveDisplayMonitor: any ApplicationAssistiveDisplayMonitoring,
         deadlineSchedulerBuilder: ApplicationUsageDeadlineSchedulerBuilder,
@@ -78,6 +83,8 @@ public final class CodexGaugeApplicationCoordinator {
         self.statusRuntime = statusRuntime
         self.menuRuntime = menuRuntime
         self.settingsRuntime = settingsRuntime
+        self.applicationUpdateRuntime = applicationUpdateRuntime
+        applicationUpdateState = applicationUpdateRuntime.state
         self.systemActivityMonitor = systemActivityMonitor
         self.assistiveDisplayMonitor = assistiveDisplayMonitor
         self.deadlineSchedulerBuilder = deadlineSchedulerBuilder
@@ -120,6 +127,7 @@ public final class CodexGaugeApplicationCoordinator {
         isStarted = true
         presentCurrentPublication(publishDeadlines: false)
         publishLaunchAtLoginState()
+        startApplicationUpdateRuntime()
         installDeadlineScheduler()
         startMonitors()
         enqueueOperation { coordinator in
@@ -137,6 +145,8 @@ public final class CodexGaugeApplicationCoordinator {
             workspace.openCodexApplication()
         case .selectCodex:
             settingsRuntime.requestExecutableSelection()
+        case .checkForUpdates:
+            applicationUpdateRuntime.checkForUpdates()
         case .settings:
             enqueueOperation { coordinator in
                 _ = await coordinator.settingsRuntime.showSettings()
@@ -208,6 +218,7 @@ public final class CodexGaugeApplicationCoordinator {
             return
         }
         isShuttingDown = true
+        applicationUpdateRuntime.stop()
         refreshGeneration &+= 1
         systemActivityMonitor.stop()
         assistiveDisplayMonitor.stop()
@@ -235,6 +246,22 @@ public final class CodexGaugeApplicationCoordinator {
         deadlineScheduler = deadlineSchedulerBuilder.make { [weak self] reason in
             self?.usageDeadlineReached(reason)
         }
+    }
+
+    private func startApplicationUpdateRuntime() {
+        applicationUpdateRuntime.start { [weak self] state in
+            self?.receiveApplicationUpdateState(state)
+        }
+    }
+
+    private func receiveApplicationUpdateState(
+        _ state: ApplicationUpdateState
+    ) {
+        guard !isShuttingDown, state != applicationUpdateState else {
+            return
+        }
+        applicationUpdateState = state
+        updateCachedMenu()
     }
 
     private func startMonitors() {
@@ -361,7 +388,8 @@ public final class CodexGaugeApplicationCoordinator {
             now: now()
         )
         statusRuntime.present(frames: presentation.frames)
-        menuRuntime.update(menuModelBuilder.build(presentation.menuInput))
+        currentMenuInput = presentation.menuInput
+        updateCachedMenu()
         discoveredQuotaIDs = presentation.discoveredQuotaIDs
         settingsRuntime.updateDiscoveredQuotaIDs(discoveredQuotaIDs)
         settingsRuntime.updateConnectionStatus(connectionStatus)
@@ -370,6 +398,18 @@ public final class CodexGaugeApplicationCoordinator {
         }
         deadlineScheduler?.publish(
             productStates: presentation.menuInput.productStates
+        )
+    }
+
+    private func updateCachedMenu() {
+        guard let currentMenuInput else {
+            return
+        }
+        menuRuntime.update(
+            menuModelBuilder.build(
+                currentMenuInput,
+                applicationUpdateState: applicationUpdateState
+            )
         )
     }
 

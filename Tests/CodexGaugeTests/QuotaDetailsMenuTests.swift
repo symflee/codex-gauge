@@ -13,6 +13,7 @@ func quotaDetailsMenuTests() -> [TestCase] {
         quotaMenuExplainsIncompleteSpendControlTest(),
         quotaMenuKeepsIndependentFailureStatesTest(),
         quotaMenuSelectsConnectionActionTest(),
+        quotaMenuReflectsApplicationUpdateAvailabilityTest(),
         quotaMenuAdapterUsesCachedModelTest(),
         quotaMenuDispatchesInjectedActionsTest()
     ]
@@ -39,7 +40,11 @@ private func quotaMenuExplicitLanguageFactoryTest() -> TestCase {
         )
         try expect(
             korean.actionGroups.flatMap { $0 }.map(\.title)
-                == ["새로 고침", "Codex 선택…", "설정…", "Codex Gauge 종료"],
+                == [
+                    "새로 고침", "Codex 선택…",
+                    "현재 버전: v? (최신 확인 불가)", "설정…",
+                    "Codex Gauge 종료"
+                ],
             "Expected Korean menu actions"
         )
         try expect(
@@ -48,7 +53,11 @@ private func quotaMenuExplicitLanguageFactoryTest() -> TestCase {
         )
         try expect(
             english.actionGroups.flatMap { $0 }.map(\.title)
-                == ["Refresh", "Select Codex…", "Settings…", "Quit Codex Gauge"],
+                == [
+                    "Refresh", "Select Codex…",
+                    "Current version: v? (latest unavailable)", "Settings…",
+                    "Quit Codex Gauge"
+                ],
             "Expected English menu actions"
         )
     }
@@ -184,8 +193,78 @@ private func quotaMenuExpiresValuesWithToolbarValidityPolicyTest() -> TestCase {
         )
         try expect(
             staleModel.actionGroups.flatMap { $0 }.map(\.action)
-                == [.refresh, .selectCodex, .settings, .quit],
+                == [.refresh, .selectCodex, .checkForUpdates, .settings, .quit],
             "Expected refresh and recovery actions to remain available"
+        )
+    }
+}
+
+private func quotaMenuReflectsApplicationUpdateAvailabilityTest() -> TestCase {
+    TestCase(name: "quota menu shows current and latest versions after the launch probe") {
+        let input = QuotaDetailsMenuInput(
+            productStates: [.codex: .loading],
+            codexAvailability: .available,
+            currentDate: Date(timeIntervalSince1970: 1_900_000_000)
+        )
+        let korean = QuotaDetailsMenuModelBuilder.bundled(language: .korean)
+        let english = QuotaDetailsMenuModelBuilder.bundled(language: .english)
+        let checking = korean.build(
+            input,
+            applicationUpdateState: ApplicationUpdateState(
+                currentVersion: "1.2.0",
+                status: .checking
+            )
+        )
+        let current = korean.build(
+            input,
+            applicationUpdateState: ApplicationUpdateState(
+                currentVersion: "1.2.0",
+                status: .current(latestVersion: "1.2.0")
+            )
+        )
+        let availableState = ApplicationUpdateState(
+            currentVersion: "1.2.0",
+            status: .updateAvailable(latestVersion: "1.3.0")
+        )
+        let available = korean.build(
+            input,
+            applicationUpdateState: availableState
+        )
+        let availableEnglish = english.build(
+            input,
+            applicationUpdateState: availableState
+        )
+
+        try expect(
+            updateAction(in: checking)?.title
+                == "현재 버전: v1.2.0 (최신 확인 중…)",
+            "Expected launch-checking title"
+        )
+        try expect(
+            updateAction(in: current)?.title
+                == "현재 버전: v1.2.0 (최신 v1.2.0)",
+            "Expected current version title"
+        )
+        try expect(
+            updateAction(in: available)?.title
+                == "현재 버전: v1.2.0 (최신 v1.3.0)",
+            "Expected Korean available version title"
+        )
+        try expect(
+            updateAction(in: availableEnglish)?.title
+                == "Current version: v1.2.0 (latest v1.3.0)",
+            "Expected English available version title"
+        )
+        try expect(updateAction(in: checking)?.isEnabled == false, "Expected disabled probe")
+        try expect(updateAction(in: current)?.isEnabled == false, "Expected disabled current")
+        try expect(updateAction(in: available)?.isEnabled == true, "Expected enabled update")
+        try expect(
+            available.actionGroups.map { $0.map(\.action) } == [
+                [.refresh, .openCodex],
+                [.checkForUpdates, .settings],
+                [.quit]
+            ],
+            "Expected update and settings in their own action group"
         )
     }
 }
@@ -310,12 +389,16 @@ private func quotaMenuGroupsAllWindowsTest() -> TestCase {
         )
         try expect(
             model.actionGroups.flatMap { $0 }.map(\.action)
-                == [.refresh, .openCodex, .settings, .quit],
+                == [.refresh, .openCodex, .checkForUpdates, .settings, .quit],
             "Expected action order"
         )
         try expect(
             model.actionGroups.flatMap { $0 }.map(\.title)
-                == ["Refresh", "Open Codex", "Settings…", "Quit Codex Gauge"],
+                == [
+                    "Refresh", "Open Codex",
+                    "Current version: v? (latest unavailable)", "Settings…",
+                    "Quit Codex Gauge"
+                ],
             "Expected localized action titles"
         )
     }
@@ -386,7 +469,7 @@ private func quotaMenuSelectsConnectionActionTest() -> TestCase {
         try expect(model.productSections[1].statusRows == ["Codex not found"], "Expected absence")
         try expect(
             model.actionGroups.flatMap { $0 }.map(\.action)
-                == [.refresh, .selectCodex, .settings, .quit],
+                == [.refresh, .selectCodex, .checkForUpdates, .settings, .quit],
             "Expected select action"
         )
     }
@@ -441,6 +524,13 @@ private func quotaMenuAdapterUsesCachedModelTest() -> TestCase {
                 titlesBeforeOpening.contains("Spend limit · 64% remaining"),
                 "Expected the cached AppKit menu to contain the separate spend row"
             )
+            guard let updateItem = menu.items.first(where: { item in
+                item.representedObject as? String
+                    == QuotaMenuAction.checkForUpdates.rawValue
+            }) else {
+                throw TestFailure(description: "Expected update action item")
+            }
+            try expect(!updateItem.isEnabled, "Expected unavailable updater action disabled")
 
             menuController.menuWillOpen(menu)
             try expect(scheduler.cancelCount == 1, "Expected menu-open pause")
@@ -472,7 +562,9 @@ private func quotaMenuDispatchesInjectedActionsTest() -> TestCase {
             QuotaMenuAction.allCases.forEach(actions.perform)
 
             try expect(
-                recorder.values == ["refresh", "open", "select", "settings", "quit"],
+                recorder.values == [
+                    "refresh", "open", "select", "update", "settings", "quit"
+                ],
                 "Expected action closure dispatch"
             )
         }
@@ -515,12 +607,22 @@ private func menuLocalization() -> QuotaMenuLocalization {
         "menu.action.refresh": "Refresh",
         "menu.action.open_codex": "Open Codex",
         "menu.action.select_codex": "Select Codex…",
+        "menu.update.checking": "Current version: v{current} (checking latest…)",
+        "menu.update.versions": "Current version: v{current} (latest v{latest})",
+        "menu.update.failed": "Current version: v{current} (latest check failed)",
+        "menu.update.unavailable": "Current version: v{current} (latest unavailable)",
         "menu.action.settings": "Settings…",
         "menu.quit": "Quit Codex Gauge"
     ]
     return QuotaMenuLocalization { key in
         values[key] ?? key
     }
+}
+
+private func updateAction(
+    in model: QuotaDetailsMenuModel
+) -> QuotaMenuActionItem? {
+    model.actionGroups.flatMap { $0 }.first { $0.action == .checkForUpdates }
 }
 
 private func menuQuota(
@@ -567,6 +669,7 @@ private func menuActions(recorder: MenuCallRecorder) -> StatusMenuActions {
         refresh: { recorder.record("refresh") },
         openCodex: { recorder.record("open") },
         selectCodex: { recorder.record("select") },
+        checkForUpdates: { recorder.record("update") },
         settings: { recorder.record("settings") },
         quit: { recorder.record("quit") }
     )

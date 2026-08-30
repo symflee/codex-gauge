@@ -502,7 +502,7 @@ private struct SyntheticAppServerPathStore {
             at: directory,
             withIntermediateDirectories: false
         )
-        try FileManager.default.copyItem(at: syntheticExecutableURL, to: interpreter)
+        try Self.copyInterpreter(to: interpreter, in: directory)
         try Self.makeExecutable(interpreter)
         try Self.writeWrapper(to: wrapper)
         directoryURL = directory
@@ -511,6 +511,14 @@ private struct SyntheticAppServerPathStore {
 
     func cleanUp() {
         try? FileManager.default.removeItem(at: directoryURL)
+    }
+
+    private static func copyInterpreter(to url: URL, in directory: URL) throws {
+        let executableDirectory = syntheticExecutableURL.deletingLastPathComponent()
+        let framework = executableDirectory.appendingPathComponent("Sparkle.framework")
+        let frameworkDestination = directory.appendingPathComponent("Sparkle.framework")
+        try FileManager.default.copyItem(at: syntheticExecutableURL, to: url)
+        try FileManager.default.copyItem(at: framework, to: frameworkDestination)
     }
 
     private static func writeWrapper(to url: URL) throws {

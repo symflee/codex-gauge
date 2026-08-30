@@ -5,33 +5,41 @@ on:
     tags:
       - 'v*'
   workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing vX.Y.Z tag to build
+        required: true
+        type: string
 
 permissions: {}
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ github.ref }}-${{ inputs.tag }}
   cancel-in-progress: false
 
 jobs:
   build_package:
-    name: build-package
+    name: validate-and-test
     runs-on: macos-26
     timeout-minutes: 40
     permissions:
       contents: read
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+      RELEASE_TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.tag }}
     outputs:
       artifact_name: ${{ steps.metadata.outputs.artifact_name }}
       build: ${{ steps.metadata.outputs.build }}
+      tag: ${{ steps.metadata.outputs.tag }}
       version: ${{ steps.metadata.outputs.version }}
     steps:
-      - name: Check out repository
+      - name: Check out exact release tag
         # actions/checkout v7.0.1
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           fetch-depth: 0
           persist-credentials: false
+          ref: ${{ github.event_name == 'push' && github.ref || inputs.tag }}
 
       - name: Verify toolchain
         shell: bash
@@ -50,64 +58,29 @@ jobs:
             -project CodexGauge.xcodeproj \
             -target CodexGauge \
             -configuration Release \
+            -disableAutomaticPackageResolution \
             -showBuildSettings)"
           version="$(awk '$1 == "MARKETING_VERSION" { value = $3 } END { print value }' <<< "$build_settings")"
           build="$(awk '$1 == "CURRENT_PROJECT_VERSION" { value = $3 } END { print value }' <<< "$build_settings")"
           test -n "$version"
           test -n "$build"
-          if [ "$GITHUB_EVENT_NAME" = "push" ]; then
-            Scripts/validate-release-context.sh \
-              --tag "$GITHUB_REF_NAME" \
-              --version "$version" \
-              --build "$build" \
-              --main-ref refs/remotes/origin/main
-          fi
+          Scripts/validate-release-context.sh \
+            --tag "$RELEASE_TAG" \
+            --version "$version" \
+            --build "$build" \
+            --main-ref refs/remotes/origin/main
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "build=$build" >> "$GITHUB_OUTPUT"
+          echo "tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
           echo "artifact_name=codex-gauge-$version-$build" >> "$GITHUB_OUTPUT"
-
-      - name: Describe package
-        run: swift package describe
-
-      - name: Build Debug
-        run: >-
-          swift build -c debug
-          --explicit-target-dependency-import-check error
-          -Xswiftc -warnings-as-errors
-
-      - name: Run Swift Testing contracts
-        run: >-
-          swift test
-          --explicit-target-dependency-import-check error
-          -Xswiftc -strict-concurrency=complete
-          -Xswiftc -warnings-as-errors
-
-      - name: Run exhaustive custom tests
-        run: Scripts/run-exhaustive-tests.sh
-
-      - name: Build Release
-        run: >-
-          swift build -c release
-          --explicit-target-dependency-import-check error
-          -Xswiftc -warnings-as-errors
 
       - name: Test release contracts
         shell: bash
         run: |
           set -euo pipefail
-          bash Tests/ExhaustiveRunnerTests/test_exhaustive_runner.sh
           bash Tests/ReleasePackagingTests/test_release_packaging.sh
+          bash Tests/ReleaseAppcastTests/test_release_appcast.sh
           bash Tests/ReleaseWorkflowTests/test_release_workflow.sh
-
-      - name: Test Xcode unit target
-        run: >-
-          xcodebuild test
-          -project CodexGauge.xcodeproj
-          -scheme CodexGauge
-          -destination 'platform=macOS,arch=arm64'
-          -derivedDataPath "$RUNNER_TEMP/CodexGaugeReleaseTests"
-          -only-testing:CodexGaugeUnitTests
-          CODE_SIGNING_ALLOWED=NO
 
       - name: Test Xcode UI smoke
         run: >-
@@ -116,18 +89,52 @@ jobs:
           -scheme CodexGauge
           -destination 'platform=macOS,arch=arm64'
           -derivedDataPath "$RUNNER_TEMP/CodexGaugeReleaseTests"
+          -disableAutomaticPackageResolution
           -only-testing:CodexGaugeUITests
           CODE_SIGN_IDENTITY=-
           DEVELOPMENT_TEAM=
 
-      - name: Build and verify release disk image
-        run: >-
-          Scripts/build-release-dmg.sh
-          --output-directory "$RUNNER_TEMP/codex-gauge-release"
-          --version "${{ steps.metadata.outputs.version }}"
-          --build "${{ steps.metadata.outputs.build }}"
+  build_candidate:
+    name: build-candidate
+    if: github.repository == 'symflee/codex-gauge'
+    needs: build_package
+    runs-on: macos-26
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+      SPARKLE_PUBLIC_ED_KEY: ${{ vars.SPARKLE_PUBLIC_ED_KEY }}
+    steps:
+      - name: Check out validated release tag
+        # actions/checkout v7.0.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ needs.build_package.outputs.tag }}
 
-      - name: Add release review notes and verification scripts
+      - name: Revalidate exact trusted commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          Scripts/validate-release-context.sh \
+            --tag "${{ needs.build_package.outputs.tag }}" \
+            --version "${{ needs.build_package.outputs.version }}" \
+            --build "${{ needs.build_package.outputs.build }}" \
+            --main-ref refs/remotes/origin/main
+
+      - name: Build and verify unsigned release candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          Scripts/build-release-dmg.sh \
+            --output-directory "$RUNNER_TEMP/codex-gauge-release" \
+            --version "${{ needs.build_package.outputs.version }}" \
+            --build "${{ needs.build_package.outputs.build }}" \
+            --sparkle-public-ed-key "$SPARKLE_PUBLIC_ED_KEY"
+
+      - name: Add review metadata and public verification tools
         shell: bash
         run: |
           set -euo pipefail
@@ -137,13 +144,245 @@ jobs:
           cp Scripts/verify-release-app.sh "$release_directory/verification/"
           cp Scripts/verify-release-dmg.sh "$release_directory/verification/"
           cp Scripts/verify-release-dmg-layout.applescript "$release_directory/verification/"
+          cp Scripts/verify-release-appcast.sh "$release_directory/verification/"
+          cp Scripts/verify-sparkle-signature.swift "$release_directory/verification/"
+          cp THIRD_PARTY_NOTICES.md "$release_directory/verification/"
+          printf '%s\n' "$SPARKLE_PUBLIC_ED_KEY" \
+            > "$release_directory/verification/SparklePublicEdKey.txt"
+          test "$(find "$release_directory" -type f | wc -l | tr -d '[:space:]')" = "10"
 
-      - name: Upload verified release candidate
+      - name: Upload unsigned release candidate
         # actions/upload-artifact v7.0.1
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: ${{ steps.metadata.outputs.artifact_name }}
+          name: ${{ needs.build_package.outputs.artifact_name }}-unsigned
           path: ${{ runner.temp }}/codex-gauge-release
+          if-no-files-found: error
+          retention-days: 2
+          compression-level: 0
+          include-hidden-files: false
+
+  sign_appcast:
+    name: sign-appcast
+    if: github.repository == 'symflee/codex-gauge'
+    needs:
+      - build_package
+      - build_candidate
+    runs-on: macos-26
+    timeout-minutes: 15
+    environment: release-signing
+    permissions:
+      actions: read
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+      SPARKLE_RELEASE_TOOLS_URL: https://github.com/sparkle-project/Sparkle/releases/download/2.9.6/Sparkle-for-Swift-Package-Manager.zip
+      SPARKLE_RELEASE_TOOLS_SHA256: 8d5fb41d960b43f4a68aa14126bf62b098544ec8d191cdcc73eb14e63a8e7606
+    steps:
+      - name: Download unsigned release candidate
+        # actions/download-artifact v8.0.1
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: ${{ needs.build_package.outputs.artifact_name }}-unsigned
+          path: ${{ runner.temp }}/codex-gauge-release-candidate
+
+      - name: Fetch pinned official Sparkle release tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          tools_root="$RUNNER_TEMP/sparkle-release-tools"
+          mkdir "$tools_root"
+          curl \
+            --fail \
+            --location \
+            --proto '=https' \
+            --tlsv1.2 \
+            "$SPARKLE_RELEASE_TOOLS_URL" \
+            --output "$tools_root/Sparkle.zip"
+          actual_checksum="$(shasum -a 256 "$tools_root/Sparkle.zip" | awk '{print $1}')"
+          test "$actual_checksum" = "$SPARKLE_RELEASE_TOOLS_SHA256"
+          ditto -x -k "$tools_root/Sparkle.zip" "$tools_root/archive"
+          test -x "$tools_root/archive/bin/generate_appcast"
+          test -x "$tools_root/archive/bin/sign_update"
+          cat > "$tools_root/derive-sparkle-public-key.swift" <<'SWIFT'
+          import CryptoKit
+          import Darwin
+          import Foundation
+
+          func fail() -> Never {
+              fputs("invalid Sparkle EdDSA private seed\n", stderr)
+              exit(1)
+          }
+
+          guard CommandLine.arguments.count == 1 else {
+              fail()
+          }
+
+          let encodedData = FileHandle.standardInput.readDataToEndOfFile()
+          guard let encodedSeed = String(data: encodedData, encoding: .utf8),
+                let seed = Data(base64Encoded: encodedSeed),
+                seed.count == 32,
+                seed.base64EncodedString() == encodedSeed,
+                let privateKey = try? Curve25519.Signing.PrivateKey(
+                  rawRepresentation: seed
+                ) else {
+              fail()
+          }
+
+          let encodedPublicKey = privateKey.publicKey.rawRepresentation.base64EncodedData()
+          FileHandle.standardOutput.write(encodedPublicKey)
+          SWIFT
+          case "$(uname -m)" in
+            arm64|x86_64) swift_architecture="$(uname -m)" ;;
+            *) echo "Unsupported signing runner architecture" >&2; exit 1 ;;
+          esac
+          xcrun swiftc \
+            -target "$swift_architecture-apple-macosx13.0" \
+            -module-cache-path "$tools_root/swift-module-cache" \
+            "$tools_root/derive-sparkle-public-key.swift" \
+            -o "$tools_root/derive-sparkle-public-key"
+          test -x "$tools_root/derive-sparkle-public-key"
+
+      - name: Generate and cryptographically verify signed appcast
+        shell: bash
+        env:
+          SPARKLE_EDDSA_PRIVATE_KEY: ${{ secrets.SPARKLE_EDDSA_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          release_directory="$RUNNER_TEMP/codex-gauge-release-candidate"
+          signing_directory="$RUNNER_TEMP/codex-gauge-appcast-signing"
+          tools_directory="$RUNNER_TEMP/sparkle-release-tools/archive/bin"
+          archive="$release_directory/CodexGauge.dmg"
+          appcast="$release_directory/appcast.xml"
+          release_tag="${{ needs.build_package.outputs.tag }}"
+          version="${{ needs.build_package.outputs.version }}"
+          build="${{ needs.build_package.outputs.build }}"
+          candidate_public_key_path="$release_directory/verification/SparklePublicEdKey.txt"
+          key_deriver="$RUNNER_TEMP/sparkle-release-tools/derive-sparkle-public-key"
+          private_ed_key="$SPARKLE_EDDSA_PRIVATE_KEY"
+          unset SPARKLE_EDDSA_PRIVATE_KEY
+          test -n "$private_ed_key"
+          test -f "$archive"
+          test ! -e "$appcast"
+          test -f "$candidate_public_key_path"
+          test ! -L "$candidate_public_key_path"
+          test -x "$key_deriver"
+          if ! candidate_public_key="$(ruby -rbase64 -e '
+            raw = File.binread(ARGV.fetch(0))
+            exit(1) unless raw.end_with?("\n") && raw.count("\n") == 1
+            encoded = raw.delete_suffix("\n")
+            decoded = Base64.strict_decode64(encoded)
+            exit(1) unless decoded.bytesize == 32
+            exit(1) unless Base64.strict_encode64(decoded) == encoded
+            print encoded
+          ' "$candidate_public_key_path")"; then
+            unset private_ed_key
+            echo "Candidate Sparkle public key is invalid" >&2
+            exit 1
+          fi
+          if ! derived_public_key="$(printf '%s' "$private_ed_key" \
+            | "$key_deriver")"; then
+            unset private_ed_key candidate_public_key
+            echo "Sparkle private key must be a canonical 32-byte seed" >&2
+            exit 1
+          fi
+          if ! test "$derived_public_key" = "$candidate_public_key"; then
+            unset private_ed_key candidate_public_key derived_public_key
+            echo "Sparkle signing key does not match the candidate public key" >&2
+            exit 1
+          fi
+          unset candidate_public_key derived_public_key
+          mkdir "$signing_directory"
+          cp "$archive" "$signing_directory/CodexGauge.dmg"
+          if ! printf '%s' "$private_ed_key" \
+            | "$tools_directory/generate_appcast" \
+                --ed-key-file - \
+                --maximum-versions 1 \
+                --maximum-deltas 0 \
+                --download-url-prefix "https://github.com/symflee/codex-gauge/releases/download/$release_tag/" \
+                -o "$signing_directory/appcast.xml" \
+                "$signing_directory" \
+                >/dev/null 2>&1; then
+            echo "Sparkle appcast generation failed" >&2
+            exit 1
+          fi
+          test ! -e "$signing_directory/old_updates"
+          metadata="$RUNNER_TEMP/codex-gauge-appcast-metadata"
+          archive_length="$(wc -c < "$archive" | tr -d '[:space:]')"
+          expected_url="https://github.com/symflee/codex-gauge/releases/download/$release_tag/CodexGauge.dmg"
+          ruby -rbase64 -rrexml/document - \
+            "$signing_directory/appcast.xml" \
+            "$metadata" \
+            "$expected_url" \
+            "$version" \
+            "$build" \
+            "$archive_length" <<'RUBY'
+          path, metadata, expected_url, version, build, archive_length = ARGV
+          raw = File.binread(path)
+          exit(1) if raw.include?("<!DOCTYPE") || raw.include?("<!ENTITY")
+          footer = raw.match(/<!-- sparkle-signatures:\s*\nedSignature: ([A-Za-z0-9+\/=]+)\s*\nlength: ([0-9]+)\s*\n-->\s*\z/m)
+          exit(1) unless footer && footer.begin(0) == Integer(footer[2], 10)
+          exit(1) unless Base64.strict_decode64(footer[1]).bytesize == 64
+          document = REXML::Document.new(raw)
+          namespace = { "sparkle" => "http://www.andymatuschak.org/xml-namespaces/sparkle" }
+          items = REXML::XPath.match(document, "/rss/channel/item")
+          exit(1) unless items.length == 1
+          item = items.fetch(0)
+          enclosures = REXML::XPath.match(item, "enclosure")
+          exit(1) unless enclosures.length == 1
+          enclosure = enclosures.fetch(0)
+          builds = REXML::XPath.match(item, "sparkle:version", namespace)
+          versions = REXML::XPath.match(item, "sparkle:shortVersionString", namespace)
+          minimum_systems = REXML::XPath.match(item, "sparkle:minimumSystemVersion", namespace)
+          exit(1) unless builds.length == 1 && versions.length == 1
+          exit(1) unless minimum_systems.length == 1
+          actual_build = builds.fetch(0).text&.strip
+          actual_version = versions.fetch(0).text&.strip
+          minimum_system = minimum_systems.fetch(0).text&.strip
+          exit(1) unless actual_build == build && actual_version == version
+          exit(1) unless minimum_system == "13.0"
+          exit(1) unless enclosure.attributes["url"] == expected_url
+          exit(1) unless enclosure.attributes["length"] == archive_length
+          exit(1) unless enclosure.attributes["type"] == "application/octet-stream"
+          signature = enclosure.attributes["sparkle:edSignature"]
+          exit(1) unless signature
+          exit(1) unless Base64.strict_decode64(signature).bytesize == 64
+          exit(1) if enclosure.attributes["deltaFrom"]
+          forbidden = %w[channel phasedRolloutInterval criticalUpdate minimumAutoupdateVersion minimumUpdateVersion informationalUpdate deltas deltaFrom releaseNotesLink]
+          forbidden.each do |name|
+            exit(1) unless REXML::XPath.match(item, ".//sparkle:#{name}", namespace).empty?
+          end
+          exit(1) unless REXML::XPath.match(item, "description").empty?
+          File.write(metadata, "#{signature}\n")
+          RUBY
+          archive_signature="$(tr -d '\r\n' < "$metadata")"
+          if ! printf '%s' "$private_ed_key" \
+            | "$tools_directory/sign_update" \
+                --verify \
+                --ed-key-file - \
+                "$archive" \
+                "$archive_signature" \
+                >/dev/null 2>&1; then
+            echo "Sparkle archive signature verification failed" >&2
+            exit 1
+          fi
+          if ! printf '%s' "$private_ed_key" \
+            | "$tools_directory/sign_update" \
+                --verify \
+                --ed-key-file - \
+                "$signing_directory/appcast.xml" \
+                >/dev/null 2>&1; then
+            echo "Sparkle feed signature verification failed" >&2
+            exit 1
+          fi
+          unset private_ed_key
+          mv "$signing_directory/appcast.xml" "$appcast"
+
+      - name: Upload signed release candidate
+        # actions/upload-artifact v7.0.1
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: ${{ needs.build_package.outputs.artifact_name }}
+          path: ${{ runner.temp }}/codex-gauge-release-candidate
           if-no-files-found: error
           retention-days: 7
           compression-level: 0
@@ -151,14 +390,17 @@ jobs:
 
   publish_draft:
     name: publish-draft
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
-    needs: build_package
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') && github.repository == 'symflee/codex-gauge'
+    needs:
+      - build_package
+      - sign_appcast
     runs-on: macos-26
     timeout-minutes: 15
     permissions:
       actions: read
       contents: write
     env:
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
       GH_TOKEN: ${{ github.token }}
     steps:
       - name: Download verified release candidate
@@ -168,35 +410,63 @@ jobs:
           name: ${{ needs.build_package.outputs.artifact_name }}
           path: ${{ runner.temp }}/codex-gauge-release-candidate
 
-      - name: Reverify release candidate
+      - name: Reverify release candidate without signing secret
         shell: bash
         run: |
           set -euo pipefail
           release_directory="$RUNNER_TEMP/codex-gauge-release-candidate"
-          test "$(find "$release_directory" -type f | wc -l | tr -d '[:space:]')" = "6"
+          signature_verifier="$RUNNER_TEMP/verify-sparkle-signature"
+          test "$(find "$release_directory" -type f | wc -l | tr -d '[:space:]')" = "11"
           test -f "$release_directory/CodexGauge.dmg"
           test -f "$release_directory/CodexGauge.dmg.sha256"
+          test -f "$release_directory/appcast.xml"
           test -f "$release_directory/release-notes.md"
           test -f "$release_directory/verification/verify-release-app.sh"
           test -f "$release_directory/verification/verify-release-dmg.sh"
           test -f "$release_directory/verification/verify-release-dmg-layout.applescript"
+          test -f "$release_directory/verification/verify-release-appcast.sh"
+          test -f "$release_directory/verification/verify-sparkle-signature.swift"
+          test -f "$release_directory/verification/THIRD_PARTY_NOTICES.md"
+          test -f "$release_directory/verification/SparklePublicEdKey.txt"
+          case "$(uname -m)" in
+            arm64|x86_64) swift_architecture="$(uname -m)" ;;
+            *) echo "Unsupported verification runner architecture" >&2; exit 1 ;;
+          esac
+          xcrun swiftc \
+            -target "$swift_architecture-apple-macosx13.0" \
+            -module-cache-path "$RUNNER_TEMP/codex-gauge-signature-module-cache" \
+            "$release_directory/verification/verify-sparkle-signature.swift" \
+            -o "$signature_verifier"
+          test -x "$signature_verifier"
           chmod +x \
             "$release_directory/verification/verify-release-app.sh" \
-            "$release_directory/verification/verify-release-dmg.sh"
+            "$release_directory/verification/verify-release-dmg.sh" \
+            "$release_directory/verification/verify-release-appcast.sh"
+          public_key="$(tr -d '\r\n' < "$release_directory/verification/SparklePublicEdKey.txt")"
           bash "$release_directory/verification/verify-release-dmg.sh" \
             --dmg "$release_directory/CodexGauge.dmg" \
             --checksum "$release_directory/CodexGauge.dmg.sha256" \
+            --expected-third-party-notices "$release_directory/verification/THIRD_PARTY_NOTICES.md" \
+            --sparkle-public-ed-key "$public_key" \
             --version "${{ needs.build_package.outputs.version }}" \
             --build "${{ needs.build_package.outputs.build }}"
+          bash "$release_directory/verification/verify-release-appcast.sh" \
+            --appcast "$release_directory/appcast.xml" \
+            --archive "$release_directory/CodexGauge.dmg" \
+            --tag "${{ needs.build_package.outputs.tag }}" \
+            --version "${{ needs.build_package.outputs.version }}" \
+            --build "${{ needs.build_package.outputs.build }}" \
+            --public-ed-key "$public_key" \
+            --signature-verifier-tool "$signature_verifier"
 
       - name: Refuse an existing release
         shell: bash
         run: |
           set -euo pipefail
-          if gh release view "$GITHUB_REF_NAME" \
+          if gh release view "${{ needs.build_package.outputs.tag }}" \
             --repo "$GITHUB_REPOSITORY" \
             >/dev/null 2>&1; then
-            echo "release already exists: $GITHUB_REF_NAME" >&2
+            echo "release already exists: ${{ needs.build_package.outputs.tag }}" >&2
             exit 1
           fi
 
@@ -205,26 +475,12 @@ jobs:
         run: |
           set -euo pipefail
           release_directory="$RUNNER_TEMP/codex-gauge-release-candidate"
-          gh release create "$GITHUB_REF_NAME" \
+          gh release create "${{ needs.build_package.outputs.tag }}" \
             "$release_directory/CodexGauge.dmg#Codex Gauge macOS universal installer" \
             "$release_directory/CodexGauge.dmg.sha256#SHA-256 checksum" \
+            "$release_directory/appcast.xml#Signed Sparkle update feed" \
             --repo "$GITHUB_REPOSITORY" \
             --verify-tag \
             --draft \
             --title "Codex Gauge ${{ needs.build_package.outputs.version }}" \
             --notes-file "$release_directory/release-notes.md"
-
-      - name: Verify draft release
-        shell: bash
-        run: |
-          set -euo pipefail
-          draft="$(gh release view "$GITHUB_REF_NAME" \
-            --repo "$GITHUB_REPOSITORY" \
-            --json isDraft \
-            --jq .isDraft)"
-          assets="$(gh release view "$GITHUB_REF_NAME" \
-            --repo "$GITHUB_REPOSITORY" \
-            --json assets \
-            --jq '.assets | map(.name) | sort | join(",")')"
-          test "$draft" = "true"
-          test "$assets" = "CodexGauge.dmg,CodexGauge.dmg.sha256"

@@ -35,6 +35,10 @@
 "menu.action.refresh" = "Refresh";
 "menu.action.open_codex" = "Open Codex";
 "menu.action.select_codex" = "Select Codex…";
+"menu.update.checking" = "Current version: v{current} (checking latest…)";
+"menu.update.versions" = "Current version: v{current} (latest v{latest})";
+"menu.update.failed" = "Current version: v{current} (latest check failed)";
+"menu.update.unavailable" = "Current version: v{current} (latest unavailable)";
 "menu.action.settings" = "Settings…";
 "menu.quit" = "Quit Codex Gauge";
 "settings.window.title" = "Codex Gauge Settings";

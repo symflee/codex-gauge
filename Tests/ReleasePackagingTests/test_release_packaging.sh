@@ -5,6 +5,7 @@ set -euo pipefail
 test_directory="$(cd "$(dirname "$0")" && pwd)"
 repository_root="$(cd "$test_directory/../.." && pwd)"
 test_root="$(mktemp -d "${TMPDIR:-/tmp}/codex-gauge-release-tests.XXXXXX")"
+fixture_volume_sequence=0
 
 cleanup() {
     local leaf_name
@@ -65,10 +66,12 @@ create_stage_artifact() {
     local layout_mount_root=""
     local layout_mount_path=""
     local writable_artifact=""
-    local fixture_volume_name="Codex Gauge Test $$"
+    local fixture_volume_name=""
 
+    fixture_volume_sequence=$((fixture_volume_sequence + 1))
+    fixture_volume_name="Codex Gauge Test $$ $fixture_volume_sequence"
     layout_mount_root="$(mktemp -d "${TMPDIR:-/tmp}/codex-gauge-fixture-mount.XXXXXX")"
-    layout_mount_path="$layout_mount_root/volume"
+    layout_mount_path="$layout_mount_root/$fixture_volume_name"
     writable_artifact="$layout_mount_root/writable.dmg"
     hdiutil create \
         -srcfolder "$stage_path" \
@@ -177,20 +180,96 @@ create_fixture_application() {
     plutil -insert CFBundleVersion -string 1 "$plist_path"
     plutil -insert LSMinimumSystemVersion -string 13.0 "$plist_path"
     plutil -insert LSUIElement -bool true "$plist_path"
+    plutil -insert SUFeedURL \
+        -string 'https://github.com/symflee/codex-gauge/releases/latest/download/appcast.xml' \
+        "$plist_path"
+    plutil -insert SUPublicEDKey -string "$fixture_public_key" "$plist_path"
+    plutil -insert SUEnableAutomaticChecks -bool false "$plist_path"
+    plutil -insert SUAutomaticallyUpdate -bool false "$plist_path"
+    plutil -insert SUAllowsAutomaticUpdates -bool false "$plist_path"
+    plutil -insert SUEnableSystemProfiling -bool false "$plist_path"
+    plutil -insert SUShowReleaseNotes -bool false "$plist_path"
+    plutil -insert SUVerifyUpdateBeforeExtraction -bool true "$plist_path"
+    plutil -insert SURequireSignedFeed -bool true "$plist_path"
+    plutil -insert SUSignedFeedFailureExpirationInterval -integer 0 "$plist_path"
     mkdir -p "$contents_path/Resources/en.lproj"
     mkdir -p "$contents_path/Resources/ko.lproj"
     printf '%s\n' '"fixture" = "Fixture";' > "$contents_path/Resources/en.lproj/Localizable.strings"
     printf '%s\n' '"fixture" = "픽스처";' > "$contents_path/Resources/ko.lproj/Localizable.strings"
-    codesign --force --sign - --options runtime "$application_path"
+    cp "$fixture_notices" "$contents_path/Resources/THIRD_PARTY_NOTICES.md"
+    create_fixture_sparkle_framework "$application_path" "$executable_path"
+    codesign \
+        --force \
+        --sign - \
+        --options runtime \
+        --entitlements "$application_entitlements" \
+        "$application_path"
+}
+
+create_fixture_sparkle_framework() {
+    local application_path="$1"
+    local source_executable="$2"
+    local framework_path="$application_path/Contents/Frameworks/Sparkle.framework"
+    local version_path="$framework_path/Versions/B"
+    local updater_path="$version_path/Updater.app"
+
+    mkdir -p "$version_path/Resources"
+    mkdir -p "$updater_path/Contents/MacOS"
+    cp "$source_executable" "$version_path/Sparkle"
+    cp "$source_executable" "$version_path/Autoupdate"
+    cp "$source_executable" "$updater_path/Contents/MacOS/Updater"
+    plutil -create xml1 "$version_path/Resources/Info.plist"
+    plutil -insert CFBundleExecutable -string Sparkle \
+        "$version_path/Resources/Info.plist"
+    plutil -insert CFBundleIdentifier -string org.sparkle-project.Sparkle \
+        "$version_path/Resources/Info.plist"
+    plutil -insert CFBundlePackageType -string FMWK \
+        "$version_path/Resources/Info.plist"
+    plutil -insert CFBundleVersion -string 2.9.6 \
+        "$version_path/Resources/Info.plist"
+    plutil -insert CFBundleShortVersionString -string 2.9.6 \
+        "$version_path/Resources/Info.plist"
+    plutil -create xml1 "$updater_path/Contents/Info.plist"
+    plutil -insert CFBundleExecutable -string Updater \
+        "$updater_path/Contents/Info.plist"
+    plutil -insert CFBundleIdentifier -string org.sparkle-project.Updater \
+        "$updater_path/Contents/Info.plist"
+    plutil -insert CFBundlePackageType -string APPL \
+        "$updater_path/Contents/Info.plist"
+    plutil -insert CFBundleVersion -string 2.9.6 \
+        "$updater_path/Contents/Info.plist"
+    plutil -insert CFBundleShortVersionString -string 2.9.6 \
+        "$updater_path/Contents/Info.plist"
+    ln -s B "$framework_path/Versions/Current"
+    ln -s Versions/Current/Sparkle "$framework_path/Sparkle"
+    ln -s Versions/Current/Resources "$framework_path/Resources"
+    ln -s Versions/Current/Autoupdate "$framework_path/Autoupdate"
+    ln -s Versions/Current/Updater.app "$framework_path/Updater.app"
+    codesign --force --sign - --options runtime "$version_path/Autoupdate"
+    codesign --force --sign - --options runtime "$updater_path"
+    codesign --force --sign - --options runtime "$framework_path"
 }
 
 copy_and_sign_fixture() {
     local destination="$1"
+    local framework_path=""
 
     ditto "$fixture_application" "$destination"
     shift
-    "$@" "$destination"
-    codesign --force --sign - --options runtime "$destination" >/dev/null
+    if [ "$#" -gt 0 ]; then
+        "$@" "$destination"
+    fi
+    framework_path="$destination/Contents/Frameworks/Sparkle.framework"
+    if [ -d "$framework_path" ] && [ ! -L "$framework_path" ]; then
+        codesign --force --sign - --options runtime "$framework_path" >/dev/null
+    fi
+    codesign \
+        --force \
+        --sign - \
+        --options runtime \
+        --entitlements "$application_entitlements" \
+        "$destination" \
+        >/dev/null
 }
 
 set_invalid_bundle_identifier() {
@@ -220,12 +299,63 @@ replace_fixture_executable() {
         -o "$application_path/Contents/MacOS/CodexGauge"
 }
 
+enable_automatic_installation() {
+    local application_path="$1"
+
+    plutil -replace SUAutomaticallyUpdate -bool true \
+        "$application_path/Contents/Info.plist"
+}
+
+enable_scheduled_update_checks() {
+    local application_path="$1"
+    local plist_path="$application_path/Contents/Info.plist"
+
+    plutil -replace SUEnableAutomaticChecks -bool true "$plist_path"
+    plutil -insert SUScheduledCheckInterval -integer 86400 "$plist_path"
+}
+
+add_sparkle_xpc_services() {
+    local application_path="$1"
+
+    mkdir -p \
+        "$application_path/Contents/Frameworks/Sparkle.framework/Versions/B/XPCServices"
+}
+
+remove_sparkle_autoupdate() {
+    local application_path="$1"
+
+    rm "$application_path/Contents/Frameworks/Sparkle.framework/Versions/B/Autoupdate"
+}
+
+remove_third_party_notices() {
+    local application_path="$1"
+
+    rm "$application_path/Contents/Resources/THIRD_PARTY_NOTICES.md"
+}
+
+add_unexpected_autoupdate_entitlement() {
+    local application_path="$1"
+    local autoupdate_path=""
+
+    autoupdate_path="$application_path/Contents/Frameworks/Sparkle.framework/Versions/B/Autoupdate"
+    codesign \
+        --force \
+        --sign - \
+        --options runtime \
+        --entitlements "$application_entitlements" \
+        "$autoupdate_path" \
+        >/dev/null
+}
+
 trap cleanup EXIT
 
 create_script="$repository_root/Scripts/create-release-dmg.sh"
 build_script="$repository_root/Scripts/build-release-dmg.sh"
 verify_application_script="$repository_root/Scripts/verify-release-app.sh"
 verify_dmg_script="$repository_root/Scripts/verify-release-dmg.sh"
+obsolete_library_validation_gate="$repository_root/Scripts/enforce-sparkle-library-validation-gate.sh"
+application_entitlements="$repository_root/App/CodexGauge/CodexGauge.entitlements"
+project_file="$repository_root/CodexGauge.xcodeproj/project.pbxproj"
 configure_layout_script="$repository_root/Scripts/configure-release-dmg.applescript"
 verify_layout_script="$repository_root/Scripts/verify-release-dmg-layout.applescript"
 invalidate_layout_script="$test_directory/set-invalid-dmg-layout.applescript"
@@ -235,11 +365,25 @@ verify_background_safe_zone="$test_directory/verify-background-safe-zone.swift"
 background_generator="$repository_root/Scripts/generate-dmg-background.swift"
 guide_source="$repository_root/docs/installation.md"
 background_source="$repository_root/Distribution/DMG/background.png"
+fixture_notices="$test_root/THIRD_PARTY_NOTICES.md"
+false_application_entitlements="$test_root/false-application.entitlements"
+extra_application_entitlements="$test_root/extra-application.entitlements"
+fixture_public_key='GX9rI+FshTLGq8g4+s1ep4m+DHaykgM0A5v6iz02jWE='
+
+printf '%s\n' \
+    '# Third-Party Notices' \
+    'Sparkle 2.9.6' \
+    'MIT License' \
+    'Copyright (c) Sparkle Project' \
+    > "$fixture_notices"
 
 test -x "$create_script" || fail "missing executable create-release-dmg.sh"
 test -x "$build_script" || fail "missing executable build-release-dmg.sh"
 test -x "$verify_application_script" || fail "missing executable verify-release-app.sh"
 test -x "$verify_dmg_script" || fail "missing executable verify-release-dmg.sh"
+test -f "$application_entitlements" || fail "missing application entitlements"
+test ! -e "$obsolete_library_validation_gate" \
+    || fail "obsolete Library Validation blocker still exists"
 test -f "$configure_layout_script" || fail "missing Finder layout script"
 test -f "$verify_layout_script" || fail "missing Finder layout verification script"
 test -f "$invalidate_layout_script" || fail "missing invalid Finder layout fixture"
@@ -259,6 +403,27 @@ bash -n "$create_script"
 bash -n "$build_script"
 bash -n "$verify_application_script"
 bash -n "$verify_dmg_script"
+cp "$application_entitlements" "$extra_application_entitlements"
+plutil -insert 'com\.apple\.security\.get-task-allow' \
+    -bool true \
+    "$extra_application_entitlements"
+cp "$application_entitlements" "$false_application_entitlements"
+plutil -replace 'com\.apple\.security\.cs\.disable-library-validation' \
+    -bool false \
+    "$false_application_entitlements"
+plutil -convert json -o - "$application_entitlements" \
+    | ruby -rjson -e '
+  actual = JSON.parse(STDIN.read)
+  expected = {"com.apple.security.cs.disable-library-validation" => true}
+  exit(actual == expected ? 0 : 1)
+' \
+    || fail "application entitlements are not the exact approved set"
+[ "$(grep -F -c \
+    'CODE_SIGN_ENTITLEMENTS = App/CodexGauge/CodexGauge.entitlements;' \
+    "$project_file")" = "2" ] \
+    || fail "application entitlements are not limited to app Debug and Release"
+[ "$(grep -F -c 'ENABLE_HARDENED_RUNTIME = YES;' "$project_file")" = "2" ] \
+    || fail "Hardened Runtime must remain enabled for the application"
 osacompile -o "$test_root/configure-release-dmg.scpt" \
     "$configure_layout_script"
 osacompile -o "$test_root/verify-release-dmg-layout.scpt" \
@@ -313,6 +478,42 @@ fi
 if grep -q 'SWIFT_TREAT_WARNINGS_AS_ERRORS=YES' "$build_script"; then
     fail "Xcode package builds cannot combine suppressed warnings with warnings as errors"
 fi
+grep -F -q -- '-disableAutomaticPackageResolution' "$build_script" \
+    || fail "release Xcode build can ignore the resolved package lock"
+missing_key_output="$test_root/missing-public-key"
+mkdir "$missing_key_output"
+expect_failure "$build_script" \
+    --output-directory "$missing_key_output" \
+    --version 0.2.0 \
+    --build 3
+
+if grep -q -- '--deep' "$build_script" "$verify_application_script"; then
+    fail "Sparkle nested signing or verification relies on --deep"
+fi
+grep -F -q 'THIRD_PARTY_NOTICES.md' "$build_script" \
+    || fail "release build does not bundle third-party notices"
+grep -F -q 'sparkle_xpc_services="$sparkle_version/XPCServices"' \
+    "$build_script" \
+    || fail "release build does not locate unused Sparkle XPC services"
+grep -F -q 'rm -r -- "$sparkle_xpc_services"' "$build_script" \
+    || fail "release build does not trim unused Sparkle XPC services"
+if grep -F -q 'enforce-sparkle-library-validation-gate.sh' "$build_script"; then
+    fail "release build still invokes the obsolete Library Validation blocker"
+fi
+grep -F -q -- '--entitlements "$application_entitlements"' "$build_script" \
+    || fail "release build does not apply the canonical main entitlement"
+grep -F -q 'com.apple.security.cs.disable-library-validation' \
+    "$verify_application_script" \
+    || fail "release verification does not require the main exception"
+grep -F -q -- '--xml' \
+    "$verify_application_script" \
+    || fail "release verification does not request structured entitlements"
+grep -F -q -- '--entitlements -' \
+    "$verify_application_script" \
+    || fail "release verification does not inspect effective entitlements"
+grep -F -q -- '--architecture "$architecture"' \
+    "$verify_application_script" \
+    || fail "release verification does not inspect every universal slice"
 
 if grep -E '^[[:space:]]*(sudo[[:space:]]+)?(/usr/bin/)?(xattr|spctl)([[:space:]]|$)|do shell script.*(xattr|spctl)|no-quarantine|--noqtn|--norsrc|--noextattr|DITTONORSRC|COPYFILE_DISABLE' \
     "$create_script" \
@@ -353,12 +554,66 @@ expect_create_failure wrong-background-format \
 "$verify_application_script" \
     --app "$fixture_application" \
     --version 0.1.0 \
-    --build 1
+    --build 1 \
+    --sparkle-public-ed-key "$fixture_public_key" \
+    --expected-third-party-notices "$fixture_notices"
+
+missing_main_entitlement_application="$test_root/MissingMainEntitlement.app"
+copy_and_sign_fixture "$missing_main_entitlement_application"
+codesign \
+    --force \
+    --sign - \
+    --options runtime \
+    "$missing_main_entitlement_application" \
+    >/dev/null
+expect_failure_containing "application entitlements do not match" \
+    "$verify_application_script" \
+    --app "$missing_main_entitlement_application" \
+    --version 0.1.0 \
+    --build 1 \
+    --sparkle-public-ed-key "$fixture_public_key" \
+    --expected-third-party-notices "$fixture_notices"
+
+false_main_entitlement_application="$test_root/FalseMainEntitlement.app"
+copy_and_sign_fixture "$false_main_entitlement_application"
+codesign \
+    --force \
+    --sign - \
+    --options runtime \
+    --entitlements "$false_application_entitlements" \
+    "$false_main_entitlement_application" \
+    >/dev/null
+expect_failure_containing "application entitlements do not match" \
+    "$verify_application_script" \
+    --app "$false_main_entitlement_application" \
+    --version 0.1.0 \
+    --build 1 \
+    --sparkle-public-ed-key "$fixture_public_key" \
+    --expected-third-party-notices "$fixture_notices"
+
+extra_main_entitlement_application="$test_root/ExtraMainEntitlement.app"
+copy_and_sign_fixture "$extra_main_entitlement_application"
+codesign \
+    --force \
+    --sign - \
+    --options runtime \
+    --entitlements "$extra_application_entitlements" \
+    "$extra_main_entitlement_application" \
+    >/dev/null
+expect_failure_containing "application entitlements do not match" \
+    "$verify_application_script" \
+    --app "$extra_main_entitlement_application" \
+    --version 0.1.0 \
+    --build 1 \
+    --sparkle-public-ed-key "$fixture_public_key" \
+    --expected-third-party-notices "$fixture_notices"
 
 expect_failure "$verify_application_script" \
     --app "$fixture_application" \
     --version 0.1.1 \
-    --build 1
+    --build 1 \
+    --sparkle-public-ed-key "$fixture_public_key" \
+    --expected-third-party-notices "$fixture_notices"
 
 invalid_bundle_application="$test_root/InvalidBundle.app"
 copy_and_sign_fixture \
@@ -367,7 +622,9 @@ copy_and_sign_fixture \
 expect_failure "$verify_application_script" \
     --app "$invalid_bundle_application" \
     --version 0.1.0 \
-    --build 1
+    --build 1 \
+    --sparkle-public-ed-key "$fixture_public_key" \
+    --expected-third-party-notices "$fixture_notices"
 
 missing_localization_application="$test_root/MissingLocalization.app"
 copy_and_sign_fixture \
@@ -376,7 +633,72 @@ copy_and_sign_fixture \
 expect_failure "$verify_application_script" \
     --app "$missing_localization_application" \
     --version 0.1.0 \
-    --build 1
+    --build 1 \
+    --sparkle-public-ed-key "$fixture_public_key" \
+    --expected-third-party-notices "$fixture_notices"
+
+automatic_installation_application="$test_root/AutomaticInstallation.app"
+copy_and_sign_fixture \
+    "$automatic_installation_application" \
+    enable_automatic_installation
+expect_failure "$verify_application_script" \
+    --app "$automatic_installation_application" \
+    --version 0.1.0 \
+    --build 1 \
+    --sparkle-public-ed-key "$fixture_public_key" \
+    --expected-third-party-notices "$fixture_notices"
+
+scheduled_checks_application="$test_root/ScheduledChecks.app"
+copy_and_sign_fixture \
+    "$scheduled_checks_application" \
+    enable_scheduled_update_checks
+expect_failure "$verify_application_script" \
+    --app "$scheduled_checks_application" \
+    --version 0.1.0 \
+    --build 1 \
+    --sparkle-public-ed-key "$fixture_public_key" \
+    --expected-third-party-notices "$fixture_notices"
+
+xpc_application="$test_root/XPCServices.app"
+copy_and_sign_fixture "$xpc_application" add_sparkle_xpc_services
+expect_failure "$verify_application_script" \
+    --app "$xpc_application" \
+    --version 0.1.0 \
+    --build 1 \
+    --sparkle-public-ed-key "$fixture_public_key" \
+    --expected-third-party-notices "$fixture_notices"
+
+missing_autoupdate_application="$test_root/MissingAutoupdate.app"
+copy_and_sign_fixture \
+    "$missing_autoupdate_application" \
+    remove_sparkle_autoupdate
+expect_failure "$verify_application_script" \
+    --app "$missing_autoupdate_application" \
+    --version 0.1.0 \
+    --build 1 \
+    --sparkle-public-ed-key "$fixture_public_key" \
+    --expected-third-party-notices "$fixture_notices"
+
+missing_notices_application="$test_root/MissingNotices.app"
+copy_and_sign_fixture "$missing_notices_application" remove_third_party_notices
+expect_failure "$verify_application_script" \
+    --app "$missing_notices_application" \
+    --version 0.1.0 \
+    --build 1 \
+    --sparkle-public-ed-key "$fixture_public_key" \
+    --expected-third-party-notices "$fixture_notices"
+
+unexpected_nested_entitlement_application="$test_root/UnexpectedNestedEntitlement.app"
+copy_and_sign_fixture \
+    "$unexpected_nested_entitlement_application" \
+    add_unexpected_autoupdate_entitlement
+expect_failure_containing "Sparkle Autoupdate must not contain entitlements" \
+    "$verify_application_script" \
+    --app "$unexpected_nested_entitlement_application" \
+    --version 0.1.0 \
+    --build 1 \
+    --sparkle-public-ed-key "$fixture_public_key" \
+    --expected-third-party-notices "$fixture_notices"
 
 artifact_path="$test_root/CodexGauge.dmg"
 "$create_script" \

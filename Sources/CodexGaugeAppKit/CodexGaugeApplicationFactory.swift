@@ -71,6 +71,7 @@ public enum CodexGaugeApplicationFactory {
                 repository: repository
             ),
             launchAtLoginController: LaunchAtLoginController(),
+            applicationUpdateRuntime: ApplicationUpdateRuntimeFactory.makeDefault(),
             diagnosticsProvider: diagnosticsProvider.provider,
             executableSelector: NSOpenPanelCodexExecutableSelector(),
             launchOptions: launchOptions,
@@ -96,6 +97,7 @@ public enum CodexGaugeApplicationFactory {
                 repository: repository
             ),
             launchAtLoginController: UITestFixtureLaunchAtLoginController(),
+            applicationUpdateRuntime: DisabledApplicationUpdateRuntime(),
             diagnosticsProvider: diagnosticsProvider.provider,
             executableSelector: UITestFixtureCodexExecutableSelector(),
             launchOptions: launchOptions,
@@ -111,6 +113,7 @@ public enum CodexGaugeApplicationFactory {
         refreshBuilder: any ApplicationRefreshCoordinatorBuilding,
         preferencesLoader: any ApplicationPreferencesLoading,
         launchAtLoginController: any ApplicationLaunchAtLoginControlling,
+        applicationUpdateRuntime: any ApplicationUpdateRuntime,
         diagnosticsProvider: @escaping SettingsConnectionDiagnosticsProvider,
         executableSelector: (any CodexExecutableSelecting)?,
         launchOptions: CodexGaugeApplicationLaunchOptions,
@@ -146,6 +149,7 @@ public enum CodexGaugeApplicationFactory {
             statusRuntime: statusRuntime,
             menuRuntime: menuRuntime,
             settingsRuntime: settingsRuntime,
+            applicationUpdateRuntime: applicationUpdateRuntime,
             systemActivityMonitor: SystemActivityMonitor(workspace: workspace),
             assistiveDisplayMonitor: AssistiveDisplayMonitor(workspace: workspace),
             deadlineSchedulerBuilder: .system(),
@@ -169,6 +173,7 @@ public enum CodexGaugeApplicationFactory {
             refresh: { eventRelay.perform(.refresh) },
             openCodex: { eventRelay.perform(.openCodex) },
             selectCodex: { eventRelay.perform(.selectCodex) },
+            checkForUpdates: { eventRelay.perform(.checkForUpdates) },
             settings: { eventRelay.perform(.settings) },
             quit: { eventRelay.perform(.quit) }
         )
