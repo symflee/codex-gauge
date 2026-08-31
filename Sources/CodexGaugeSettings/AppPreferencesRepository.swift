@@ -52,7 +52,8 @@ public actor AppPreferencesRepository {
             launchAtLoginIntent: values.launchAtLoginIntent,
             selectedExecutableURL: current.selectedExecutableURL,
             hasCompletedFirstLaunch: current.hasCompletedFirstLaunch,
-            language: values.language
+            language: values.language,
+            statusGaugeAppearance: values.statusGaugeAppearance
         )
         try save(merged)
     }
@@ -65,7 +66,8 @@ public actor AppPreferencesRepository {
             launchAtLoginIntent: current.launchAtLoginIntent,
             selectedExecutableURL: url,
             hasCompletedFirstLaunch: current.hasCompletedFirstLaunch,
-            language: current.language
+            language: current.language,
+            statusGaugeAppearance: current.statusGaugeAppearance
         )
         try save(merged)
     }
@@ -95,7 +97,8 @@ private extension AppPreferences {
             launchAtLoginIntent: launchAtLoginIntent,
             selectedExecutableURL: selectedExecutableURL,
             hasCompletedFirstLaunch: isCompleted,
-            language: language
+            language: language,
+            statusGaugeAppearance: statusGaugeAppearance
         )
         return merged
     }

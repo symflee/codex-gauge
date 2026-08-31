@@ -50,6 +50,16 @@
 "settings.selection.automatic" = "자동 선택";
 "settings.selection.manual" = "직접 선택";
 "settings.selection.accessibility" = "한도 선택 방식";
+"settings.section.gauge-colors" = "게이지 색상";
+"settings.gauge.preset.accessibility" = "게이지 색상 프리셋";
+"settings.gauge.preset.blue" = "선명한 파랑 — 기본";
+"settings.gauge.preset.graphite" = "그라파이트";
+"settings.gauge.preset.green" = "선명한 초록";
+"settings.gauge.preset.orange" = "선명한 주황";
+"settings.gauge.preset.purple" = "선명한 보라";
+"settings.gauge.preset.custom" = "사용자 지정";
+"settings.gauge.border" = "테두리 색상";
+"settings.gauge.fill" = "채우기 색상";
 "settings.section.quotas" = "표시할 한도";
 "settings.quota.format" = "%@ [%@]";
 "settings.quota.unavailable.format" = "%@ — 현재 없음";

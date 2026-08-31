@@ -9,6 +9,10 @@ public enum SettingsFormEvent: Equatable, Sendable {
     case refreshProfileChanged(RefreshProfile)
     case launchAtLoginIntentChanged(Bool)
     case languageChanged(AppLanguage)
+    case statusGaugePresetChanged(StatusGaugePreset)
+    case statusGaugeCustomSelected
+    case statusGaugeBorderColorChanged(StatusGaugeColor)
+    case statusGaugeFillColorChanged(StatusGaugeColor)
 }
 
 public struct SettingsFormReducer: Sendable {
@@ -33,7 +37,26 @@ public struct SettingsFormReducer: Sendable {
             replacing(state, launchAtLoginIntent: enabled)
         case .languageChanged(let language):
             replacing(state, language: language)
+        case .statusGaugePresetChanged(let preset):
+            replacing(state, statusGaugeAppearance: .preset(preset))
+        case .statusGaugeCustomSelected:
+            replacing(state, statusGaugeAppearance: customAppearance(state))
+        case .statusGaugeBorderColorChanged(let color):
+            replacing(state, statusGaugeAppearance: customAppearance(state, border: color))
+        case .statusGaugeFillColorChanged(let color):
+            replacing(state, statusGaugeAppearance: customAppearance(state, fill: color))
         }
+    }
+
+    private func customAppearance(
+        _ state: SettingsFormState,
+        border: StatusGaugeColor? = nil,
+        fill: StatusGaugeColor? = nil
+    ) -> StatusGaugeAppearance {
+        .custom(
+            borderColor: border ?? state.statusGaugeAppearance.borderColor,
+            fillColor: fill ?? state.statusGaugeAppearance.fillColor
+        )
     }
 
     private func changingSelection(
@@ -64,6 +87,7 @@ public struct SettingsFormReducer: Sendable {
         refreshProfile: RefreshProfile? = nil,
         launchAtLoginIntent: Bool? = nil,
         language: AppLanguage? = nil,
+        statusGaugeAppearance: StatusGaugeAppearance? = nil,
         discoveredQuotaIDs: Set<QuotaSelectionID>? = nil
     ) -> SettingsFormState {
         SettingsFormState(
@@ -73,6 +97,7 @@ public struct SettingsFormReducer: Sendable {
             refreshProfile: refreshProfile ?? state.refreshProfile,
             launchAtLoginIntent: launchAtLoginIntent ?? state.launchAtLoginIntent,
             language: language ?? state.language,
+            statusGaugeAppearance: statusGaugeAppearance ?? state.statusGaugeAppearance,
             discoveredQuotaIDs: discoveredQuotaIDs ?? state.discoveredQuotaIDs
         )
     }

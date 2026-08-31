@@ -4,7 +4,7 @@ import CoreFoundation
 import Foundation
 
 enum PreferencesCodec {
-    private static let currentVersion = 2
+    private static let currentVersion = 3
 
     static func encode(_ preferences: AppPreferences) throws -> Data {
         let object: [String: Any] = [
@@ -14,7 +14,10 @@ enum PreferencesCodec {
             "launchAtLoginIntent": preferences.launchAtLoginIntent,
             "selectedExecutableURL": encodeURL(preferences.selectedExecutableURL),
             "hasCompletedFirstLaunch": preferences.hasCompletedFirstLaunch,
-            "language": preferences.language.rawValue
+            "language": preferences.language.rawValue,
+            "statusGaugeAppearance": encodeAppearance(
+                preferences.statusGaugeAppearance
+            )
         ]
         return try JSONSerialization.data(
             withJSONObject: object,
@@ -47,6 +50,11 @@ enum PreferencesCodec {
                 dictionary,
                 defaultLanguage: defaultLanguage
             )
+        case 2:
+            return decodeVersionTwo(
+                dictionary,
+                defaultLanguage: defaultLanguage
+            )
         case currentVersion:
             return decodeCurrent(
                 dictionary,
@@ -67,7 +75,7 @@ enum PreferencesCodec {
         guard let version = integer(dictionary["version"]) else {
             return false
         }
-        return version == 0 || version == 1
+        return (0...2).contains(version)
     }
 
     private static func encodeDisplay(
@@ -104,6 +112,21 @@ enum PreferencesCodec {
         url?.absoluteString ?? NSNull()
     }
 
+    private static func encodeAppearance(
+        _ appearance: StatusGaugeAppearance
+    ) -> [String: String] {
+        switch appearance {
+        case .preset(let preset):
+            return ["mode": "preset", "preset": preset.rawValue]
+        case .custom(let borderColor, let fillColor):
+            return [
+                "mode": "custom",
+                "borderColor": borderColor.hexString,
+                "fillColor": fillColor.hexString
+            ]
+        }
+    }
+
     private static func sorted(
         _ identifiers: Set<QuotaSelectionID>
     ) -> [QuotaSelectionID] {
@@ -135,12 +158,27 @@ enum PreferencesCodec {
         _ dictionary: [String: Any],
         defaultLanguage: AppLanguage
     ) -> AppPreferences {
-        decodeVersionOne(
+        decodeShared(
             dictionary,
             language: decodeLanguage(
                 dictionary["language"],
                 defaultLanguage: defaultLanguage
-            )
+            ),
+            appearance: decodeAppearance(dictionary["statusGaugeAppearance"])
+        )
+    }
+
+    private static func decodeVersionTwo(
+        _ dictionary: [String: Any],
+        defaultLanguage: AppLanguage
+    ) -> AppPreferences {
+        decodeShared(
+            dictionary,
+            language: decodeLanguage(
+                dictionary["language"],
+                defaultLanguage: defaultLanguage
+            ),
+            appearance: .default
         )
     }
 
@@ -148,12 +186,17 @@ enum PreferencesCodec {
         _ dictionary: [String: Any],
         defaultLanguage: AppLanguage
     ) -> AppPreferences {
-        decodeVersionOne(dictionary, language: defaultLanguage)
+        decodeShared(
+            dictionary,
+            language: defaultLanguage,
+            appearance: .default
+        )
     }
 
-    private static func decodeVersionOne(
+    private static func decodeShared(
         _ dictionary: [String: Any],
-        language: AppLanguage
+        language: AppLanguage,
+        appearance: StatusGaugeAppearance
     ) -> AppPreferences {
         AppPreferences(
             displayPreference: decodeDisplay(dictionary["display"]),
@@ -169,8 +212,50 @@ enum PreferencesCodec {
             hasCompletedFirstLaunch: boolean(
                 dictionary["hasCompletedFirstLaunch"]
             ) ?? false,
-            language: language
+            language: language,
+            statusGaugeAppearance: appearance
         )
+    }
+
+    private static func decodeAppearance(_ value: Any?) -> StatusGaugeAppearance {
+        guard let dictionary = value as? [String: Any] else {
+            return .default
+        }
+        switch string(dictionary["mode"]) {
+        case "preset":
+            return decodePresetAppearance(dictionary["preset"])
+        case "custom":
+            return decodeCustomAppearance(dictionary)
+        default:
+            return .default
+        }
+    }
+
+    private static func decodePresetAppearance(_ value: Any?) -> StatusGaugeAppearance {
+        guard let rawValue = string(value) else {
+            return .default
+        }
+        guard let preset = StatusGaugePreset(rawValue: rawValue) else {
+            return .default
+        }
+        return .preset(preset)
+    }
+
+    private static func decodeCustomAppearance(
+        _ dictionary: [String: Any]
+    ) -> StatusGaugeAppearance {
+        let borderColor = decodeColor(dictionary["borderColor"])
+            ?? StatusGaugePreset.blue.borderColor
+        let fillColor = decodeColor(dictionary["fillColor"])
+            ?? StatusGaugePreset.blue.fillColor
+        return .custom(borderColor: borderColor, fillColor: fillColor)
+    }
+
+    private static func decodeColor(_ value: Any?) -> StatusGaugeColor? {
+        guard let hexString = string(value) else {
+            return nil
+        }
+        return StatusGaugeColor(hexString: hexString)
     }
 
     private static func decodeDisplay(_ value: Any?) -> DisplayPreference {

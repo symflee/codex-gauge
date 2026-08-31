@@ -50,6 +50,16 @@
 "settings.selection.automatic" = "Automatic";
 "settings.selection.manual" = "Manual";
 "settings.selection.accessibility" = "Quota selection mode";
+"settings.section.gauge-colors" = "Gauge colors";
+"settings.gauge.preset.accessibility" = "Gauge color preset";
+"settings.gauge.preset.blue" = "Vivid Blue — Default";
+"settings.gauge.preset.graphite" = "Graphite";
+"settings.gauge.preset.green" = "Vivid Green";
+"settings.gauge.preset.orange" = "Vivid Orange";
+"settings.gauge.preset.purple" = "Vivid Purple";
+"settings.gauge.preset.custom" = "Custom";
+"settings.gauge.border" = "Border color";
+"settings.gauge.fill" = "Fill color";
 "settings.section.quotas" = "Quotas to display";
 "settings.quota.format" = "%@ [%@]";
 "settings.quota.unavailable.format" = "%@ — Currently unavailable";

@@ -37,6 +37,44 @@ public final class SettingsFormViewController: NSViewController {
         refreshControl.itemTitles
     }
 
+    public var renderedGaugePresetOptionTitles: [String] {
+        gaugePresetControl.itemArray.compactMap { item in
+            item.isSeparatorItem ? nil : item.title
+        }
+    }
+
+    public var renderedGaugePresetSeparatorCount: Int {
+        gaugePresetControl.itemArray.filter(\.isSeparatorItem).count
+    }
+
+    public var renderedGaugePresetSwatchCount: Int {
+        gaugePresetControl.itemArray.filter { item in
+            !item.isSeparatorItem && item.image != nil
+        }.count
+    }
+
+    public var renderedGaugeColorHexValues: [String] {
+        let appearance = formState.statusGaugeAppearance
+        return [appearance.borderColor.hexString, appearance.fillColor.hexString]
+    }
+
+    public var renderedGaugeColorAccessibilityValues: [String] {
+        [gaugeBorderColorWell, gaugeFillColorWell].compactMap { colorWell in
+            colorWell.accessibilityValue() as? String
+        }
+    }
+
+    public var renderedGaugeColorLabels: [String] {
+        [gaugeBorderLabel.stringValue, gaugeFillLabel.stringValue]
+    }
+
+    public var usesExpandedNonContinuousGaugeColorWells: Bool {
+        let wells = [gaugeBorderColorWell, gaugeFillColorWell]
+        return wells.allSatisfy { well in
+            well.colorWellStyle == .expanded && !well.isContinuous
+        }
+    }
+
     public var renderedLaunchAtLoginTitle: String {
         launchAtLoginButton.title
     }
@@ -89,18 +127,32 @@ public final class SettingsFormViewController: NSViewController {
     private let selectionModes: [SettingsQuotaSelectionMode] = [.automatic, .manual]
     private let refreshProfiles = RefreshProfile.allCases
     private let languages = AppLanguage.allCases
+    private let gaugePresets = StatusGaugePreset.allCases
     private var strings: SettingsStrings
     private var quotaButtons: [NSButton] = []
     private var quotaAccessibilityLabels: [String] = []
 
     private lazy var languageSectionLabel = makeSectionTitle(strings.languageSection)
     private lazy var displaySectionLabel = makeSectionTitle(strings.displaySection)
+    private lazy var gaugeSectionLabel = makeSectionTitle(strings.gaugeSection)
     private lazy var quotaSectionLabel = makeSectionTitle(strings.quotaSection)
     private lazy var refreshSectionLabel = makeSectionTitle(strings.refreshSection)
     private lazy var connectionSectionLabel = makeSectionTitle(strings.connectionSection)
     private lazy var languageControl = makeLanguageControl()
     private lazy var productControl = makeProductControl()
     private lazy var selectionControl = makeSelectionControl()
+    private lazy var gaugePresetControl = makeGaugePresetControl()
+    private lazy var gaugeBorderLabel = makeGaugeColorLabel(strings.gaugeBorderColor)
+    private lazy var gaugeFillLabel = makeGaugeColorLabel(strings.gaugeFillColor)
+    private lazy var gaugeBorderColorWell = makeGaugeColorWell(
+        action: #selector(gaugeBorderColorChanged(_:)),
+        identifier: CodexGaugeAccessibilityIdentifier.settingsGaugeBorder
+    )
+    private lazy var gaugeFillColorWell = makeGaugeColorWell(
+        action: #selector(gaugeFillColorChanged(_:)),
+        identifier: CodexGaugeAccessibilityIdentifier.settingsGaugeFill
+    )
+    private lazy var gaugeColorStack = makeGaugeColorStack()
     private lazy var quotaStack = makeQuotaStack()
     private lazy var refreshControl = makeRefreshControl()
     private lazy var launchAtLoginButton = makeLaunchAtLoginButton()
@@ -122,6 +174,10 @@ public final class SettingsFormViewController: NSViewController {
         action: #selector(copyDiagnostics(_:))
     )
     private lazy var projectNoticeLabel = makeProjectNoticeLabel()
+
+    private var customGaugePresetIndex: Int {
+        gaugePresets.count + 1
+    }
 
     public init(
         formState: SettingsFormState,
@@ -154,13 +210,13 @@ public final class SettingsFormViewController: NSViewController {
 
     public override func loadView() {
         let rootView = NSView(frame: NSRect(x: 0, y: 0, width: 440, height: 720))
-        let contentStack = makeContentStack()
-        rootView.addSubview(contentStack)
+        let scrollView = makeOuterScrollView()
+        rootView.addSubview(scrollView)
         NSLayoutConstraint.activate([
-            contentStack.leadingAnchor.constraint(equalTo: rootView.leadingAnchor, constant: 24),
-            contentStack.trailingAnchor.constraint(equalTo: rootView.trailingAnchor, constant: -24),
-            contentStack.topAnchor.constraint(equalTo: rootView.topAnchor, constant: 24),
-            contentStack.bottomAnchor.constraint(lessThanOrEqualTo: rootView.bottomAnchor, constant: -24)
+            scrollView.leadingAnchor.constraint(equalTo: rootView.leadingAnchor),
+            scrollView.trailingAnchor.constraint(equalTo: rootView.trailingAnchor),
+            scrollView.topAnchor.constraint(equalTo: rootView.topAnchor),
+            scrollView.bottomAnchor.constraint(equalTo: rootView.bottomAnchor)
         ])
         view = rootView
         render()
@@ -246,6 +302,24 @@ public final class SettingsFormViewController: NSViewController {
         launchAtLoginButton.performClick(nil)
     }
 
+    public func performGaugeBorderColorSelection(_ color: NSColor) {
+        gaugeBorderColorWell.color = color
+        gaugeBorderColorChanged(gaugeBorderColorWell)
+    }
+
+    public func performGaugeFillColorSelection(_ color: NSColor) {
+        gaugeFillColorWell.color = color
+        gaugeFillColorChanged(gaugeFillColorWell)
+    }
+
+    public func deactivateGaugeColorWells() {
+        guard isViewLoaded else {
+            return
+        }
+        gaugeBorderColorWell.deactivate()
+        gaugeFillColorWell.deactivate()
+    }
+
     private func forwardLaunchAtLoginRequest(_ event: SettingsFormEvent) {
         guard case .launchAtLoginIntentChanged(let enabled) = event else {
             return
@@ -260,6 +334,9 @@ public final class SettingsFormViewController: NSViewController {
             displaySectionLabel,
             productControl,
             selectionControl,
+            gaugeSectionLabel,
+            gaugePresetControl,
+            gaugeColorStack,
             quotaSectionLabel,
             makeQuotaScrollView(),
             refreshSectionLabel,
@@ -279,6 +356,8 @@ public final class SettingsFormViewController: NSViewController {
         languageControl.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         productControl.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         selectionControl.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        gaugePresetControl.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        gaugeColorStack.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         refreshControl.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         launchAtLoginStack.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         projectNoticeLabel.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
@@ -289,10 +368,41 @@ public final class SettingsFormViewController: NSViewController {
         [
             languageSectionLabel,
             displaySectionLabel,
+            gaugeSectionLabel,
             quotaSectionLabel,
             refreshSectionLabel,
             connectionSectionLabel
         ]
+    }
+
+    private func makeOuterScrollView() -> NSScrollView {
+        let scrollView = NSScrollView()
+        let documentView = SettingsFormDocumentView()
+        let contentStack = makeContentStack()
+        configureOuterScrollView(scrollView, documentView: documentView)
+        documentView.addSubview(contentStack)
+        NSLayoutConstraint.activate([
+            documentView.widthAnchor.constraint(equalTo: scrollView.contentView.widthAnchor),
+            contentStack.leadingAnchor.constraint(equalTo: documentView.leadingAnchor, constant: 24),
+            contentStack.trailingAnchor.constraint(equalTo: documentView.trailingAnchor, constant: -24),
+            contentStack.topAnchor.constraint(equalTo: documentView.topAnchor, constant: 24),
+            contentStack.bottomAnchor.constraint(equalTo: documentView.bottomAnchor, constant: -24)
+        ])
+        return scrollView
+    }
+
+    private func configureOuterScrollView(
+        _ scrollView: NSScrollView,
+        documentView: NSView
+    ) {
+        documentView.translatesAutoresizingMaskIntoConstraints = false
+        scrollView.documentView = documentView
+        scrollView.hasVerticalScroller = true
+        scrollView.hasHorizontalScroller = false
+        scrollView.autohidesScrollers = true
+        scrollView.borderType = .noBorder
+        scrollView.drawsBackground = false
+        scrollView.translatesAutoresizingMaskIntoConstraints = false
     }
 
     private func makeLanguageControl() -> NSPopUpButton {
@@ -329,6 +439,61 @@ public final class SettingsFormViewController: NSViewController {
         )
         control.setAccessibilityLabel(strings.selectionAccessibilityLabel)
         return control
+    }
+
+    private func makeGaugePresetControl() -> NSPopUpButton {
+        let control = NSPopUpButton()
+        control.target = self
+        control.action = #selector(gaugePresetChanged(_:))
+        control.setAccessibilityIdentifier(
+            CodexGaugeAccessibilityIdentifier.settingsGaugePreset
+        )
+        control.setAccessibilityLabel(strings.gaugePresetAccessibilityLabel)
+        return control
+    }
+
+    private func makeGaugeColorLabel(_ title: String) -> NSTextField {
+        let label = NSTextField(labelWithString: title)
+        label.widthAnchor.constraint(equalToConstant: 104).isActive = true
+        return label
+    }
+
+    private func makeGaugeColorWell(
+        action: Selector,
+        identifier: String
+    ) -> NSColorWell {
+        let colorWell = NSColorWell()
+        colorWell.colorWellStyle = .expanded
+        colorWell.isContinuous = false
+        colorWell.target = self
+        colorWell.action = action
+        colorWell.setAccessibilityIdentifier(identifier)
+        colorWell.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        return colorWell
+    }
+
+    private func makeGaugeColorStack() -> NSStackView {
+        let stack = NSStackView(views: [
+            makeGaugeColorRow(label: gaugeBorderLabel, colorWell: gaugeBorderColorWell),
+            makeGaugeColorRow(label: gaugeFillLabel, colorWell: gaugeFillColorWell)
+        ])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 6
+        return stack
+    }
+
+    private func makeGaugeColorRow(
+        label: NSTextField,
+        colorWell: NSColorWell
+    ) -> NSStackView {
+        let row = NSStackView(views: [label, colorWell])
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        row.spacing = 8
+        row.distribution = .fill
+        colorWell.widthAnchor.constraint(greaterThanOrEqualToConstant: 220).isActive = true
+        return row
     }
 
     private func makeQuotaStack() -> NSStackView {
@@ -445,6 +610,7 @@ public final class SettingsFormViewController: NSViewController {
         selectionControl.selectedSegment = selectionModes.firstIndex(
             of: formState.quotaSelectionMode
         ) ?? 0
+        renderGaugeAppearance()
         refreshControl.selectItem(
             at: refreshProfiles.firstIndex(of: formState.refreshProfile) ?? 0
         )
@@ -458,6 +624,7 @@ public final class SettingsFormViewController: NSViewController {
         renderLanguageControl()
         renderSegmentTitles(productControl, titles: productModes.map(strings.productName))
         renderSegmentTitles(selectionControl, titles: selectionModes.map(strings.selectionModeName))
+        renderGaugeLocalizedStrings()
         renderRefreshControl()
         renderActionTitles()
         renderAccessibilityLabels()
@@ -467,6 +634,7 @@ public final class SettingsFormViewController: NSViewController {
         let titles = [
             strings.languageSection,
             strings.displaySection,
+            strings.gaugeSection,
             strings.quotaSection,
             strings.refreshSection,
             strings.connectionSection
@@ -478,6 +646,36 @@ public final class SettingsFormViewController: NSViewController {
 
     private func renderLanguageControl() {
         replaceItems(in: languageControl, with: languages.map(strings.languageName))
+    }
+
+    private func renderGaugeLocalizedStrings() {
+        gaugeBorderLabel.stringValue = strings.gaugeBorderColor
+        gaugeFillLabel.stringValue = strings.gaugeFillColor
+        rebuildGaugePresetItems()
+    }
+
+    private func rebuildGaugePresetItems() {
+        gaugePresetControl.removeAllItems()
+        gaugePresets.forEach(addGaugePresetItem)
+        gaugePresetControl.menu?.addItem(.separator())
+        addGaugeCustomItem()
+    }
+
+    private func addGaugePresetItem(_ preset: StatusGaugePreset) {
+        gaugePresetControl.addItem(withTitle: strings.gaugePresetName(preset))
+        gaugePresetControl.lastItem?.image = makeGaugeSwatch(
+            borderColor: preset.borderColor,
+            fillColor: preset.fillColor
+        )
+    }
+
+    private func addGaugeCustomItem() {
+        let appearance = formState.statusGaugeAppearance
+        gaugePresetControl.addItem(withTitle: strings.gaugeCustom)
+        gaugePresetControl.lastItem?.image = makeGaugeSwatch(
+            borderColor: appearance.borderColor,
+            fillColor: appearance.fillColor
+        )
     }
 
     private func renderRefreshControl() {
@@ -504,7 +702,92 @@ public final class SettingsFormViewController: NSViewController {
         languageControl.setAccessibilityLabel(strings.languageAccessibilityLabel)
         productControl.setAccessibilityLabel(strings.productAccessibilityLabel)
         selectionControl.setAccessibilityLabel(strings.selectionAccessibilityLabel)
+        gaugePresetControl.setAccessibilityLabel(strings.gaugePresetAccessibilityLabel)
+        gaugeBorderColorWell.setAccessibilityLabel(strings.gaugeBorderColor)
+        gaugeFillColorWell.setAccessibilityLabel(strings.gaugeFillColor)
         refreshControl.setAccessibilityLabel(strings.refreshAccessibilityLabel)
+    }
+
+    private func renderGaugeAppearance() {
+        let appearance = formState.statusGaugeAppearance
+        selectGaugePreset(for: appearance)
+        renderGaugeColorWell(gaugeBorderColorWell, color: appearance.borderColor)
+        renderGaugeColorWell(gaugeFillColorWell, color: appearance.fillColor)
+    }
+
+    private func selectGaugePreset(for appearance: StatusGaugeAppearance) {
+        switch appearance {
+        case .preset(let preset):
+            gaugePresetControl.selectItem(
+                at: gaugePresets.firstIndex(of: preset) ?? 0
+            )
+        case .custom:
+            gaugePresetControl.selectItem(at: customGaugePresetIndex)
+        }
+    }
+
+    private func renderGaugeColorWell(
+        _ colorWell: NSColorWell,
+        color: StatusGaugeColor
+    ) {
+        colorWell.color = Self.appKitColor(color)
+        colorWell.setAccessibilityValue(color.hexString)
+    }
+
+    private func makeGaugeSwatch(
+        borderColor: StatusGaugeColor,
+        fillColor: StatusGaugeColor
+    ) -> NSImage {
+        let size = NSSize(width: 20, height: 12)
+        let border = Self.appKitColor(borderColor)
+        let fill = Self.appKitColor(fillColor)
+        let image = NSImage(size: size, flipped: false) { rect in
+            Self.drawGaugeSwatch(rect, borderColor: border, fillColor: fill)
+            return true
+        }
+        image.isTemplate = false
+        return image
+    }
+
+    private static func drawGaugeSwatch(
+        _ rect: NSRect,
+        borderColor: NSColor,
+        fillColor: NSColor
+    ) {
+        let swatchRect = rect.insetBy(dx: 1, dy: 1)
+        let path = NSBezierPath(roundedRect: swatchRect, xRadius: 3, yRadius: 3)
+        fillColor.setFill()
+        path.fill()
+        borderColor.setStroke()
+        path.lineWidth = 2
+        path.stroke()
+    }
+
+    private static func appKitColor(_ color: StatusGaugeColor) -> NSColor {
+        NSColor(
+            srgbRed: CGFloat(color.red) / 255,
+            green: CGFloat(color.green) / 255,
+            blue: CGFloat(color.blue) / 255,
+            alpha: 1
+        )
+    }
+
+    private func normalizedGaugeColor(_ color: NSColor) -> StatusGaugeColor? {
+        guard let color = color.usingColorSpace(.sRGB),
+              let red = normalizedColorByte(color.redComponent),
+              let green = normalizedColorByte(color.greenComponent),
+              let blue = normalizedColorByte(color.blueComponent) else {
+            return nil
+        }
+        return StatusGaugeColor(red: red, green: green, blue: blue)
+    }
+
+    private func normalizedColorByte(_ component: CGFloat) -> UInt8? {
+        guard component.isFinite else {
+            return nil
+        }
+        let clamped = min(max(component, 0), 1)
+        return UInt8((clamped * 255).rounded())
     }
 
     private func renderSegmentTitles(
@@ -619,6 +902,35 @@ public final class SettingsFormViewController: NSViewController {
         apply(.quotaSelectionModeChanged(selectionModes[sender.selectedSegment]))
     }
 
+    @objc private func gaugePresetChanged(_ sender: NSPopUpButton) {
+        let index = sender.indexOfSelectedItem
+        if gaugePresets.indices.contains(index) {
+            apply(.statusGaugePresetChanged(gaugePresets[index]))
+            return
+        }
+        guard index == customGaugePresetIndex else {
+            renderGaugeAppearance()
+            return
+        }
+        apply(.statusGaugeCustomSelected)
+    }
+
+    @objc private func gaugeBorderColorChanged(_ sender: NSColorWell) {
+        guard let color = normalizedGaugeColor(sender.color) else {
+            renderGaugeAppearance()
+            return
+        }
+        apply(.statusGaugeBorderColorChanged(color))
+    }
+
+    @objc private func gaugeFillColorChanged(_ sender: NSColorWell) {
+        guard let color = normalizedGaugeColor(sender.color) else {
+            renderGaugeAppearance()
+            return
+        }
+        apply(.statusGaugeFillColorChanged(color))
+    }
+
     @objc private func quotaSelectionChanged(_ sender: NSButton) {
         let options = formState.quotaOptions
         guard options.indices.contains(sender.tag) else {
@@ -693,6 +1005,7 @@ struct SettingsStrings {
     var windowTitle: String { localized("settings.window.title") }
     var languageSection: String { localized("settings.section.language") }
     var displaySection: String { localized("settings.section.display") }
+    var gaugeSection: String { localized("settings.section.gauge-colors") }
     var quotaSection: String { localized("settings.section.quotas") }
     var refreshSection: String { localized("settings.section.refresh") }
     var launchAtLogin: String { localized("settings.launch-at-login") }
@@ -712,6 +1025,12 @@ struct SettingsStrings {
     var refreshAccessibilityLabel: String {
         localized("settings.refresh.accessibility")
     }
+    var gaugePresetAccessibilityLabel: String {
+        localized("settings.gauge.preset.accessibility")
+    }
+    var gaugeBorderColor: String { localized("settings.gauge.border") }
+    var gaugeFillColor: String { localized("settings.gauge.fill") }
+    var gaugeCustom: String { localized("settings.gauge.preset.custom") }
     var connectionSection: String { localized("settings.section.connection") }
     var selectCodexAction: String { localized("settings.connection.select") }
     var copyDiagnosticsAction: String {
@@ -730,6 +1049,10 @@ struct SettingsStrings {
 
     func productName(_ mode: DisplayProductMode) -> String {
         localized("settings.product.\(mode.rawValue)")
+    }
+
+    func gaugePresetName(_ preset: StatusGaugePreset) -> String {
+        localized("settings.gauge.preset.\(preset.rawValue)")
     }
 
     func connectionPath(
@@ -863,5 +1186,11 @@ private extension LaunchAtLoginStatus {
         case .unavailable:
             "unavailable"
         }
+    }
+}
+
+private final class SettingsFormDocumentView: NSView {
+    override var isFlipped: Bool {
+        true
     }
 }

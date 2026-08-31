@@ -6,6 +6,7 @@ final class CodexGaugeFirstLaunchUITests: XCTestCase {
     private let settingsWindowIdentifier = "codex-gauge.settings.window"
     private let settingsCloseIdentifier = "codex-gauge.settings.close"
     private let settingsLanguageIdentifier = "codex-gauge.settings.language"
+    private let settingsGaugePresetIdentifier = "codex-gauge.settings.gauge-preset"
     private let statusAccessibilityLabel =
         "Codex 5시간 한도 남은 사용량 83퍼센트"
 
@@ -25,6 +26,11 @@ final class CodexGaugeFirstLaunchUITests: XCTestCase {
             "Expected the first-launch settings window"
         )
         selectKoreanLanguage(in: settingsWindow, application: application)
+        selectGaugePreset(
+            named: "그라파이트",
+            in: settingsWindow,
+            application: application
+        )
         assertSyntheticStatus(in: application)
 
         application.terminate()
@@ -37,7 +43,10 @@ final class CodexGaugeFirstLaunchUITests: XCTestCase {
                 .waitForExistence(timeout: 3),
             "Expected later launches to keep settings closed"
         )
-        assertSettingsMenuLifecycle(in: subsequentApplication)
+        assertSettingsMenuLifecycle(
+            in: subsequentApplication,
+            expectedGaugePreset: "그라파이트"
+        )
     }
 
     @MainActor
@@ -89,13 +98,45 @@ final class CodexGaugeFirstLaunchUITests: XCTestCase {
     }
 
     @MainActor
-    private func assertSettingsMenuLifecycle(in application: XCUIApplication) {
+    private func selectGaugePreset(
+        named presetName: String,
+        in settingsWindow: XCUIElement,
+        application: XCUIApplication
+    ) {
+        let preset = settingsWindow.popUpButtons[settingsGaugePresetIdentifier]
+        XCTAssertTrue(
+            preset.waitForExistence(timeout: 5),
+            "Expected the gauge color preset selector"
+        )
+        preset.click()
+        let menuItem = application.menuItems[presetName]
+        XCTAssertTrue(menuItem.waitForExistence(timeout: 5))
+        menuItem.click()
+        assertGaugePreset(presetName, in: settingsWindow)
+    }
+
+    @MainActor
+    private func assertGaugePreset(
+        _ presetName: String,
+        in settingsWindow: XCUIElement
+    ) {
+        let preset = settingsWindow.popUpButtons[settingsGaugePresetIdentifier]
+        XCTAssertTrue(preset.waitForExistence(timeout: 5))
+        XCTAssertEqual(preset.value as? String, presetName)
+    }
+
+    @MainActor
+    private func assertSettingsMenuLifecycle(
+        in application: XCUIApplication,
+        expectedGaugePreset: String
+    ) {
         openSettingsFromStatusItem(in: application)
         let settingsWindow = application.windows[settingsWindowIdentifier]
         XCTAssertTrue(
             settingsWindow.waitForExistence(timeout: 10),
             "Expected the settings menu action to show the window"
         )
+        assertGaugePreset(expectedGaugePreset, in: settingsWindow)
 
         let closeButton = settingsWindow.buttons[settingsCloseIdentifier]
         XCTAssertTrue(closeButton.waitForExistence(timeout: 5))
@@ -110,6 +151,10 @@ final class CodexGaugeFirstLaunchUITests: XCTestCase {
             application.windows[settingsWindowIdentifier]
                 .waitForExistence(timeout: 10),
             "Expected settings to be recreated from the menu"
+        )
+        assertGaugePreset(
+            expectedGaugePreset,
+            in: application.windows[settingsWindowIdentifier]
         )
     }
 

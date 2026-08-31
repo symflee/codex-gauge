@@ -8,6 +8,7 @@ func settingsFormTests() -> [TestCase] {
         settingsFormBuildsQuotaOptionsTest(),
         settingsFormReducerEditsPreferencesTest(),
         settingsFormReducerFiltersProductsTest(),
+        settingsFormEditsGaugeAppearanceTest(),
         settingsFormPresenterTest(),
         settingsFormReplacesDiscoveredQuotasTest(),
         settingsFormNormalizesEmptyManualPersistenceTest(),
@@ -98,6 +99,51 @@ private func settingsFormReducerEditsPreferencesTest() -> TestCase {
         try expect(formValues.refreshProfile == .fast, "Expected fast refresh")
         try expect(formValues.launchAtLoginIntent, "Expected login launch intent")
         try expect(formValues.language == .korean, "Expected Korean language")
+        try expect(formValues.statusGaugeAppearance == .default, "Expected gauge preserved")
+    }
+}
+
+private func settingsFormEditsGaugeAppearanceTest() -> TestCase {
+    TestCase(name: "settings form preserves explicit preset and custom gauge modes") {
+        let reducer = SettingsFormReducer()
+        var state = SettingsFormState(preferences: .default, discoveredQuotaIDs: [])
+
+        state = reducer.reduce(state: state, event: .statusGaugePresetChanged(.green))
+        try expect(state.statusGaugeAppearance == .preset(.green), "Expected green preset")
+
+        state = reducer.reduce(state: state, event: .statusGaugeCustomSelected)
+        try expect(
+            state.statusGaugeAppearance == .custom(
+                borderColor: StatusGaugePreset.green.borderColor,
+                fillColor: StatusGaugePreset.green.fillColor
+            ),
+            "Expected custom mode with current colors"
+        )
+
+        let border = StatusGaugeColor(red: 0x01, green: 0x23, blue: 0x45)
+        state = reducer.reduce(state: state, event: .statusGaugeBorderColorChanged(border))
+        try expect(state.statusGaugeAppearance.borderColor == border, "Expected custom border")
+        try expect(
+            state.statusGaugeAppearance.fillColor == StatusGaugePreset.green.fillColor,
+            "Expected fill preserved"
+        )
+
+        state = reducer.reduce(
+            state: state,
+            event: .statusGaugePresetChanged(.blue)
+        )
+        state = reducer.reduce(
+            state: state,
+            event: .statusGaugeFillColorChanged(StatusGaugePreset.blue.fillColor)
+        )
+        try expect(
+            state.statusGaugeAppearance == .custom(
+                borderColor: StatusGaugePreset.blue.borderColor,
+                fillColor: StatusGaugePreset.blue.fillColor
+            ),
+            "Expected matching colors to retain custom mode"
+        )
+        try expect(state.formValues.statusGaugeAppearance == state.statusGaugeAppearance, "Expected form value")
     }
 }
 
@@ -199,6 +245,10 @@ private func settingsFormReplacesDiscoveredQuotasTest() -> TestCase {
 
         try expect(updated.formValues == initial.formValues, "Expected preferences unchanged")
         try expect(updated.language == preferences.language, "Expected language unchanged")
+        try expect(
+            updated.statusGaugeAppearance == preferences.statusGaugeAppearance,
+            "Expected gauge appearance unchanged"
+        )
         try expect(updated.quotaOptions.count == 2, "Expected discovery rows replaced")
         try expect(
             updated.quotaOptions.first?.availability == .discovered,
@@ -219,6 +269,7 @@ private func settingsFormValuesAreSendableTest() -> TestCase {
             "Expected stable form defaults"
         )
         try expect(state.language == .english, "Expected default form language")
+        try expect(state.statusGaugeAppearance == .default, "Expected default gauge")
     }
 }
 

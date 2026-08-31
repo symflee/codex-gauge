@@ -45,6 +45,7 @@ public final class SettingsWindowController: NSWindowController, NSWindowDelegat
     }
 
     public func windowWillClose(_ notification: Notification) {
+        settingsViewController.deactivateGaugeColorWells()
         releaseWindowGraph(notification.object as? NSWindow)
         let closure = onClose
         onClose = nil

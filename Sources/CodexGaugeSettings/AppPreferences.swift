@@ -11,6 +11,7 @@ public struct AppPreferences: Equatable, Sendable {
     public let selectedExecutableURL: URL?
     public let hasCompletedFirstLaunch: Bool
     public let language: AppLanguage
+    public let statusGaugeAppearance: StatusGaugeAppearance
 
     public init(
         displayPreference: DisplayPreference = .default,
@@ -18,7 +19,8 @@ public struct AppPreferences: Equatable, Sendable {
         launchAtLoginIntent: Bool = false,
         selectedExecutableURL: URL? = nil,
         hasCompletedFirstLaunch: Bool = false,
-        language: AppLanguage = .english
+        language: AppLanguage = .english,
+        statusGaugeAppearance: StatusGaugeAppearance = .default
     ) {
         self.displayPreference = Self.normalize(displayPreference)
         self.refreshProfile = refreshProfile
@@ -26,6 +28,7 @@ public struct AppPreferences: Equatable, Sendable {
         self.selectedExecutableURL = Self.fileURL(selectedExecutableURL)
         self.hasCompletedFirstLaunch = hasCompletedFirstLaunch
         self.language = language
+        self.statusGaugeAppearance = statusGaugeAppearance
     }
 
     private static func normalize(

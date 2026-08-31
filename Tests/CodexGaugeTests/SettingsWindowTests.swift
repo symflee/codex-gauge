@@ -14,6 +14,7 @@ func settingsWindowTests() -> [TestCase] {
         settingsWindowCreationFailureSkipsActivationTest(),
         settingsWindowLateCancellationSkipsActivationTest(),
         settingsWindowPersistsEditsTest(),
+        settingsWindowGaugeAppearanceControlsTest(),
         settingsWindowRelocalizesInPlaceTest(),
         settingsWindowExternalLanguageUpdateDoesNotSaveTest(),
         settingsExecutableSelectorForwardsPromptTest(),
@@ -36,7 +37,8 @@ func settingsWindowTests() -> [TestCase] {
         settingsWindowRejectsTerminalShowTest(),
         settingsWindowShutdownClosesLateWindowTest(),
         settingsWindowShutdownFinishesCommittedSelectionTest(),
-        settingsDurationAccessibilityLocalizationTest()
+        settingsDurationAccessibilityLocalizationTest(),
+        settingsGaugeLocalizationParityTest()
     ]
 }
 
@@ -58,7 +60,8 @@ private func settingsWindowRelocalizesInPlaceScenario() async throws {
             productMode: .both,
             quotaSelection: .manual([quota])
         ),
-        language: .korean
+        language: .korean,
+        statusGaugeAppearance: .preset(.green)
     )
     try await repository.save(preferences)
     var runtimeValues = [SettingsFormValues]()
@@ -87,7 +90,7 @@ private func settingsWindowRelocalizesInPlaceScenario() async throws {
     try expect(controller.window?.title == "Codex Gauge 설정", "Expected Korean title")
     try expect(
         viewController.renderedSectionTitles == [
-            "언어", "표시 대상", "표시할 한도", "갱신 주기", "Codex 연결"
+            "언어", "표시 대상", "게이지 색상", "표시할 한도", "갱신 주기", "Codex 연결"
         ],
         "Expected every Korean section title"
     )
@@ -102,6 +105,17 @@ private func settingsWindowRelocalizesInPlaceScenario() async throws {
     try expect(
         viewController.renderedSelectionOptionTitles == ["자동 선택", "직접 선택"],
         "Expected Korean selection options"
+    )
+    try expect(
+        viewController.renderedGaugePresetOptionTitles == [
+            "선명한 파랑 — 기본", "그라파이트", "선명한 초록",
+            "선명한 주황", "선명한 보라", "사용자 지정"
+        ],
+        "Expected Korean gauge preset names"
+    )
+    try expect(
+        viewController.renderedGaugeColorLabels == ["테두리 색상", "채우기 색상"],
+        "Expected Korean gauge color labels"
     )
     try expect(
         viewController.renderedRefreshOptionTitles == ["수동", "절전", "균형", "빠름"],
@@ -121,7 +135,8 @@ private func settingsWindowRelocalizesInPlaceScenario() async throws {
     try expect(viewController.formState.language == .english, "Expected English form state")
     try expect(
         viewController.renderedSectionTitles == [
-            "Language", "Display", "Quotas to display", "Refresh profile", "Codex connection"
+            "Language", "Display", "Gauge colors", "Quotas to display",
+            "Refresh profile", "Codex connection"
         ],
         "Expected every English section title"
     )
@@ -136,6 +151,21 @@ private func settingsWindowRelocalizesInPlaceScenario() async throws {
     try expect(
         viewController.renderedSelectionOptionTitles == ["Automatic", "Manual"],
         "Expected English selection options"
+    )
+    try expect(
+        viewController.renderedGaugePresetOptionTitles == [
+            "Vivid Blue — Default", "Graphite", "Vivid Green",
+            "Vivid Orange", "Vivid Purple", "Custom"
+        ],
+        "Expected English gauge preset names"
+    )
+    try expect(
+        viewController.renderedGaugeColorLabels == ["Border color", "Fill color"],
+        "Expected English gauge color labels"
+    )
+    try expect(
+        viewController.formState.statusGaugeAppearance == .preset(.green),
+        "Expected language change to preserve gauge appearance"
     )
     try expect(
         viewController.renderedRefreshOptionTitles == ["Manual", "Eco", "Balanced", "Fast"],
@@ -438,6 +468,22 @@ private func settingsWindowStructureScenario() async throws {
     try expect(window.styleMask != .borderless, "Expected standard window chrome")
     try expect(abs(window.contentLayoutRect.width - 440) < 1, "Expected 440pt content width")
     try expect(controller.settingsViewController.isViewLoaded, "Expected programmatic view")
+    let outerScrollViews = controller.settingsViewController.view.subviews.compactMap {
+        $0 as? NSScrollView
+    }
+    try expect(outerScrollViews.count == 1, "Expected one outer form scroll view")
+    try expect(
+        outerScrollViews.first?.borderType == .noBorder,
+        "Expected borderless outer form scrolling"
+    )
+    try expect(
+        outerScrollViews.first?.hasVerticalScroller == true,
+        "Expected vertical form scrolling"
+    )
+    window.contentView?.layoutSubtreeIfNeeded()
+    let formHeight = outerScrollViews.first?.documentView?.frame.height ?? 0
+    let viewportHeight = outerScrollViews.first?.contentView.bounds.height ?? 0
+    try expect(formHeight > viewportHeight, "Expected form content to require scrolling")
     try expect(!window.title.hasPrefix("settings."), "Expected localized window title")
     let repeatedController = try await showSettingsController(coordinator)
     try expect(repeatedController === controller, "Expected one settings window")
@@ -449,6 +495,139 @@ private func settingsWindowPersistsEditsTest() -> TestCase {
     TestCase(name: "settings persists form edits and preserves hidden fields") {
         try await settingsWindowPersistenceScenario()
     }
+}
+
+private func settingsWindowGaugeAppearanceControlsTest() -> TestCase {
+    TestCase(name: "settings renders and persists preset and custom gauge colors") {
+        try await settingsWindowGaugeAppearanceControlsScenario()
+    }
+}
+
+@MainActor
+private func settingsWindowGaugeAppearanceControlsScenario() async throws {
+    _ = NSApplication.shared
+    let store = try SettingsUITestStore()
+    defer { store.cleanUp() }
+    let repository = try store.repository(defaultLanguage: .korean)
+    try await repository.save(
+        AppPreferences(
+            language: .korean,
+            statusGaugeAppearance: .preset(.blue)
+        )
+    )
+    var runtimeValues = [SettingsFormValues]()
+    let coordinator = SettingsWindowCoordinator(
+        repository: repository,
+        discoveredQuotaProvider: { [] },
+        onSettingsFormValuesChanged: { runtimeValues.append($0) }
+    )
+    let controller = try await showSettingsController(coordinator)
+    let viewController = controller.settingsViewController
+
+    try verifyInitialGaugeControls(viewController)
+    viewController.apply(.statusGaugePresetChanged(.purple))
+    try expect(runtimeValues.count == 1, "Expected one atomic preset callback")
+    try expect(
+        runtimeValues.last?.statusGaugeAppearance == .preset(.purple),
+        "Expected complete preset colors in one form value"
+    )
+    viewController.apply(.statusGaugeCustomSelected)
+    try expect(
+        viewController.formState.statusGaugeAppearance == .custom(
+            borderColor: StatusGaugePreset.purple.borderColor,
+            fillColor: StatusGaugePreset.purple.fillColor
+        ),
+        "Expected custom mode to copy the effective preset colors"
+    )
+
+    viewController.performGaugeBorderColorSelection(
+        testGaugeColor(red: 0x12, green: 0x34, blue: 0x56, alpha: 0.25)
+    )
+    try expect(
+        viewController.renderedGaugeColorHexValues == ["#123456", "#BF5AF2"],
+        "Expected opaque 8-bit sRGB border and preserved fill"
+    )
+    viewController.performGaugeFillColorSelection(
+        testGaugeColor(red: 0xAB, green: 0xCD, blue: 0xEF, alpha: 0)
+    )
+    try expect(
+        viewController.renderedGaugeColorHexValues == ["#123456", "#ABCDEF"],
+        "Expected opaque 8-bit sRGB fill and preserved border"
+    )
+    try expect(
+        viewController.renderedGaugeColorAccessibilityValues == ["#123456", "#ABCDEF"],
+        "Expected accessibility values to follow the current custom colors"
+    )
+    let callbackCount = runtimeValues.count
+    viewController.performGaugeBorderColorSelection(
+        NSColor(patternImage: NSImage(size: NSSize(width: 1, height: 1)))
+    )
+    try expect(
+        viewController.renderedGaugeColorHexValues == ["#123456", "#ABCDEF"],
+        "Expected an unconvertible color selection to be ignored"
+    )
+    try expect(
+        runtimeValues.count == callbackCount,
+        "Expected no form callback for an unconvertible color"
+    )
+    await coordinator.flushPendingSave()
+
+    let saved = await repository.load()
+    try expect(
+        saved.statusGaugeAppearance == .custom(
+            borderColor: StatusGaugeColor(red: 0x12, green: 0x34, blue: 0x56),
+            fillColor: StatusGaugeColor(red: 0xAB, green: 0xCD, blue: 0xEF)
+        ),
+        "Expected normalized custom colors persisted"
+    )
+    controller.close()
+}
+
+@MainActor
+private func verifyInitialGaugeControls(
+    _ viewController: SettingsFormViewController
+) throws {
+    try expect(
+        viewController.renderedGaugePresetOptionTitles == [
+            "선명한 파랑 — 기본", "그라파이트", "선명한 초록",
+            "선명한 주황", "선명한 보라", "사용자 지정"
+        ],
+        "Expected five ordered presets and custom"
+    )
+    try expect(
+        viewController.renderedGaugePresetSeparatorCount == 1,
+        "Expected one separator before custom"
+    )
+    try expect(
+        viewController.renderedGaugePresetSwatchCount == 6,
+        "Expected programmatic two-color swatches"
+    )
+    try expect(
+        viewController.renderedGaugeColorHexValues == ["#004C99", "#0A84FF"],
+        "Expected default blue colors"
+    )
+    try expect(
+        viewController.renderedGaugeColorAccessibilityValues == ["#004C99", "#0A84FF"],
+        "Expected current hex values for assistive technologies"
+    )
+    try expect(
+        viewController.usesExpandedNonContinuousGaugeColorWells,
+        "Expected expanded color wells with end-only updates"
+    )
+}
+
+private func testGaugeColor(
+    red: UInt8,
+    green: UInt8,
+    blue: UInt8,
+    alpha: CGFloat
+) -> NSColor {
+    NSColor(
+        srgbRed: CGFloat(red) / 255,
+        green: CGFloat(green) / 255,
+        blue: CGFloat(blue) / 255,
+        alpha: alpha
+    )
 }
 
 @MainActor
@@ -555,7 +734,8 @@ private func settingsWindowRecreationScenario() async throws {
             quotaSelection: .manual([identifier])
         ),
         refreshProfile: .eco,
-        launchAtLoginIntent: true
+        launchAtLoginIntent: true,
+        statusGaugeAppearance: .preset(.orange)
     )
     try await repository.save(updated)
 
@@ -567,6 +747,10 @@ private func settingsWindowRecreationScenario() async throws {
     try expect(state.selectedQuotaIDs == [identifier], "Expected reloaded selection")
     try expect(state.refreshProfile == .eco, "Expected reloaded refresh profile")
     try expect(state.launchAtLoginIntent, "Expected reloaded login intent")
+    try expect(
+        state.statusGaugeAppearance == .preset(.orange),
+        "Expected reloaded gauge appearance"
+    )
 
     controller?.close()
 }
@@ -653,6 +837,55 @@ private func settingsDurationAccessibilityLocalizationTest() -> TestCase {
         try expect(formatter.format(43_200) == "30 days", "Expected no month inference")
         try expect(formatter.format(nil) == "Unknown duration", "Expected localized unknown")
     }
+}
+
+private func settingsGaugeLocalizationParityTest() -> TestCase {
+    TestCase(name: "gauge settings keep Korean and English localization keys in parity") {
+        let korean = try gaugeSettingsLocalizationKeys(language: "ko")
+        let english = try gaugeSettingsLocalizationKeys(language: "en")
+        let required = Set([
+            "settings.section.gauge-colors",
+            "settings.gauge.preset.accessibility",
+            "settings.gauge.preset.blue",
+            "settings.gauge.preset.graphite",
+            "settings.gauge.preset.green",
+            "settings.gauge.preset.orange",
+            "settings.gauge.preset.purple",
+            "settings.gauge.preset.custom",
+            "settings.gauge.border",
+            "settings.gauge.fill"
+        ])
+
+        try expect(korean == english, "Expected complete localization key parity")
+        try expect(required.isSubset(of: korean), "Expected gauge localization keys")
+    }
+}
+
+private func gaugeSettingsLocalizationKeys(language: String) throws -> Set<String> {
+    let root = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+    let file = root
+        .appendingPathComponent("Sources/CodexGaugeAppKit/Resources")
+        .appendingPathComponent("\(language).lproj/Localizable.strings")
+    let contents = try String(contentsOf: file, encoding: .utf8)
+    return Set(contents.split(separator: "\n").compactMap(gaugeLocalizationKey))
+}
+
+private func gaugeLocalizationKey(_ line: Substring) -> String? {
+    guard line.first == "\"" else {
+        return nil
+    }
+    let parts = line.split(
+        separator: "\"",
+        maxSplits: 2,
+        omittingEmptySubsequences: false
+    )
+    guard parts.count > 1 else {
+        return nil
+    }
+    return String(parts[1])
 }
 
 private func settingsWindowConnectionSectionTest() -> TestCase {

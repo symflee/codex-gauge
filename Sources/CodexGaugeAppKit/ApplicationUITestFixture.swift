@@ -181,7 +181,8 @@ public struct UITestFixtureApplicationPreferencesLoader:
             launchAtLoginIntent: stored.launchAtLoginIntent,
             selectedExecutableURL: stored.selectedExecutableURL,
             hasCompletedFirstLaunch: stored.hasCompletedFirstLaunch,
-            language: stored.language
+            language: stored.language,
+            statusGaugeAppearance: stored.statusGaugeAppearance
         )
     }
 }

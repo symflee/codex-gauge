@@ -15,6 +15,7 @@ func applicationRuntimeTests() -> [TestCase] {
         applicationRuntimePublishesOnePresentationTransactionTest(),
         applicationRuntimeRoutesMenuAndSettingsTest(),
         applicationRuntimeRelocalizesWithoutRefreshingTest(),
+        applicationRuntimeRestylesWithoutRefreshingTest(),
         applicationRuntimePublishesLaunchAtLoginStateTest(),
         applicationRuntimeReplacesRefreshGenerationTest(),
         applicationRuntimePreservesPendingWakeAcrossReplacementTest(),
@@ -36,7 +37,11 @@ private func applicationRuntimeRelocalizesWithoutRefreshingTest() -> TestCase {
 
 @MainActor
 private func applicationRuntimeRelocalizesWithoutRefreshingScenario() async throws {
-    let preferences = AppPreferences(language: .korean)
+    let appearance = StatusGaugeAppearance.preset(.purple)
+    let preferences = AppPreferences(
+        language: .korean,
+        statusGaugeAppearance: appearance
+    )
     let harness = RuntimeHarness(
         preferencesLoader: RuntimePreferencesLoader(preferences: preferences)
     )
@@ -57,11 +62,16 @@ private func applicationRuntimeRelocalizesWithoutRefreshingScenario() async thro
             displayPreference: preferences.displayPreference,
             refreshProfile: preferences.refreshProfile,
             launchAtLoginIntent: preferences.launchAtLoginIntent,
-            language: .english
+            language: .english,
+            statusGaugeAppearance: preferences.statusGaugeAppearance
         )
     )
 
     try expect(harness.status.languages.last == .english, "Expected English status")
+    try expect(
+        harness.status.appearances.last == appearance,
+        "Expected language change to preserve the gauge appearance"
+    )
     try expect(harness.settings.languages.last == .english, "Expected English settings")
     try expect(
         menuActionTitle(.refresh, in: harness.menu.models.last) == "Refresh",
@@ -75,6 +85,60 @@ private func applicationRuntimeRelocalizesWithoutRefreshingScenario() async thro
     try expect(
         harness.deadlineScheduler.productStates.count == deadlineCountBeforeChange,
         "Expected no deadline publication for language changes"
+    )
+}
+
+private func applicationRuntimeRestylesWithoutRefreshingTest() -> TestCase {
+    TestCase(name: "application runtime restyles cached status without refreshing") {
+        try await applicationRuntimeRestylesWithoutRefreshingScenario()
+    }
+}
+
+@MainActor
+private func applicationRuntimeRestylesWithoutRefreshingScenario() async throws {
+    let preferences = AppPreferences(
+        language: .korean,
+        statusGaugeAppearance: .preset(.blue)
+    )
+    let harness = RuntimeHarness(
+        preferencesLoader: RuntimePreferencesLoader(preferences: preferences)
+    )
+    harness.coordinator.start()
+    await harness.coordinator.waitForPendingOperations()
+    let refreshEventsBeforeChange = await harness.refreshBuilder.coordinators[0].events
+    let deadlineCountBeforeChange = harness.deadlineScheduler.productStates.count
+    let presentationCountBeforeChange = harness.status.presentedFrames.count
+
+    harness.coordinator.settingsFormValuesDidChange(
+        SettingsFormValues(
+            displayPreference: preferences.displayPreference,
+            refreshProfile: preferences.refreshProfile,
+            launchAtLoginIntent: preferences.launchAtLoginIntent,
+            language: preferences.language,
+            statusGaugeAppearance: .preset(.green)
+        )
+    )
+
+    try expect(
+        harness.status.appearances.last == .preset(.green),
+        "Expected updated gauge appearance"
+    )
+    try expect(
+        harness.status.languages.last == .korean,
+        "Expected appearance change to preserve the language"
+    )
+    try expect(
+        harness.status.presentedFrames.count == presentationCountBeforeChange + 1,
+        "Expected one cached status presentation"
+    )
+    let refreshEventsAfterChange = await harness.refreshBuilder.coordinators[0].events
+    try expect(
+        refreshEventsAfterChange == refreshEventsBeforeChange,
+        "Expected no provider or refresh command for appearance changes"
+    )
+    try expect(
+        harness.deadlineScheduler.productStates.count == deadlineCountBeforeChange,
+        "Expected no deadline publication for appearance changes"
     )
 }
 
@@ -794,9 +858,22 @@ private final class RuntimeApplicationSpy: CodexGaugeApplicationRunning {
 
 @MainActor
 private final class RuntimeStatusSpy: ApplicationStatusRuntime {
+    private struct RenderingConfiguration {
+        let language: AppLanguage
+        let appearance: StatusGaugeAppearance
+    }
+
     private(set) var presentedFrames = [[DisplayFrame]]()
     private(set) var pauseValues = [StatusRotationPauseReason: Bool]()
-    private(set) var languages = [AppLanguage]()
+    private var renderingConfigurations = [RenderingConfiguration]()
+
+    var languages: [AppLanguage] {
+        renderingConfigurations.map(\.language)
+    }
+
+    var appearances: [StatusGaugeAppearance] {
+        renderingConfigurations.map(\.appearance)
+    }
 
     func present(frames: [DisplayFrame]) {
         presentedFrames.append(frames)
@@ -806,8 +883,16 @@ private final class RuntimeStatusSpy: ApplicationStatusRuntime {
         pauseValues[reason] = paused
     }
 
-    func updateLanguage(_ language: AppLanguage) {
-        languages.append(language)
+    func updateRenderingConfiguration(
+        language: AppLanguage,
+        statusGaugeAppearance: StatusGaugeAppearance
+    ) {
+        renderingConfigurations.append(
+            RenderingConfiguration(
+                language: language,
+                appearance: statusGaugeAppearance
+            )
+        )
     }
 }
 

@@ -110,7 +110,8 @@ private func applicationUITestFixtureForcesCodexDisplayInMemoryScenario() async 
         launchAtLoginIntent: true,
         selectedExecutableURL: URL(fileURLWithPath: "/Synthetic/ignored/codex"),
         hasCompletedFirstLaunch: true,
-        language: .korean
+        language: .korean,
+        statusGaugeAppearance: .preset(.purple)
     )
     try await repository.save(stored)
     let loader = UITestFixtureApplicationPreferencesLoader(repository: repository)
@@ -129,6 +130,10 @@ private func applicationUITestFixtureForcesCodexDisplayInMemoryScenario() async 
         "Expected selected executable preserved in memory"
     )
     try expect(loaded.language == .korean, "Expected stored language preserved in memory")
+    try expect(
+        loaded.statusGaugeAppearance == stored.statusGaugeAppearance,
+        "Expected stored gauge appearance preserved in memory"
+    )
     try expect(persisted == stored, "Expected stored preferences untouched")
 }
 

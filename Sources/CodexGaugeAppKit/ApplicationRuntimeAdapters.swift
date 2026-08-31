@@ -9,7 +9,10 @@ import Foundation
 public protocol ApplicationStatusRuntime: AnyObject {
     func present(frames: [DisplayFrame])
 
-    func updateLanguage(_ language: AppLanguage)
+    func updateRenderingConfiguration(
+        language: AppLanguage,
+        statusGaugeAppearance: StatusGaugeAppearance
+    )
 
     func setRotationPaused(
         _ paused: Bool,
@@ -18,14 +21,19 @@ public protocol ApplicationStatusRuntime: AnyObject {
 }
 
 public extension ApplicationStatusRuntime {
-    func updateLanguage(_ language: AppLanguage) {
+    func updateRenderingConfiguration(
+        language: AppLanguage,
+        statusGaugeAppearance: StatusGaugeAppearance
+    ) {
         _ = language
+        _ = statusGaugeAppearance
     }
 }
 
 @MainActor
 public final class StatusItemRuntimeAdapter: ApplicationStatusRuntime {
     public let controller: StatusItemController
+    private let imageCache = StatusGaugeImageCache()
 
     public init(controller: StatusItemController) {
         self.controller = controller
@@ -35,8 +43,17 @@ public final class StatusItemRuntimeAdapter: ApplicationStatusRuntime {
         controller.setFrames(frames)
     }
 
-    public func updateLanguage(_ language: AppLanguage) {
-        controller.replaceRenderer(StatusFrameRenderer(language: language))
+    public func updateRenderingConfiguration(
+        language: AppLanguage,
+        statusGaugeAppearance: StatusGaugeAppearance
+    ) {
+        controller.replaceRenderer(
+            StatusFrameRenderer(
+                language: language,
+                statusGaugeAppearance: statusGaugeAppearance,
+                cache: imageCache
+            )
+        )
     }
 
     public func setRotationPaused(

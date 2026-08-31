@@ -43,8 +43,11 @@ func initialSystemLanguagePersistenceContract() async throws {
     let persisted = try #require(
         JSONSerialization.jsonObject(with: persistedData) as? [String: Any]
     )
-    #expect(persisted["version"] as? Int == 2)
+    #expect(persisted["version"] as? Int == 3)
     #expect(persisted["language"] as? String == "ko")
+    #expect(firstLoad.statusGaugeAppearance == .default)
+    #expect(firstLoad.statusGaugeAppearance.borderColor.hexString == "#004C99")
+    #expect(firstLoad.statusGaugeAppearance.fillColor.hexString == "#0A84FF")
 }
 
 @Test("Version zero preferences migrate through the isolated repository")
@@ -88,8 +91,10 @@ func versionZeroPreferencesMigrationContract() async throws {
         JSONSerialization.jsonObject(with: automaticallyMigratedData)
             as? [String: Any]
     )
-    #expect(automaticallyMigrated["version"] as? Int == 2)
+    #expect(automaticallyMigrated["version"] as? Int == 3)
     #expect(automaticallyMigrated["language"] as? String == "ko")
+    #expect(preferences.statusGaugeAppearance == .default)
+    #expect(preferences.statusGaugeAppearance.fillColor.hexString == "#0A84FF")
 
     try await store.repository.save(preferences)
     let migratedData = try #require(store.storedData())
@@ -97,7 +102,7 @@ func versionZeroPreferencesMigrationContract() async throws {
         JSONSerialization.jsonObject(with: migratedData) as? [String: Any]
     )
 
-    #expect(migratedObject["version"] as? Int == 2)
+    #expect(migratedObject["version"] as? Int == 3)
     #expect(migratedObject["language"] as? String == "ko")
 }
 
@@ -131,8 +136,37 @@ func versionOnePreferencesMigrationContract() async throws {
     let migrated = try #require(
         JSONSerialization.jsonObject(with: migratedData) as? [String: Any]
     )
-    #expect(migrated["version"] as? Int == 2)
+    #expect(migrated["version"] as? Int == 3)
     #expect(migrated["language"] as? String == "ko")
+    #expect(preferences.statusGaugeAppearance == .default)
+    #expect(preferences.statusGaugeAppearance.fillColor.hexString == "#0A84FF")
+}
+
+@Test("Version two preferences migrate with a default gauge appearance")
+func versionTwoPreferencesMigrationContract() async throws {
+    let payload: [String: Any] = [
+        "version": 2,
+        "display": [
+            "productMode": "codex",
+            "selection": ["mode": "automatic"]
+        ],
+        "refreshProfile": "balanced",
+        "language": "ko"
+    ]
+    let store = try StandardPreferencesStore(
+        initialData: JSONSerialization.data(withJSONObject: payload)
+    )
+    defer { store.cleanUp() }
+
+    let preferences = await store.repository.load()
+    let migratedData = try #require(store.storedData())
+    let migrated = try #require(
+        JSONSerialization.jsonObject(with: migratedData) as? [String: Any]
+    )
+
+    #expect(preferences.statusGaugeAppearance == .default)
+    #expect(preferences.statusGaugeAppearance.fillColor.hexString == "#0A84FF")
+    #expect(migrated["version"] as? Int == 3)
 }
 
 @Test("Malformed and future preference payloads use safe defaults")

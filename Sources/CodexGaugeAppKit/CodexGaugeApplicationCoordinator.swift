@@ -94,7 +94,10 @@ public final class CodexGaugeApplicationCoordinator {
         preferences = AppPreferences(language: initialLanguage)
         self.now = now
         self.startupHook = startupHook
-        statusRuntime.updateLanguage(initialLanguage)
+        statusRuntime.updateRenderingConfiguration(
+            language: initialLanguage,
+            statusGaugeAppearance: preferences.statusGaugeAppearance
+        )
         settingsRuntime.updateLanguage(initialLanguage)
     }
 
@@ -376,10 +379,15 @@ public final class CodexGaugeApplicationCoordinator {
     ) {
         let displayChanged = previous.displayPreference != current.displayPreference
         let languageChanged = previous.language != current.language
+        let appearanceChanged = previous.statusGaugeAppearance
+            != current.statusGaugeAppearance
         if languageChanged {
             updateLanguage(current.language)
         }
-        if displayChanged || languageChanged {
+        if appearanceChanged, !languageChanged {
+            updateStatusRenderingConfiguration()
+        }
+        if displayChanged || languageChanged || appearanceChanged {
             presentCurrentPublication(publishDeadlines: false)
         }
         if displayChanged {
@@ -396,8 +404,15 @@ public final class CodexGaugeApplicationCoordinator {
 
     private func updateLanguage(_ language: AppLanguage) {
         menuModelBuilder = .bundled(language: language)
-        statusRuntime.updateLanguage(language)
+        updateStatusRenderingConfiguration()
         settingsRuntime.updateLanguage(language)
+    }
+
+    private func updateStatusRenderingConfiguration() {
+        statusRuntime.updateRenderingConfiguration(
+            language: preferences.language,
+            statusGaugeAppearance: preferences.statusGaugeAppearance
+        )
     }
 
     private func enqueueLaunchAtLoginChange(_ enabled: Bool) {
@@ -623,7 +638,8 @@ private extension AppPreferences {
             launchAtLoginIntent: values.launchAtLoginIntent,
             selectedExecutableURL: selectedExecutableURL,
             hasCompletedFirstLaunch: hasCompletedFirstLaunch,
-            language: values.language
+            language: values.language,
+            statusGaugeAppearance: values.statusGaugeAppearance
         )
     }
 
@@ -634,7 +650,8 @@ private extension AppPreferences {
             launchAtLoginIntent: launchAtLoginIntent,
             selectedExecutableURL: url,
             hasCompletedFirstLaunch: hasCompletedFirstLaunch,
-            language: language
+            language: language,
+            statusGaugeAppearance: statusGaugeAppearance
         )
     }
 }

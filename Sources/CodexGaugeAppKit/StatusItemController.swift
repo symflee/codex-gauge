@@ -12,12 +12,18 @@ public protocol StatusItemPresenting: AnyObject {
 @MainActor
 public final class SystemStatusItemPresenter: StatusItemPresenting, StatusMenuPresenting {
     private let statusItem: NSStatusItem
+    private let button: NSStatusBarButton?
 
     public init(statusItem: NSStatusItem) {
         self.statusItem = statusItem
-        statusItem.button?.setAccessibilityIdentifier(
-            CodexGaugeAccessibilityIdentifier.statusItem
-        )
+        button = statusItem.button
+        configure(button)
+    }
+
+    public init(statusItem: NSStatusItem, button: NSStatusBarButton) {
+        self.statusItem = statusItem
+        self.button = button
+        configure(button)
     }
 
     public convenience init(statusBar: NSStatusBar = .system) {
@@ -26,7 +32,7 @@ public final class SystemStatusItemPresenter: StatusItemPresenting, StatusMenuPr
     }
 
     public var effectiveAppearance: NSAppearance? {
-        statusItem.button?.effectiveAppearance
+        button?.effectiveAppearance
     }
 
     public func setLength(_ length: CGFloat) {
@@ -34,12 +40,35 @@ public final class SystemStatusItemPresenter: StatusItemPresenting, StatusMenuPr
     }
 
     public func present(_ frame: RenderedStatusFrame) {
-        statusItem.button?.attributedTitle = frame.attributedTitle
-        statusItem.button?.setAccessibilityLabel(frame.accessibilityLabel)
+        guard let button else {
+            return
+        }
+        clearTitle(on: button)
+        button.imagePosition = .imageOnly
+        button.imageScaling = .scaleNone
+        button.image = frame.image
+        button.setAccessibilityLabel(frame.accessibilityLabel)
     }
 
     public func setMenu(_ menu: NSMenu) {
         statusItem.menu = menu
+    }
+
+    private func configure(_ button: NSStatusBarButton?) {
+        guard let button else {
+            return
+        }
+        button.setAccessibilityIdentifier(
+            CodexGaugeAccessibilityIdentifier.statusItem
+        )
+        button.imagePosition = .imageOnly
+        button.imageScaling = .scaleNone
+        clearTitle(on: button)
+    }
+
+    private func clearTitle(on button: NSStatusBarButton) {
+        button.title = ""
+        button.attributedTitle = NSAttributedString(string: "")
     }
 }
 
@@ -51,6 +80,7 @@ public final class StatusItemController {
     private var renderer: StatusFrameRendering
     private let rotation: StatusFrameRotation
     private let prototypeBuilder = StatusWidthPrototypeBuilder()
+    private let durationPresentationPolicy = StatusDurationPresentationPolicy()
 
     public init(
         presenter: StatusItemPresenting,
@@ -72,9 +102,13 @@ public final class StatusItemController {
         _ frames: [DisplayFrame],
         widthPrototypes: [DisplayFrame] = []
     ) {
-        let renderedFrames = render(frames)
+        let durationMode = durationPresentationPolicy.mode(for: frames)
+        let renderedFrames = render(frames, durationMode: durationMode)
         let derivedPrototypes = prototypeBuilder.prototypes(for: frames)
-        let widthCandidates = renderedFrames + render(derivedPrototypes + widthPrototypes)
+        let widthCandidates = renderedFrames + render(
+            derivedPrototypes + widthPrototypes,
+            durationMode: durationMode
+        )
         updateLength(using: widthCandidates)
         rotation.setFrames(renderedFrames)
     }
@@ -83,9 +117,16 @@ public final class StatusItemController {
         rotation.setPaused(paused, for: reason)
     }
 
-    private func render(_ frames: [DisplayFrame]) -> [RenderedStatusFrame] {
+    private func render(
+        _ frames: [DisplayFrame],
+        durationMode: StatusDurationMode
+    ) -> [RenderedStatusFrame] {
         frames.map { frame in
-            renderer.render(frame, appearance: presenter.effectiveAppearance)
+            renderer.render(
+                frame,
+                durationMode: durationMode,
+                appearance: presenter.effectiveAppearance
+            )
         }
     }
 
@@ -102,5 +143,38 @@ public final class StatusItemController {
         _ right: RenderedStatusFrame
     ) -> Bool {
         left.measuredWidth < right.measuredWidth
+    }
+}
+
+private struct StatusDurationPresentationPolicy: Sendable {
+    func mode(for frames: [DisplayFrame]) -> StatusDurationMode {
+        let totalCriterionCount = frames.reduce(0) { count, frame in
+            count + criterionCount(for: frame)
+        }
+        guard totalCriterionCount == 1 else {
+            return .full
+        }
+        return .compactSingleCriterion
+    }
+
+    private func criterionCount(for frame: DisplayFrame) -> Int {
+        switch frame {
+        case .single:
+            1
+        case .comparison(let codex, let spark):
+            comparisonCriterionCount(codex: codex, spark: spark)
+        }
+    }
+
+    private func comparisonCriterionCount(
+        codex: DisplayQuota,
+        spark: DisplayQuota
+    ) -> Int {
+        guard codex.identifier.rawDurationMinutes
+            == spark.identifier.rawDurationMinutes
+        else {
+            return 2
+        }
+        return 1
     }
 }

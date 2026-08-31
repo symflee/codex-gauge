@@ -2,25 +2,160 @@ import AppKit
 import CodexGaugeCore
 import CodexGaugeSettings
 
+public enum StatusDurationMode: Equatable, Sendable {
+    case full
+    case compactSingleCriterion
+}
+
+public struct StatusGaugeVisualLabelFormatter: Sendable {
+    public init() {}
+
+    public func format(
+        _ frame: DisplayFrame,
+        durationMode: StatusDurationMode = .full
+    ) -> String {
+        switch frame {
+        case .single(let quota):
+            singleLabel(quota, durationMode: durationMode)
+        case .comparison(let codex, let spark):
+            comparisonLabel(
+                codex: codex,
+                spark: spark,
+                durationMode: durationMode
+            )
+        }
+    }
+
+    private func singleLabel(
+        _ quota: DisplayQuota,
+        durationMode: StatusDurationMode
+    ) -> String {
+        var components: [String] = []
+        if quota.identifier.product == .spark {
+            components.append("S")
+        }
+        appendDuration(of: quota, mode: durationMode, to: &components)
+        components.append(valueLabel(quota.value))
+        return components.joined(separator: " ")
+    }
+
+    private func comparisonLabel(
+        codex: DisplayQuota,
+        spark: DisplayQuota,
+        durationMode: StatusDurationMode
+    ) -> String {
+        guard hasSharedDuration(codex: codex, spark: spark) else {
+            return mixedDurationLabel(
+                codex: codex,
+                spark: spark,
+                durationMode: durationMode
+            )
+        }
+        return sharedDurationLabel(
+            codex: codex,
+            spark: spark,
+            durationMode: durationMode
+        )
+    }
+
+    private func sharedDurationLabel(
+        codex: DisplayQuota,
+        spark: DisplayQuota,
+        durationMode: StatusDurationMode
+    ) -> String {
+        let values = "C\(valueLabel(codex.value)) · S\(valueLabel(spark.value))"
+        guard let duration = durationLabel(of: codex, mode: durationMode) else {
+            return values
+        }
+        return "\(duration) \(values)"
+    }
+
+    private func mixedDurationLabel(
+        codex: DisplayQuota,
+        spark: DisplayQuota,
+        durationMode: StatusDurationMode
+    ) -> String {
+        let codexLabel = productLabel("C", quota: codex, durationMode: durationMode)
+        let sparkLabel = productLabel("S", quota: spark, durationMode: durationMode)
+        return "\(codexLabel) · \(sparkLabel)"
+    }
+
+    private func hasSharedDuration(
+        codex: DisplayQuota,
+        spark: DisplayQuota
+    ) -> Bool {
+        codex.identifier.rawDurationMinutes == spark.identifier.rawDurationMinutes
+    }
+
+    private func productLabel(
+        _ product: String,
+        quota: DisplayQuota,
+        durationMode: StatusDurationMode
+    ) -> String {
+        var components = [product]
+        appendDuration(of: quota, mode: durationMode, to: &components)
+        components.append(valueLabel(quota.value))
+        return components.joined(separator: " ")
+    }
+
+    private func appendDuration(
+        of quota: DisplayQuota,
+        mode: StatusDurationMode,
+        to components: inout [String]
+    ) {
+        guard let duration = durationLabel(of: quota, mode: mode) else {
+            return
+        }
+        components.append(duration)
+    }
+
+    private func durationLabel(
+        of quota: DisplayQuota,
+        mode: StatusDurationMode
+    ) -> String? {
+        let durationBadge = quota.durationBadge
+        guard mode == .compactSingleCriterion else {
+            return durationBadge.label
+        }
+        guard durationBadge == .unknown else {
+            return nil
+        }
+        return durationBadge.label
+    }
+
+    private func valueLabel(_ value: DisplayValueState) -> String {
+        switch value {
+        case .fresh(let percent):
+            "\(percent)%"
+        case .stale(let percent):
+            "~\(percent)%"
+        case .loading:
+            "…"
+        case .unavailable:
+            "—"
+        }
+    }
+}
+
 @MainActor
 public struct RenderedStatusFrame {
-    public let attributedTitle: NSAttributedString
+    public let image: NSImage
     public let semanticTitle: String
+    public let visualLabel: String
     public let accessibilityLabel: String
-    public let badgeLabels: [String]
     public let measuredWidth: CGFloat
 
     public init(
-        attributedTitle: NSAttributedString,
+        image: NSImage,
         semanticTitle: String,
+        visualLabel: String,
         accessibilityLabel: String,
-        badgeLabels: [String],
         measuredWidth: CGFloat
     ) {
-        self.attributedTitle = attributedTitle
+        self.image = image
         self.semanticTitle = semanticTitle
+        self.visualLabel = visualLabel
         self.accessibilityLabel = accessibilityLabel
-        self.badgeLabels = badgeLabels
         self.measuredWidth = measuredWidth
     }
 }
@@ -29,117 +164,88 @@ public struct RenderedStatusFrame {
 public protocol StatusFrameRendering: AnyObject {
     func render(
         _ frame: DisplayFrame,
+        durationMode: StatusDurationMode,
         appearance: NSAppearance?
     ) -> RenderedStatusFrame
+}
+
+public extension StatusFrameRendering {
+    func render(
+        _ frame: DisplayFrame,
+        appearance: NSAppearance?
+    ) -> RenderedStatusFrame {
+        render(frame, durationMode: .full, appearance: appearance)
+    }
 }
 
 @MainActor
 public final class StatusFrameRenderer: StatusFrameRendering {
     private let titleFormatter: DisplayFrameFormatter
+    private let visualLabelFormatter: StatusGaugeVisualLabelFormatter
     private let accessibilityFormatter: StatusAccessibilityFormatter
-    private let badgeCache: StatusBadgeImageCache
+    private let statusGaugeAppearance: StatusGaugeAppearance
+    private let cache: StatusGaugeImageCache
 
     public init(
         titleFormatter: DisplayFrameFormatter = DisplayFrameFormatter(),
-        accessibilityFormatter: StatusAccessibilityFormatter = StatusAccessibilityFormatter(),
-        badgeCache: StatusBadgeImageCache = StatusBadgeImageCache()
+        visualLabelFormatter: StatusGaugeVisualLabelFormatter
+            = StatusGaugeVisualLabelFormatter(),
+        accessibilityFormatter: StatusAccessibilityFormatter
+            = StatusAccessibilityFormatter(),
+        statusGaugeAppearance: StatusGaugeAppearance = .default,
+        cache: StatusGaugeImageCache = StatusGaugeImageCache()
     ) {
         self.titleFormatter = titleFormatter
+        self.visualLabelFormatter = visualLabelFormatter
         self.accessibilityFormatter = accessibilityFormatter
-        self.badgeCache = badgeCache
+        self.statusGaugeAppearance = statusGaugeAppearance
+        self.cache = cache
     }
 
     public convenience init(
         language: AppLanguage,
-        badgeCache: StatusBadgeImageCache = StatusBadgeImageCache()
+        statusGaugeAppearance: StatusGaugeAppearance = .default,
+        cache: StatusGaugeImageCache = StatusGaugeImageCache()
     ) {
         self.init(
-            accessibilityFormatter: StatusAccessibilityFormatter(
-                language: language
-            ),
-            badgeCache: badgeCache
+            accessibilityFormatter: StatusAccessibilityFormatter(language: language),
+            statusGaugeAppearance: statusGaugeAppearance,
+            cache: cache
         )
     }
 
     public func render(
         _ frame: DisplayFrame,
+        durationMode: StatusDurationMode,
         appearance: NSAppearance?
     ) -> RenderedStatusFrame {
-        let formatted = titleFormatter.format(frame)
-        let result = makeAttributedTitle(formatted.title, appearance: appearance)
+        let semanticTitle = titleFormatter.format(frame).title
+        let visualLabel = visualLabelFormatter.format(
+            frame,
+            durationMode: durationMode
+        )
+        return makeRenderedFrame(
+            frame,
+            semanticTitle: semanticTitle,
+            visualLabel: visualLabel
+        )
+    }
+
+    private func makeRenderedFrame(
+        _ frame: DisplayFrame,
+        semanticTitle: String,
+        visualLabel: String
+    ) -> RenderedStatusFrame {
+        let image = cache.image(
+            label: visualLabel,
+            appearance: statusGaugeAppearance
+        )
         return RenderedStatusFrame(
-            attributedTitle: result.title,
-            semanticTitle: formatted.title,
+            image: image,
+            semanticTitle: semanticTitle,
+            visualLabel: visualLabel,
             accessibilityLabel: accessibilityFormatter.format(frame),
-            badgeLabels: result.badgeLabels,
-            measuredWidth: ceil(result.title.size().width)
+            measuredWidth: ceil(image.size.width)
         )
     }
-
-    private func makeAttributedTitle(
-        _ title: String,
-        appearance: NSAppearance?
-    ) -> AttributedTitleResult {
-        let result = NSMutableAttributedString()
-        var remaining = title[...]
-        var labels: [String] = []
-        while let badge = nextBadge(in: remaining) {
-            appendText(String(remaining[..<badge.opening]), to: result)
-            let label = String(remaining[badge.labelRange])
-            appendBadge(label, appearance: appearance, to: result)
-            labels.append(label)
-            remaining = remaining[badge.remainderStart...]
-        }
-        appendText(String(remaining), to: result)
-        return AttributedTitleResult(title: result, badgeLabels: labels)
-    }
-
-    private func nextBadge(in text: Substring) -> BadgeRange? {
-        guard let opening = text.firstIndex(of: "[") else {
-            return nil
-        }
-        let labelStart = text.index(after: opening)
-        guard let closing = text[labelStart...].firstIndex(of: "]") else {
-            return nil
-        }
-        return BadgeRange(
-            opening: opening,
-            labelRange: labelStart..<closing,
-            remainderStart: text.index(after: closing)
-        )
-    }
-
-    private func appendText(_ text: String, to title: NSMutableAttributedString) {
-        guard !text.isEmpty else {
-            return
-        }
-        let font = NSFont.monospacedDigitSystemFont(
-            ofSize: NSFont.systemFontSize,
-            weight: .regular
-        )
-        title.append(NSAttributedString(string: text, attributes: [.font: font]))
-    }
-
-    private func appendBadge(
-        _ label: String,
-        appearance: NSAppearance?,
-        to title: NSMutableAttributedString
-    ) {
-        let attachment = NSTextAttachment()
-        attachment.image = badgeCache.image(label: label, appearance: appearance)
-        attachment.bounds.origin.y = -2
-        title.append(NSAttributedString(attachment: attachment))
-    }
-}
-
-private struct BadgeRange {
-    let opening: Substring.Index
-    let labelRange: Range<Substring.Index>
-    let remainderStart: Substring.Index
-}
-
-@MainActor
-private struct AttributedTitleResult {
-    let title: NSAttributedString
-    let badgeLabels: [String]
 }
