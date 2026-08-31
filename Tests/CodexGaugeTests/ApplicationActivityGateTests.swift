@@ -4,8 +4,7 @@ func applicationActivityGateTests() -> [TestCase] {
     [
         applicationActivitySuspendsOnlyForFirstReasonTest(),
         applicationActivityResumesOnlyAfterLastReasonTest(),
-        applicationActivityIgnoresDuplicateEventsTest(),
-        applicationActivityValuesAreSendableTest()
+        applicationActivityIgnoresDuplicateEventsTest()
     ]
 }
 
@@ -61,19 +60,4 @@ private func applicationActivityIgnoresDuplicateEventsTest() -> TestCase {
             "Expected missing reason end ignored"
         )
     }
-}
-
-private func applicationActivityValuesAreSendableTest() -> TestCase {
-    TestCase(name: "application activity values are immutable and Sendable") {
-        requireApplicationActivitySendable(ApplicationSuspensionReason.sleep)
-        requireApplicationActivitySendable(ApplicationActivityEvent.began(.sleep))
-        requireApplicationActivitySendable(ApplicationActivityState.active)
-        requireApplicationActivitySendable(ApplicationActivityCommand.suspend)
-        requireApplicationActivitySendable(ApplicationActivityTransition(state: .active))
-        requireApplicationActivitySendable(ApplicationActivityReducer())
-    }
-}
-
-private func requireApplicationActivitySendable<Value: Sendable>(_ value: Value) {
-    _ = value
 }

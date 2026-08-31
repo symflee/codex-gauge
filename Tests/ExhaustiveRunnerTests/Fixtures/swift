@@ -2,18 +2,82 @@
 
 set -euo pipefail
 
-if [ "$#" -ne 2 ] || [ "$1" != "run" ] || [ "$2" != "codex-gauge-tests" ]; then
+[ "$#" -ge 4 ] || exit 64
+[ "$1" = "run" ] || exit 64
+shift
+[ "$1" = "--force-resolved-versions" ] || exit 64
+shift
+
+skip_build=false
+if [ "$1" = "--skip-build" ]; then
+    skip_build=true
+    shift
+fi
+
+if [ "$#" -lt 2 ] \
+    || [ "$1" != "codex-gauge-tests" ] \
+    || [ "$2" != "--verbose" ]; then
     exit 64
 fi
 
+shift 2
+
 case "${CODEX_GAUGE_FAKE_TEST_CASE:-}" in
     success)
+        [ "$skip_build" = false ] || exit 64
+        if [ "$#" -eq 1 ]; then
+            [ "$1" = "--verbose" ] || exit 64
+        fi
+        [ "$#" -le 1 ] || exit 64
         printf '%s\n' \
             "RUN fixture" \
             "PASS fixture" \
             "SUMMARY total=1 pass=1 fail=0"
         ;;
+    skip-build)
+        [ "$skip_build" = true ] || exit 64
+        [ "$#" -eq 0 ] || exit 64
+        printf '%s\n' \
+            "RUN fixture" \
+            "PASS fixture" \
+            "SUMMARY total=1 pass=1 fail=0"
+        ;;
+    list)
+        [ "$#" -eq 1 ] && [ "$1" = "--list" ] || exit 64
+        printf '%s\n' "TEST fixture"
+        ;;
+    forwarded)
+        [ "$#" -eq 4 ] || exit 64
+        [ "$1" = "--suite" ] || exit 64
+        [ "$2" = "protocol" ] || exit 64
+        [ "$3" = "--filter" ] || exit 64
+        [ "$4" = "MiXeD fixture name" ] || exit 64
+        printf '%s\n' \
+            "RUN fixture" \
+            "PASS fixture" \
+            "SUMMARY total=1 pass=1 fail=0"
+        ;;
+    invalid-selection)
+        [ "$#" -eq 2 ] || exit 64
+        [ "$1" = "--suite" ] || exit 64
+        [ "$2" = "invalid" ] || exit 64
+        printf '%s\n' "codex-gauge-tests: invalid selection" >&2
+        exit 64
+        ;;
+    toolchain-mismatch)
+        [ "$#" -eq 0 ] || exit 64
+        printf '%s\n' \
+            "error: module compiled with Swift 6.3.3 cannot be imported by the Swift 6.2.3 compiler: /Users/synthetic/private/cache.swiftmodule" \
+            "error: synthetic private build detail"
+        exit 1
+        ;;
+    unknown-build-error)
+        [ "$#" -eq 0 ] || exit 64
+        printf '%s\n' "error: synthetic unknown compiler failure"
+        exit 1
+        ;;
     missing-summary)
+        [ "$#" -eq 0 ] || exit 64
         printf '%s\n' \
             "RUN fixture" \
             "PASS fixture"

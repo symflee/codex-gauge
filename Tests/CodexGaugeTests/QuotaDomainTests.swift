@@ -7,11 +7,9 @@ func quotaDomainTests() -> [TestCase] {
         clampsUsedPercentTest(),
         floorsRemainingPercentTest(),
         normalizesNonpositiveDurationTest(),
-        knownDurationBadgesTest(),
-        exactDurationBadgesTest(),
+        durationBadgesTest(),
         resetDateTest(),
-        immutableSnapshotTest(),
-        sendableDomainValuesTest()
+        immutableSnapshotTest()
     ]
 }
 
@@ -72,32 +70,9 @@ private func normalizesNonpositiveDurationTest() -> TestCase {
     }
 }
 
-private func knownDurationBadgesTest() -> TestCase {
-    TestCase(name: "duration badge preserves known product labels") {
-        let expectations = [
-            DurationExpectation(minutes: 300, label: "5h"),
-            DurationExpectation(minutes: 1_440, label: "d"),
-            DurationExpectation(minutes: 10_080, label: "w"),
-            DurationExpectation(minutes: 20_160, label: "2w"),
-            DurationExpectation(minutes: 43_200, label: "30d")
-        ]
-
-        for expectation in expectations {
-            try verify(expectation)
-        }
-    }
-}
-
-private func exactDurationBadgesTest() -> TestCase {
+private func durationBadgesTest() -> TestCase {
     TestCase(name: "duration badge labels only exact safe units") {
-        let expectations = [
-            DurationExpectation(minutes: 60, label: "1h"),
-            DurationExpectation(minutes: 120, label: "2h"),
-            DurationExpectation(minutes: 2_880, label: "2d"),
-            DurationExpectation(minutes: 30_240, label: "21d")
-        ]
-
-        for expectation in expectations {
+        for expectation in durationExpectations {
             try verify(expectation)
         }
 
@@ -133,26 +108,22 @@ private func immutableSnapshotTest() -> TestCase {
     }
 }
 
-private func sendableDomainValuesTest() -> TestCase {
-    TestCase(name: "quota domain values are sendable and equatable") {
-        let quota = try makeWindow()
-        let snapshot = UsageSnapshot(
-            capturedAt: Date(timeIntervalSince1970: 1_893_000_000),
-            quotasByProduct: [.spark: [quota]]
-        )
-
-        requireSendable(UsageProduct.codex)
-        requireSendable(QuotaSlot.primary)
-        requireSendable(quota)
-        requireSendable(snapshot)
-        try expect(snapshot == snapshot, "Expected value equality")
-    }
-}
-
 private struct DurationExpectation {
     let minutes: Int
     let label: String
 }
+
+private let durationExpectations = [
+    DurationExpectation(minutes: 300, label: "5h"),
+    DurationExpectation(minutes: 1_440, label: "d"),
+    DurationExpectation(minutes: 10_080, label: "w"),
+    DurationExpectation(minutes: 20_160, label: "2w"),
+    DurationExpectation(minutes: 43_200, label: "30d"),
+    DurationExpectation(minutes: 60, label: "1h"),
+    DurationExpectation(minutes: 120, label: "2h"),
+    DurationExpectation(minutes: 2_880, label: "2d"),
+    DurationExpectation(minutes: 30_240, label: "21d")
+]
 
 private func verify(_ expectation: DurationExpectation) throws {
     let badge = DurationBadge(windowDurationMinutes: expectation.minutes)
@@ -186,8 +157,4 @@ private func makeWindow(
         throw TestFailure(description: "Expected a valid quota window")
     }
     return quota
-}
-
-private func requireSendable<Value: Sendable>(_ value: Value) {
-    _ = value
 }

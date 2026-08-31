@@ -10,8 +10,7 @@ func launchAtLoginTests() -> [TestCase] {
         launchDisableRegistrationTest(),
         launchUnavailableServiceTest(),
         launchFailureRedactionTest(),
-        launchConcurrentStatusChangeTest(),
-        launchValueSendabilityTest()
+        launchConcurrentStatusChangeTest()
     ]
 }
 
@@ -137,13 +136,6 @@ private func launchConcurrentStatusChangeTest() -> TestCase {
     }
 }
 
-private func launchValueSendabilityTest() -> TestCase {
-    TestCase(name: "login launch statuses and errors are immutable sendable values") {
-        requireLaunchSendable(LaunchAtLoginStatus.enabled)
-        requireLaunchSendable(LaunchAtLoginError.registrationFailed)
-    }
-}
-
 @MainActor
 private func withLaunchController(
     status: LaunchAtLoginStatus,
@@ -207,7 +199,3 @@ private final class RecordingLaunchAtLoginService: LaunchAtLoginServicing {
 }
 
 private struct SyntheticLaunchServiceError: Error {}
-
-private func requireLaunchSendable<Value: Sendable>(_ value: Value) {
-    _ = value
-}

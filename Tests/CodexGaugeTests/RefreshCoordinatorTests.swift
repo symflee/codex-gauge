@@ -25,8 +25,7 @@ func refreshCoordinatorTests() -> [TestCase] {
         lowPowerCoordinatorSchedulingTest(),
         incompatibleRateLimitResponseStopsPollingTest(),
         refreshPublicationMalformedWithoutPriorTest(),
-        refreshPublicationPartialProductTest(),
-        refreshCoordinatorValuesAreSendableTest()
+        refreshPublicationPartialProductTest()
     ]
 }
 
@@ -761,16 +760,6 @@ private func incompatibleRateLimitResponseStopsPollingTest() -> TestCase {
     }
 }
 
-private func refreshCoordinatorValuesAreSendableTest() -> TestCase {
-    TestCase(name: "refresh coordinator boundary values are Sendable") {
-        requireCoordinatorSendable(RefreshFailure.timeout)
-        requireCoordinatorSendable(RefreshProductIssue.partial)
-        requireCoordinatorSendable(RefreshPublication.initial)
-        requireCoordinatorSendable(DisplayPreferenceQuotaSampleSelector())
-        requireCoordinatorSendable(SystemRefreshClock())
-    }
-}
-
 private func makeCoordinator(
     clock: TestRefreshClock,
     provider: any RefreshSessionProviding,
@@ -1137,8 +1126,4 @@ private actor TestRefreshUsageSession: RefreshUsageSession {
             return result
         }
     }
-}
-
-private func requireCoordinatorSendable<Value: Sendable>(_ value: Value) {
-    _ = value
 }

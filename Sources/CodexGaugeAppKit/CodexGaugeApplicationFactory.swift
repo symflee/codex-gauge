@@ -15,22 +15,26 @@ extension CodexGaugeApplicationCoordinator: CodexGaugeApplicationRunning {}
 @MainActor
 public enum CodexGaugeApplicationFactory {
     public static func makeDefault(
-        repository: AppPreferencesRepository = AppPreferencesRepository(
-            userDefaults: .standard
-        ),
+        repository: AppPreferencesRepository? = nil,
         workspace: NSWorkspace = .shared,
         application: NSApplication = .shared,
         launchArguments: [String] = ProcessInfo.processInfo.arguments,
+        environment: [String: String] = ProcessInfo.processInfo.environment,
         startupHook: @escaping CodexGaugeApplicationCoordinator.StartupHook =
             CodexGaugeApplicationCoordinator.noOpStartupHook
     ) -> CodexGaugeApplicationCoordinator {
         let launchOptions = CodexGaugeApplicationLaunchOptions(
-            arguments: launchArguments
+            arguments: launchArguments,
+            environment: environment
+        )
+        let resolvedRepository = resolveRepository(
+            repository,
+            launchOptions: launchOptions
         )
         switch launchOptions.mode {
         case .production:
             return makeProduction(
-                repository: repository,
+                repository: resolvedRepository,
                 workspace: workspace,
                 application: application,
                 launchOptions: launchOptions,
@@ -38,13 +42,30 @@ public enum CodexGaugeApplicationFactory {
             )
         case .uiTestFixture83:
             return makeUITestFixture(
-                repository: repository,
+                repository: resolvedRepository,
                 workspace: workspace,
                 application: application,
                 launchOptions: launchOptions,
                 startupHook: startupHook
             )
         }
+    }
+
+    private static func resolveRepository(
+        _ repository: AppPreferencesRepository?,
+        launchOptions: CodexGaugeApplicationLaunchOptions
+    ) -> AppPreferencesRepository {
+        if let repository {
+            return repository
+        }
+        guard launchOptions.mode == .uiTestFixture83 else {
+            return AppPreferencesRepository(userDefaults: .standard)
+        }
+        guard let suiteName = launchOptions.uiTestPreferencesSuiteName,
+              let userDefaults = UserDefaults(suiteName: suiteName) else {
+            preconditionFailure("UI test fixture requires an isolated preferences suite")
+        }
+        return AppPreferencesRepository(userDefaults: userDefaults)
     }
 
     private static func makeProduction(

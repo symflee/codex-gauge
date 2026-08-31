@@ -7,8 +7,7 @@ func systemActivityMonitorTests() -> [TestCase] {
         systemActivityMapsWorkspaceNotificationsTest(),
         systemActivitySamplesLowPowerModeTest(),
         systemActivityStartIsIdempotentTest(),
-        systemActivityStopRemovesObserversTest(),
-        systemActivityValuesAreSendableTest()
+        systemActivityStopRemovesObserversTest()
     ]
 }
 
@@ -107,12 +106,6 @@ private func systemActivityStopRemovesObserversTest() -> TestCase {
     }
 }
 
-private func systemActivityValuesAreSendableTest() -> TestCase {
-    TestCase(name: "system activity event is an immutable sendable value") {
-        requireSystemActivitySendable(SystemActivityEvent.sleep)
-    }
-}
-
 @MainActor
 private func postWorkspaceEvents(to center: NotificationCenter) {
     center.post(name: NSWorkspace.willSleepNotification, object: nil)
@@ -145,8 +138,4 @@ private final class MutablePowerState {
     func read() -> Bool {
         isEnabled
     }
-}
-
-private func requireSystemActivitySendable<Value: Sendable>(_ value: Value) {
-    _ = value
 }

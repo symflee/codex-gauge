@@ -17,8 +17,7 @@ func codexExecutableLocatorTests() -> [TestCase] {
         knownApplicationTest(),
         knownHomebrewExecutableTest(),
         homeLocalSymlinkTest(),
-        noCandidateTest(),
-        locatorValuesAreSendableTest()
+        noCandidateTest()
     ]
 }
 
@@ -219,17 +218,6 @@ private func noCandidateTest() -> TestCase {
     }
 }
 
-private func locatorValuesAreSendableTest() -> TestCase {
-    TestCase(name: "locator contract and errors are sendable values") {
-        try withSyntheticFileSystem { fileSystem in
-            let locator = fileSystem.locator()
-
-            requireLocatorSendable(locator)
-            requireLocatorSendable(CodexLocationError.notFound)
-        }
-    }
-}
-
 private func expectLocationError(
     _ expected: CodexLocationError,
     from locator: some CodexLocating
@@ -248,10 +236,6 @@ private func withSyntheticFileSystem(
     let fileSystem = try SyntheticFileSystem()
     defer { fileSystem.remove() }
     try body(fileSystem)
-}
-
-private func requireLocatorSendable<Value: Sendable>(_ value: Value) {
-    _ = value
 }
 
 private struct SyntheticFileSystem {

@@ -424,16 +424,18 @@ plutil -convert json -o - "$application_entitlements" \
     || fail "application entitlements are not limited to app Debug and Release"
 [ "$(grep -F -c 'ENABLE_HARDENED_RUNTIME = YES;' "$project_file")" = "2" ] \
     || fail "Hardened Runtime must remain enabled for the application"
-osacompile -o "$test_root/configure-release-dmg.scpt" \
-    "$configure_layout_script"
-osacompile -o "$test_root/verify-release-dmg-layout.scpt" \
-    "$verify_layout_script"
-osacompile -o "$test_root/set-invalid-dmg-layout.scpt" \
-    "$invalidate_layout_script"
-osacompile -o "$test_root/relocate-dmg-window.scpt" \
-    "$relocate_layout_script"
-osacompile -o "$test_root/resize-dmg-window.scpt" \
-    "$resize_layout_script"
+if [ "${CODEX_GAUGE_HEADLESS_RELEASE_CONTRACTS:-}" != "1" ]; then
+    osacompile -o "$test_root/configure-release-dmg.scpt" \
+        "$configure_layout_script"
+    osacompile -o "$test_root/verify-release-dmg-layout.scpt" \
+        "$verify_layout_script"
+    osacompile -o "$test_root/set-invalid-dmg-layout.scpt" \
+        "$invalidate_layout_script"
+    osacompile -o "$test_root/relocate-dmg-window.scpt" \
+        "$relocate_layout_script"
+    osacompile -o "$test_root/resize-dmg-window.scpt" \
+        "$resize_layout_script"
+fi
 
 background_width="$(sips -g pixelWidth "$background_source" \
     | awk '/pixelWidth:/ { print $2 }')"
@@ -699,6 +701,13 @@ expect_failure_containing "Sparkle Autoupdate must not contain entitlements" \
     --build 1 \
     --sparkle-public-ed-key "$fixture_public_key" \
     --expected-third-party-notices "$fixture_notices"
+
+if [ "${CODEX_GAUGE_HEADLESS_RELEASE_CONTRACTS:-}" = "1" ]; then
+    echo "PASS headless release packaging contracts"
+    exit 0
+fi
+[ "${CODEX_GAUGE_LOCAL_RELEASE_EFFECTS_ALLOWED:-}" = "1" ] \
+    || fail "set CODEX_GAUGE_LOCAL_RELEASE_EFFECTS_ALLOWED=1 for DMG fixture tests"
 
 artifact_path="$test_root/CodexGauge.dmg"
 "$create_script" \

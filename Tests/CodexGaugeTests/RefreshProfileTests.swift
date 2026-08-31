@@ -9,13 +9,14 @@ func refreshTests() -> [TestCase] {
 private func refreshProfileTests() -> [TestCase] {
     [
         refreshProfileIntervalsTest(),
-        lowPowerIntervalsTest(),
-        refreshProfileDefaultsAndSendabilityTest()
+        lowPowerIntervalsTest()
     ]
 }
 
 private func refreshProfileIntervalsTest() -> TestCase {
     TestCase(name: "refresh profiles expose exact normal and burst intervals") {
+        try expect(RefreshProfile.default == .balanced, "Expected balanced default")
+        try expect(RefreshState().profile == .balanced, "Expected balanced state default")
         try expect(
             RefreshProfile.manual.intervals == RefreshIntervals(normal: nil, burst: nil),
             "Unexpected manual intervals"
@@ -60,19 +61,4 @@ private func lowPowerIntervalsTest() -> TestCase {
         try expect(balanced == clamped, "Expected balance clamp")
         try expect(fast == clamped, "Expected fast clamp")
     }
-}
-
-private func refreshProfileDefaultsAndSendabilityTest() -> TestCase {
-    TestCase(name: "balanced is the sendable default refresh profile") {
-        let state = RefreshState()
-
-        requireRefreshSendable(RefreshProfile.default)
-        requireRefreshSendable(state)
-        try expect(RefreshProfile.default == .balanced, "Expected balanced profile default")
-        try expect(state.profile == .balanced, "Expected balanced state default")
-    }
-}
-
-private func requireRefreshSendable<Value: Sendable>(_ value: Value) {
-    _ = value
 }

@@ -154,8 +154,7 @@ private func displayFrameBuilderTests() -> [TestCase] {
         productStatePlaceholderTest(),
         freshnessDeadlineTest(),
         resetDeadlineTest(),
-        independentProductFreshnessTest(),
-        sendableDisplayValuesTest()
+        independentProductFreshnessTest()
     ]
 }
 
@@ -254,6 +253,7 @@ private func manualMissingSelectionTest() -> TestCase {
         let now = displayReferenceDate()
         let available = try displayWindow(usedPercent: 17, durationMinutes: 300)
         let missingID = QuotaSelectionID(product: .codex, rawDurationMinutes: 10_080)
+        let normalizedID = QuotaSelectionID(product: .codex, rawDurationMinutes: 0)
         let preference = DisplayPreference(
             productMode: .codex,
             quotaSelection: .manual([missingID])
@@ -269,6 +269,7 @@ private func manualMissingSelectionTest() -> TestCase {
 
         try expect(item.identifier == missingID, "Expected stable manual identifier")
         try expect(item.value == .unavailable, "Expected missing selection to remain unavailable")
+        try expect(normalizedID.rawDurationMinutes == nil, "Expected unknown normalized ID")
     }
 }
 
@@ -383,26 +384,6 @@ private func independentProductFreshnessTest() -> TestCase {
     }
 }
 
-private func sendableDisplayValuesTest() -> TestCase {
-    TestCase(name: "display preferences and frames are sendable values") {
-        let identifier = QuotaSelectionID(product: .spark, rawDurationMinutes: 300)
-        let normalizedIdentifier = QuotaSelectionID(product: .spark, rawDurationMinutes: 0)
-        let preference = DisplayPreference(
-            productMode: .spark,
-            quotaSelection: .manual([identifier])
-        )
-        let frame = DisplayFrame.single(
-            DisplayQuota(identifier: identifier, value: .loading)
-        )
-
-        requireDisplaySendable(identifier)
-        requireDisplaySendable(preference)
-        requireDisplaySendable(frame)
-        try expect(normalizedIdentifier.rawDurationMinutes == nil, "Expected stable unknown ID")
-        try expect(frame == frame, "Expected display value equality")
-    }
-}
-
 private func displayWindow(
     slot: QuotaSlot = .primary,
     usedPercent: Double,
@@ -495,8 +476,4 @@ private func isComparison(_ frame: DisplayFrame) -> Bool {
         return false
     }
     return true
-}
-
-private func requireDisplaySendable<Value: Sendable>(_ value: Value) {
-    _ = value
 }

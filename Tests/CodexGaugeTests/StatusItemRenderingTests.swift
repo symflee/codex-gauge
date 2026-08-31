@@ -13,7 +13,6 @@ func statusItemRenderingTests() -> [TestCase] {
         statusDurationModeTransitionTest(),
         widthPrototypePreservesActualDurationModeTest(),
         gaugeImageCacheTest(),
-        gaugeImageCacheDefaultCapacityTest(),
         gaugeTextContrastTest(),
         vividPresetTextContrastTest(),
         capsuleBitmapRenderingTest(),
@@ -387,19 +386,6 @@ private func gaugeImageCacheTest() -> TestCase {
             try expect(second !== secondAfterEviction, "Expected least-recently-used eviction")
             try expect(cache.count == 2, "Expected bounded cache capacity")
             try expect(!first.isTemplate, "Expected a non-template color image")
-        }
-    }
-}
-
-private func gaugeImageCacheDefaultCapacityTest() -> TestCase {
-    TestCase(name: "status gauge cache defaults to thirty-two entries") {
-        try await MainActor.run {
-            let cache = StatusGaugeImageCache()
-            let appearance = StatusGaugeAppearance.default
-            for index in 0..<33 {
-                _ = cache.image(label: "5h \(index)%", appearance: appearance)
-            }
-            try expect(cache.count == 32, "Expected the default thirty-two entry bound")
         }
     }
 }

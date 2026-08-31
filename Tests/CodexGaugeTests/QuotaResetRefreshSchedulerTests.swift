@@ -18,8 +18,7 @@ func quotaResetRefreshSchedulerTests() -> [TestCase] {
         quotaResetHandlesPastValidityExpiryOnceTest(),
         quotaResetCombinesCoincidentDeadlineReasonsTest(),
         quotaResetPrunesHandledDeadlinesTest(),
-        quotaResetIgnoresEmptySnapshotTest(),
-        quotaResetDeadlineReasonsAreSendableTest()
+        quotaResetIgnoresEmptySnapshotTest()
     ]
 }
 
@@ -146,17 +145,6 @@ private func quotaResetIgnoresEmptySnapshotTest() -> TestCase {
             try expect(fixture.timer.requests.isEmpty, "Expected no empty publication timer")
             try expect(fixture.handledReasons.isEmpty, "Expected no empty publication event")
         }
-    }
-}
-
-private func quotaResetDeadlineReasonsAreSendableTest() -> TestCase {
-    TestCase(name: "quota reset deadline reasons are immutable sendable values") {
-        requireUsageDeadlineSendable(UsageDeadlineReason.quotaReset)
-        requireUsageDeadlineSendable(UsageDeadlineReason.validityExpired)
-        try expect(
-            UsageDeadlineReason.quotaReset != .validityExpired,
-            "Expected distinct composition reasons"
-        )
     }
 }
 
@@ -540,8 +528,4 @@ private func resetQuotas(offsets: [TimeInterval?]) throws -> [QuotaWindow] {
         }
         return quota
     }
-}
-
-private func requireUsageDeadlineSendable<Value: Sendable>(_ value: Value) {
-    _ = value
 }

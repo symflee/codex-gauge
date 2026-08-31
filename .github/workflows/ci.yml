@@ -36,75 +36,8 @@ jobs:
           xcodebuild -version
           swift --version
 
-      - name: Describe package
-        run: swift package describe
+      - name: Test tier entrypoints
+        run: bash Tests/TestEntryPointTests/test_test_entry_points.sh
 
-      - name: Build Debug
-        run: >-
-          swift build -c debug
-          --explicit-target-dependency-import-check error
-          -Xswiftc -warnings-as-errors
-
-      - name: Run Swift Testing contracts
-        run: >-
-          swift test
-          --explicit-target-dependency-import-check error
-          -Xswiftc -strict-concurrency=complete
-          -Xswiftc -warnings-as-errors
-
-      - name: Run exhaustive custom tests
-        run: Scripts/run-exhaustive-tests.sh
-
-      - name: Build Release
-        run: >-
-          swift build -c release
-          --explicit-target-dependency-import-check error
-          -Xswiftc -warnings-as-errors
-
-      - name: Test release automation
-        shell: bash
-        run: |
-          set -euo pipefail
-          bash Tests/ExhaustiveRunnerTests/test_exhaustive_runner.sh
-          bash Tests/ReleasePackagingTests/test_release_packaging.sh
-          bash Tests/ReleaseWorkflowTests/test_release_workflow.sh
-
-      - name: Test Xcode unit target
-        run: >-
-          xcodebuild test
-          -project CodexGauge.xcodeproj
-          -scheme CodexGauge
-          -destination 'platform=macOS,arch=arm64'
-          -derivedDataPath "$RUNNER_TEMP/CodexGaugeDerivedData"
-          -only-testing:CodexGaugeUnitTests
-          CODE_SIGNING_ALLOWED=NO
-
-      - name: Test Xcode UI smoke
-        if: github.event_name != 'pull_request'
-        run: >-
-          xcodebuild test
-          -project CodexGauge.xcodeproj
-          -scheme CodexGauge
-          -destination 'platform=macOS,arch=arm64'
-          -derivedDataPath "$RUNNER_TEMP/CodexGaugeDerivedData"
-          -only-testing:CodexGaugeUITests
-          CODE_SIGN_IDENTITY=-
-          DEVELOPMENT_TEAM=
-
-      - name: Build and verify release disk image
-        shell: bash
-        run: |
-          set -euo pipefail
-          build_settings="$(xcodebuild \
-            -project CodexGauge.xcodeproj \
-            -target CodexGauge \
-            -configuration Release \
-            -showBuildSettings)"
-          version="$(awk '$1 == "MARKETING_VERSION" { value = $3 } END { print value }' <<< "$build_settings")"
-          build="$(awk '$1 == "CURRENT_PROJECT_VERSION" { value = $3 } END { print value }' <<< "$build_settings")"
-          test -n "$version"
-          test -n "$build"
-          Scripts/build-release-dmg.sh \
-            --output-directory "$RUNNER_TEMP/release" \
-            --version "$version" \
-            --build "$build"
+      - name: Run pull-request verification
+        run: Scripts/test-pr.sh

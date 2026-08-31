@@ -75,14 +75,11 @@ jobs:
           echo "artifact_name=codex-gauge-$version-$build" >> "$GITHUB_OUTPUT"
 
       - name: Test release contracts
-        shell: bash
-        run: |
-          set -euo pipefail
-          bash Tests/ReleasePackagingTests/test_release_packaging.sh
-          bash Tests/ReleaseAppcastTests/test_release_appcast.sh
-          bash Tests/ReleaseWorkflowTests/test_release_workflow.sh
+        run: Scripts/test-release-contracts.sh
 
       - name: Test Xcode UI smoke
+        env:
+          CODEX_GAUGE_LOCAL_RELEASE_EFFECTS_ALLOWED: "1"
         run: >-
           xcodebuild test
           -project CodexGauge.xcodeproj
@@ -132,7 +129,8 @@ jobs:
             --output-directory "$RUNNER_TEMP/codex-gauge-release" \
             --version "${{ needs.build_package.outputs.version }}" \
             --build "${{ needs.build_package.outputs.build }}" \
-            --sparkle-public-ed-key "$SPARKLE_PUBLIC_ED_KEY"
+            --sparkle-public-ed-key "$SPARKLE_PUBLIC_ED_KEY" \
+            --allow-local-release-effects
 
       - name: Add review metadata and public verification tools
         shell: bash
@@ -449,7 +447,8 @@ jobs:
             --expected-third-party-notices "$release_directory/verification/THIRD_PARTY_NOTICES.md" \
             --sparkle-public-ed-key "$public_key" \
             --version "${{ needs.build_package.outputs.version }}" \
-            --build "${{ needs.build_package.outputs.build }}"
+            --build "${{ needs.build_package.outputs.build }}" \
+            --allow-local-release-effects
           bash "$release_directory/verification/verify-release-appcast.sh" \
             --appcast "$release_directory/appcast.xml" \
             --archive "$release_directory/CodexGauge.dmg" \

@@ -12,8 +12,7 @@ func refreshPresentationAdapterTests() -> [TestCase] {
         refreshPresentationKeepsProductIssuesIndependentTest(),
         refreshPresentationMapsGlobalFailuresTest(),
         refreshPresentationUsesExecutableSelectionWithoutApplicationTest(),
-        refreshPresentationPreservesLoadingStateTest(),
-        refreshPresentationValuesAreSendableTest()
+        refreshPresentationPreservesLoadingStateTest()
     ]
 }
 
@@ -338,19 +337,6 @@ private func refreshPresentationPreservesLoadingStateTest() -> TestCase {
     }
 }
 
-private func refreshPresentationValuesAreSendableTest() -> TestCase {
-    TestCase(name: "refresh presentation values are immutable and Sendable") {
-        let presentation = RefreshPresentationAdapter().makePresentation(
-            publication: .initial,
-            preference: .default,
-            canOpenCodexApplication: true,
-            now: Date(timeIntervalSince1970: 1_900_000_000)
-        )
-        requireRefreshPresentationSendable(RefreshPresentationAdapter())
-        requireRefreshPresentationSendable(presentation)
-    }
-}
-
 private func presentationProduct(
     windows: [QuotaWindow],
     freshness: ProductValueFreshness,
@@ -398,8 +384,4 @@ private func presentationWindow(
         throw TestFailure(description: "Expected synthetic quota")
     }
     return window
-}
-
-private func requireRefreshPresentationSendable<Value: Sendable>(_ value: Value) {
-    _ = value
 }

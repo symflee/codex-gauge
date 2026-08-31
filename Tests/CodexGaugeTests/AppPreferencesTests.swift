@@ -24,8 +24,7 @@ func appPreferencesTests() -> [TestCase] {
         appPreferencesExecutableSelectionMergeTest(),
         appPreferencesFirstLaunchAtomicMergeTest(),
         appPreferencesSuiteIsolationTest(),
-        appPreferencesSafePayloadTest(),
-        appPreferencesSendabilityTest()
+        appPreferencesSafePayloadTest()
     ]
 }
 
@@ -98,6 +97,8 @@ private func appPreferencesDefaultsTest() -> TestCase {
             "Expected injected default preferences"
         )
         try expect(preferences.language == .korean, "Expected Korean default language")
+        try expect(AppPreferences.default == AppPreferences(), "Expected stable defaults")
+        try expect(AppPreferences.default.language == .english, "Expected English fallback")
         try expect(preferences.displayPreference == .default, "Expected default display")
         try expect(preferences.statusGaugeAppearance == .default, "Expected blue gauge")
         try expect(
@@ -997,15 +998,6 @@ private func appPreferencesSafePayloadTest() -> TestCase {
     }
 }
 
-private func appPreferencesSendabilityTest() -> TestCase {
-    TestCase(name: "application preferences are immutable sendable values") {
-        requirePreferencesSendable(AppPreferences.default)
-        try expect(AppPreferences.default == AppPreferences(), "Expected stable defaults")
-        try expect(AppPreferences.default.language == .english, "Expected stable English fallback")
-        try expect(AppPreferences.default.statusGaugeAppearance == .default, "Expected blue gauge")
-    }
-}
-
 private struct PreferencesTestStore {
     let suiteName: String
     let userDefaults: UserDefaults
@@ -1088,8 +1080,4 @@ private func requiredURL(_ string: String) throws -> URL {
         throw TestFailure(description: "Expected synthetic URL")
     }
     return url
-}
-
-private func requirePreferencesSendable<Value: Sendable>(_ value: Value) {
-    _ = value
 }

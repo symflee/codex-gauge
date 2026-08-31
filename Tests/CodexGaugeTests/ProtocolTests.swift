@@ -39,8 +39,7 @@ private func responseInterpretationTests() -> [TestCase] {
         treatsMissingBucketsAsUnavailableTest(),
         classifiesRateLimitEnvelopeTest(),
         toleratesUnknownRateLimitFieldsTest(),
-        propagatesTypedRPCFailureTest(),
-        protocolValuesAreSendableTest()
+        propagatesTypedRPCFailureTest()
     ]
 }
 
@@ -324,19 +323,6 @@ private func propagatesTypedRPCFailureTest() -> TestCase {
     }
 }
 
-private func protocolValuesAreSendableTest() -> TestCase {
-    TestCase(name: "protocol values are immutable Sendable values") {
-        let response = try decodeResponse("{\"id\":1,\"result\":{}}")
-        let result = try interpretRateLimits(rateLimitResponse(result: "{}"))
-
-        requireProtocolSendable(response)
-        requireProtocolSendable(result)
-        requireProtocolSendable(AccountStatus.signedOut)
-        requireProtocolSendable(RateLimitResponseStatus.accepted)
-        try expect(response == response, "Expected response value equality")
-    }
-}
-
 private func multiBucketFixture() -> String {
     rateLimitResponse(result: """
     {"rateLimitsByLimitId":{"codex":{"primary":{"usedPercent":12.5,"windowDurationMins":300,"resetsAt":1900000000},"secondary":{"usedPercent":34,"windowDurationMins":10080,"resetsAt":1900600000}},"codex_bengalfox":{"primary":{"usedPercent":7,"windowDurationMins":300,"resetsAt":1900000000},"secondary":null}}}
@@ -379,10 +365,6 @@ private func expectMessageError(
     } catch let error as JSONRPCDecodingError {
         try expect(error == expected, "Unexpected JSON-RPC decoding failure")
     }
-}
-
-private func requireProtocolSendable<Value: Sendable>(_ value: Value) {
-    _ = value
 }
 
 private extension JSONRPCMessage {

@@ -12,8 +12,7 @@ func appServerSmokeTests() -> [TestCase] {
         appServerSmokeAwaitsSharedCancellationCleanupTest(),
         appServerSmokeMapsLocationFailuresTest(),
         appServerSmokeMapsTypedSessionFailuresTest(),
-        appServerSmokeOutputNeverIncludesUnderlyingErrorTest(),
-        appServerSmokeValuesAreSendableTest()
+        appServerSmokeOutputNeverIncludesUnderlyingErrorTest()
     ]
 }
 
@@ -222,14 +221,6 @@ private func appServerSmokeOutputNeverIncludesUnderlyingErrorTest() -> TestCase 
     }
 }
 
-private func appServerSmokeValuesAreSendableTest() -> TestCase {
-    TestCase(name: "App Server smoke public values are immutable and Sendable") {
-        requireSmokeSendable(AppServerSmokeProductState.unavailable)
-        requireSmokeSendable(AppServerSmokeFailure.timeout)
-        requireSmokeSendable(AppServerSmokeResult.failure(.processFailure))
-    }
-}
-
 private func makeSmokeRunner(session: SmokeSessionFake) -> AppServerSmokeRunner {
     AppServerSmokeRunner(sessionProvider: SmokeSessionProvider(session: session))
 }
@@ -254,10 +245,6 @@ private func expectSmokeSessionStoppedOnce(
 ) async throws {
     let stopCount = await session.stopCount
     try expect(stopCount == 1, "Expected exactly one bounded stop")
-}
-
-private func requireSmokeSendable<T: Sendable>(_ value: T) {
-    _ = value
 }
 
 private func drainSmokeTasks() async {

@@ -13,21 +13,49 @@ public struct CodexGaugeApplicationLaunchOptions: Equatable, Sendable {
 
     public static let uiTestFixture83Argument =
         "--codex-gauge-ui-test-fixture-83"
+    public static let uiTestPreferencesSuiteEnvironmentKey =
+        "CODEX_GAUGE_UI_TEST_PREFERENCES_SUITE"
+    public static let uiTestPreferencesSuitePrefix =
+        "io.github.symflee.codex-gauge.uitest."
 
     public let mode: Mode
     public let firstLaunchTestingOptions: FirstLaunchTestingOptions
+    public let uiTestPreferencesSuiteName: String?
 
-    public init(arguments: [String]) {
+    public init(
+        arguments: [String],
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) {
         #if DEBUG
-        mode = arguments.contains(Self.uiTestFixture83Argument)
-            ? .uiTestFixture83
-            : .production
-        #else
-        mode = .production
+        if arguments.contains(Self.uiTestFixture83Argument),
+           let suiteName = Self.fixtureSuiteName(environment: environment) {
+            mode = .uiTestFixture83
+            firstLaunchTestingOptions = FirstLaunchTestingOptions(
+                arguments: arguments
+            )
+            uiTestPreferencesSuiteName = suiteName
+            return
+        }
         #endif
-        firstLaunchTestingOptions = FirstLaunchTestingOptions(
-            arguments: arguments
-        )
+        mode = .production
+        firstLaunchTestingOptions = .production
+        uiTestPreferencesSuiteName = nil
+    }
+
+    private static func fixtureSuiteName(
+        environment: [String: String]
+    ) -> String? {
+        guard let value = environment[uiTestPreferencesSuiteEnvironmentKey] else {
+            return nil
+        }
+        guard value.hasPrefix(uiTestPreferencesSuitePrefix) else {
+            return nil
+        }
+        let suffix = String(value.dropFirst(uiTestPreferencesSuitePrefix.count))
+        guard UUID(uuidString: suffix) != nil else {
+            return nil
+        }
+        return value
     }
 }
 

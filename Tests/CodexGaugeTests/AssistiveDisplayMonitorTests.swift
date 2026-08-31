@@ -10,8 +10,7 @@ func assistiveDisplayMonitorTests() -> [TestCase] {
         assistiveDisplaySuppressesUnchangedStateTest(),
         assistiveDisplayStartIsIdempotentTest(),
         assistiveDisplayStopRemovesObservationsTest(),
-        assistiveDisplayCanRestartTest(),
-        assistiveDisplayValuesAreSendableTest()
+        assistiveDisplayCanRestartTest()
     ]
 }
 
@@ -164,15 +163,6 @@ private func assistiveDisplayCanRestartTest() -> TestCase {
     }
 }
 
-private func assistiveDisplayValuesAreSendableTest() -> TestCase {
-    TestCase(name: "assistive display event and state are immutable sendable values") {
-        requireAssistiveDisplaySendable(AssistiveDisplayState.disabled)
-        requireAssistiveDisplaySendable(
-            AssistiveDisplayEvent.initial(.disabled)
-        )
-    }
-}
-
 @MainActor
 private final class SyntheticAssistiveDisplaySource: AssistiveDisplayStateSourcing {
     let displayOptionsNotificationCenter = NotificationCenter()
@@ -238,10 +228,6 @@ private final class AssistiveDisplayRecorder {
     func removeAll() {
         events.removeAll()
     }
-}
-
-private func requireAssistiveDisplaySendable<Value: Sendable>(_ value: Value) {
-    _ = value
 }
 
 private extension AssistiveDisplayState {

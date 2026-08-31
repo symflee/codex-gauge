@@ -24,7 +24,6 @@ private func launchAtLoginSettingsStateTest() -> TestCase {
         try expect(approval.toggleValue == .mixed, "Expected approval distinction")
         try expect(approval.showsSystemSettingsRecovery, "Expected approval recovery")
         try expect(!unavailable.allowsChanges, "Expected unavailable control disabled")
-        requireLaunchSettingsSendable(approval)
     }
 }
 
@@ -240,8 +239,4 @@ private func localizationKey(_ line: Substring) -> String? {
         return nil
     }
     return String(parts[1])
-}
-
-private func requireLaunchSettingsSendable<Value: Sendable>(_ value: Value) {
-    _ = value
 }

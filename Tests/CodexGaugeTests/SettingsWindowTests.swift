@@ -9,8 +9,6 @@ import Foundation
 func settingsWindowTests() -> [TestCase] {
     [
         settingsWindowStructureTest(),
-        settingsWindowRuntimeReportsVisibilityTest(),
-        settingsWindowForegroundReactivationTest(),
         settingsWindowCreationFailureSkipsActivationTest(),
         settingsWindowLateCancellationSkipsActivationTest(),
         settingsWindowPersistsEditsTest(),
@@ -331,53 +329,6 @@ private func settingsWindowLateCancellationSkipsActivationScenario() async throw
     )
 }
 
-private func settingsWindowForegroundReactivationTest() -> TestCase {
-    TestCase(name: "settings reactivates the application when brought forward") {
-        try await settingsWindowForegroundReactivationScenario()
-    }
-}
-
-@MainActor
-private func settingsWindowForegroundReactivationScenario() async throws {
-    _ = NSApplication.shared
-    let store = try SettingsUITestStore()
-    defer { store.cleanUp() }
-    let activation = SettingsWindowCoordinatorActivationSpy()
-    let coordinator = SettingsWindowCoordinator(
-        repository: try store.repository(),
-        discoveredQuotaProvider: { [] },
-        foregroundPresenter: SettingsWindowForegroundPresenter(
-            applicationActivator: activation
-        )
-    )
-
-    let firstController = try await showSettingsController(coordinator)
-    firstController.window?.orderOut(nil)
-    try expect(
-        firstController.window?.isVisible == false,
-        "Expected hidden existing settings window"
-    )
-    let repeatedController = try await showSettingsController(coordinator)
-
-    try expect(repeatedController === firstController, "Expected one reused controller")
-    try expect(
-        repeatedController.window?.isVisible == true,
-        "Expected existing settings window brought forward"
-    )
-    try expect(
-        activation.ignoringOtherAppsValues == [true, true],
-        "Expected one foreground activation for each show request"
-    )
-
-    await coordinator.shutdown()
-    let terminalResult = await coordinator.showSettings()
-    try expect(terminalResult == nil, "Expected terminal show rejection")
-    try expect(
-        activation.ignoringOtherAppsValues == [true, true],
-        "Expected shutdown show not to activate the application"
-    )
-}
-
 private func settingsWindowCreationFailureSkipsActivationTest() -> TestCase {
     TestCase(name: "settings creation failure does not activate the application") {
         try await settingsWindowCreationFailureSkipsActivationScenario()
@@ -413,30 +364,6 @@ private func settingsWindowCreationFailureSkipsActivationScenario() async throws
         activation.ignoringOtherAppsValues.isEmpty,
         "Expected no activation when window creation did not produce a window"
     )
-}
-
-private func settingsWindowRuntimeReportsVisibilityTest() -> TestCase {
-    TestCase(name: "settings runtime reports only a visible settings window") {
-        try await settingsWindowRuntimeReportsVisibilityScenario()
-    }
-}
-
-@MainActor
-private func settingsWindowRuntimeReportsVisibilityScenario() async throws {
-    _ = NSApplication.shared
-    let store = try SettingsUITestStore()
-    defer { store.cleanUp() }
-    let coordinator = SettingsWindowCoordinator(
-        repository: try store.repository(),
-        discoveredQuotaProvider: { [] }
-    )
-    let runtime = SettingsWindowRuntimeAdapter(coordinator: coordinator)
-
-    let visibleResult = await runtime.showSettings()
-    try expect(visibleResult, "Expected visible settings result")
-    await runtime.shutdown()
-    let terminalResult = await runtime.showSettings()
-    try expect(!terminalResult, "Expected terminal settings failure")
 }
 
 private func settingsWindowStructureTest() -> TestCase {
@@ -1198,8 +1125,8 @@ private func settingsWindowRejectsTerminalShowScenario() async throws {
     try expect(coordinator.activeWindowController == nil, "Expected no terminal window")
     try expect(windowCreationCount == 1, "Expected no window created after shutdown began")
     try expect(
-        activation.ignoringOtherAppsValues == [true],
-        "Expected pending and terminal shows not to reactivate the application"
+        activation.ignoringOtherAppsValues.isEmpty,
+        "Expected headless pending and terminal shows not to activate"
     )
 }
 

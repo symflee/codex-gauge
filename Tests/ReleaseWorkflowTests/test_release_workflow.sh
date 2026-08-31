@@ -40,21 +40,30 @@ verify_test_key_pair() {
     [ "$derived_public_key" = "$expected_public_key" ]
 }
 
-verify_exhaustive_workflow() {
+verify_ci_test_tier() {
     local workflow_path="$1"
 
     ruby -e '
-        require "yaml"
-        document = YAML.load_file(ARGV.fetch(0))
-        runs = document.fetch("jobs").values.flat_map do |job|
-          job.fetch("steps", []).map { |step| step["run"] }.compact
-        end
-        wrapper = "Scripts/run-exhaustive-tests.sh"
-        direct = "swift run codex-gauge-tests"
-        contract = "bash Tests/ExhaustiveRunnerTests/test_exhaustive_runner.sh"
-        exit 1 unless runs.count { |run| run.strip == wrapper } == 1
-        exit 1 if runs.any? { |run| run.strip == direct }
-        exit 1 unless runs.any? { |run| run.include?(contract) }
+      require "yaml"
+      document = YAML.load_file(ARGV.fetch(0))
+      steps = document.fetch("jobs").fetch("build-test").fetch("steps")
+      runs = steps.map { |step| step["run"] }.compact
+      exit 1 unless runs.length == 3
+
+      toolchain = runs.find { |run| run.include?("xcodebuild -version") }
+      entrypoints = runs.find do |run|
+        run.strip == "bash Tests/TestEntryPointTests/test_test_entry_points.sh"
+      end
+      pull_request = runs.find { |run| run.strip == "Scripts/test-pr.sh" }
+      exit 1 unless [toolchain, entrypoints, pull_request].all?
+      exit 1 if runs.any? { |run| run.start_with?("swift package describe") }
+      exit 1 if runs.any? { |run| run.start_with?("swift build") }
+      exit 1 if runs.any? { |run| run.start_with?("swift test") }
+      exit 1 if runs.any? { |run| run.include?("swift run codex-gauge-tests") }
+      exit 1 if runs.any? { |run| run.include?("swift build -c release") }
+      exit 1 if runs.any? { |run| run.include?("Tests/Release") }
+      exit 1 if runs.any? { |run| run.include?("xcodebuild test") }
+      exit 1 if runs.any? { |run| run.include?("Scripts/build-release-dmg.sh") }
     ' "$workflow_path"
 }
 
@@ -73,17 +82,14 @@ verify_release_test_tier() {
       metadata = runs.find do |run|
         run.include?("Scripts/validate-release-context.sh")
       end
-      contracts = runs.find do |run|
-        run.include?("Tests/ReleaseWorkflowTests/test_release_workflow.sh")
-      end
+      contracts = runs.find { |run| run.strip == "Scripts/test-release-contracts.sh" }
       ui_smoke = runs.find do |run|
         run.include?("-only-testing:CodexGaugeUITests")
       end
       exit 1 unless [toolchain, metadata, contracts, ui_smoke].all?
-      exit 1 unless contracts.include?("Tests/ReleasePackagingTests/test_release_packaging.sh")
-      exit 1 unless contracts.include?("Tests/ReleaseAppcastTests/test_release_appcast.sh")
-      exit 1 if contracts.include?("Tests/ExhaustiveRunnerTests/test_exhaustive_runner.sh")
       exit 1 unless ui_smoke.include?("-disableAutomaticPackageResolution")
+      ui_step = steps.find { |step| step.fetch("run", "").include?("CodexGaugeUITests") }
+      exit 1 unless ui_step.fetch("env", {})["CODEX_GAUGE_LOCAL_RELEASE_EFFECTS_ALLOWED"] == "1"
       exit 1 if runs.any? { |run| run.start_with?("swift package describe") }
       exit 1 if runs.any? { |run| run.start_with?("swift build -c debug") }
       exit 1 if runs.any? { |run| run.start_with?("swift test") }
@@ -96,6 +102,7 @@ verify_release_test_tier() {
         step.fetch("run", "").include?("Scripts/build-release-dmg.sh")
       end
       exit 1 unless candidate_build
+      exit 1 unless candidate_build.fetch("run").include?("--allow-local-release-effects")
       exit 1 if candidate_build.fetch("run").include?("Scripts/verify-release-dmg.sh")
     ' "$workflow_path"
 }
@@ -132,6 +139,7 @@ validator="$repository_root/Scripts/validate-release-context.sh"
 exhaustive_runner="$repository_root/Scripts/run-exhaustive-tests.sh"
 ci_workflow="$repository_root/.github/workflows/ci.yml"
 workflow="$repository_root/.github/workflows/release.yml"
+release_contracts="$repository_root/Scripts/test-release-contracts.sh"
 release_notes="$repository_root/.github/release-notes.md"
 key_deriver_source="$repository_root/Scripts/derive-sparkle-public-key.swift"
 signature_verifier_source="$repository_root/Scripts/verify-sparkle-signature.swift"
@@ -142,6 +150,7 @@ test -f "$ci_workflow" || fail "missing CI workflow"
 test -f "$workflow" || fail "missing release workflow"
 test -f "$release_notes" || fail "missing release notes template"
 test -f "$key_deriver_source" || fail "missing Sparkle public-key derivation source"
+test -x "$release_contracts" || fail "missing executable release contracts entry point"
 test -f "$signature_verifier_source" || fail "missing Sparkle signature verifier source"
 
 case "$(uname -m)" in
@@ -254,12 +263,12 @@ grep -F -q '"$tools_directory/generate_appcast"' "$workflow" \
     || fail "protected signing job does not use official generate_appcast"
 grep -q 'Scripts/verify-release-appcast.sh' "$workflow" \
     || fail "release workflow does not verify the signed appcast"
-grep -q 'Tests/ReleaseAppcastTests/test_release_appcast.sh' "$workflow" \
+grep -q 'Tests/ReleaseAppcastTests/test_release_appcast.sh' "$release_contracts" \
     || fail "release workflow omits appcast contract tests"
 grep -q 'chmod +x' "$workflow" \
     || fail "downloaded verification scripts cannot execute"
-verify_exhaustive_workflow "$ci_workflow" \
-    || fail "CI workflow bypasses exhaustive completion verification"
+verify_ci_test_tier "$ci_workflow" \
+    || fail "CI test tier is not limited to fast functional checks"
 verify_release_test_tier "$workflow" \
     || fail "release test tier duplicates general checks or omits release gates"
 grep -q 'gh release create' "$workflow" \

@@ -3,7 +3,7 @@
 set -euo pipefail
 
 usage() {
-    echo "Usage: build-release-dmg.sh --output-directory <path> --version <X.Y.Z> --build <number> [--sparkle-public-ed-key <base64>]" >&2
+    echo "Usage: build-release-dmg.sh --output-directory <path> --version <X.Y.Z> --build <number> [--sparkle-public-ed-key <base64>] --allow-local-release-effects" >&2
 }
 
 fail() {
@@ -20,6 +20,7 @@ release_stage_root=""
 published_artifact=""
 artifact_published=0
 checksum_published=0
+allows_local_release_effects=0
 
 cleanup() {
     local status="$?"
@@ -81,6 +82,10 @@ while [ "$#" -gt 0 ]; do
             sparkle_public_ed_key="$2"
             shift 2
             ;;
+        --allow-local-release-effects)
+            allows_local_release_effects=1
+            shift
+            ;;
         *)
             usage
             exit 64
@@ -99,6 +104,9 @@ ruby -rbase64 -e '
   exit(key.bytesize == 32 ? 0 : 1)
 ' "$sparkle_public_ed_key" >/dev/null 2>&1 \
     || fail "Sparkle public EdDSA key must be 32-byte base64"
+[ "$allows_local_release_effects" -eq 1 ] \
+    || fail "pass --allow-local-release-effects to build a DMG"
+export CODEX_GAUGE_LOCAL_RELEASE_EFFECTS_ALLOWED=1
 
 script_directory="$(cd "$(dirname "$0")" && pwd)"
 repository_root="$(cd "$script_directory/.." && pwd)"
@@ -208,7 +216,8 @@ codesign \
     --app "$application_path" \
     --background "$repository_root/Distribution/DMG/background.png" \
     --guide "$repository_root/docs/installation.md" \
-    --output "$artifact_path"
+    --output "$artifact_path" \
+    --allow-local-release-effects
 "$script_directory/verify-release-dmg.sh" \
     --dmg "$artifact_path" \
     --checksum "$artifact_path.sha256" \
@@ -217,7 +226,8 @@ codesign \
     --sparkle-public-ed-key "$sparkle_public_ed_key" \
     --expected-third-party-notices "$third_party_notices_source" \
     --version "$expected_version" \
-    --build "$expected_build"
+    --build "$expected_build" \
+    --allow-local-release-effects
 
 mv -n "$artifact_path" "$published_artifact"
 [ ! -e "$artifact_path" ] \

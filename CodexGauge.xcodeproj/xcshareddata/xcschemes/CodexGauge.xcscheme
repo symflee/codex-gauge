@@ -25,20 +25,6 @@
             buildForRunning = "NO"
             buildForProfiling = "NO"
             buildForArchiving = "NO"
-            buildForAnalyzing = "YES">
-            <BuildableReference
-               BuildableIdentifier = "primary"
-               BlueprintIdentifier = "F00000000000000000000002"
-               BuildableName = "CodexGaugeUnitTests.xctest"
-               BlueprintName = "CodexGaugeUnitTests"
-               ReferencedContainer = "container:CodexGauge.xcodeproj">
-            </BuildableReference>
-         </BuildActionEntry>
-         <BuildActionEntry
-            buildForTesting = "YES"
-            buildForRunning = "NO"
-            buildForProfiling = "NO"
-            buildForArchiving = "NO"
             buildForAnalyzing = "NO">
             <BuildableReference
                BuildableIdentifier = "primary"
@@ -56,15 +42,6 @@
       selectedLauncherIdentifier = "Xcode.DebuggerFoundation.Launcher.LLDB"
       shouldUseLaunchSchemeArgsEnv = "YES">
       <Testables>
-         <TestableReference skipped = "NO">
-            <BuildableReference
-               BuildableIdentifier = "primary"
-               BlueprintIdentifier = "F00000000000000000000002"
-               BuildableName = "CodexGaugeUnitTests.xctest"
-               BlueprintName = "CodexGaugeUnitTests"
-               ReferencedContainer = "container:CodexGauge.xcodeproj">
-            </BuildableReference>
-         </TestableReference>
          <TestableReference skipped = "NO">
             <BuildableReference
                BuildableIdentifier = "primary"

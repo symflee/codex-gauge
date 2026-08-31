@@ -1,6 +1,13 @@
 import XCTest
 
 final class CodexGaugeFirstLaunchUITests: XCTestCase {
+    private let effectsEnvironmentKey =
+        "CODEX_GAUGE_LOCAL_RELEASE_EFFECTS_ALLOWED"
+    private let preferencesEnvironmentKey =
+        "CODEX_GAUGE_UI_TEST_PREFERENCES_SUITE"
+    private let preferencesSuiteName =
+        "io.github.symflee.codex-gauge.uitest.\(UUID().uuidString)"
+    private var launchedApplications = [XCUIApplication]()
     private let statusItemIdentifier = "codex-gauge.status-item"
     private let settingsMenuIdentifier = "codex-gauge.menu.action.settings"
     private let settingsWindowIdentifier = "codex-gauge.settings.window"
@@ -12,58 +19,93 @@ final class CodexGaugeFirstLaunchUITests: XCTestCase {
 
     override func setUpWithError() throws {
         continueAfterFailure = false
+        guard ProcessInfo.processInfo.environment[effectsEnvironmentKey] == "1" else {
+            throw NSError(
+                domain: "CodexGaugeUITests",
+                code: 1,
+                userInfo: [
+                    NSLocalizedDescriptionKey:
+                        "UI tests require explicit local release effects approval"
+                ]
+            )
+        }
+    }
+
+    override func tearDownWithError() throws {
+        launchedApplications.reversed().forEach { $0.terminate() }
+        launchedApplications.removeAll()
+        UserDefaults(suiteName: preferencesSuiteName)?
+            .removePersistentDomain(forName: preferencesSuiteName)
     }
 
     @MainActor
     func testFirstLaunchShowsSettingsWindowOnlyOnce() {
         let application = makeApplication(resetFirstLaunch: true)
+        completeFirstLaunch(in: application)
+        application.terminate()
+        verifySubsequentLaunch()
+    }
 
+    @MainActor
+    private func completeFirstLaunch(in application: XCUIApplication) {
         application.launch()
-
-        let settingsWindow = application.windows[settingsWindowIdentifier]
+        let window = application.windows[settingsWindowIdentifier]
         XCTAssertTrue(
-            settingsWindow.waitForExistence(timeout: 10),
+            window.waitForExistence(timeout: 10),
             "Expected the first-launch settings window"
         )
-        selectKoreanLanguage(in: settingsWindow, application: application)
+        selectKoreanLanguage(in: window, application: application)
         selectGaugePreset(
             named: "그라파이트",
-            in: settingsWindow,
+            in: window,
             application: application
         )
         assertSyntheticStatus(in: application)
+    }
 
-        application.terminate()
-        let subsequentApplication = makeApplication(resetFirstLaunch: false)
-        subsequentApplication.launch()
-        assertSyntheticStatus(in: subsequentApplication)
-
+    @MainActor
+    private func verifySubsequentLaunch() {
+        let application = makeApplication(resetFirstLaunch: false)
+        application.launch()
+        assertSyntheticStatus(in: application)
         XCTAssertFalse(
-            subsequentApplication.windows[settingsWindowIdentifier]
+            application.windows[settingsWindowIdentifier]
                 .waitForExistence(timeout: 3),
             "Expected later launches to keep settings closed"
         )
         assertSettingsMenuLifecycle(
-            in: subsequentApplication,
+            in: application,
             expectedGaugePreset: "그라파이트"
         )
+        application.terminate()
     }
 
     @MainActor
     private func makeApplication(resetFirstLaunch: Bool) -> XCUIApplication {
         let application = XCUIApplication()
-        application.launchArguments = [
+        application.launchEnvironment[effectsEnvironmentKey] = "1"
+        application.launchEnvironment[preferencesEnvironmentKey] =
+            preferencesSuiteName
+        application.launchArguments = fixtureArguments(
+            resetFirstLaunch: resetFirstLaunch
+        )
+        launchedApplications.append(application)
+        return application
+    }
+
+    private func fixtureArguments(resetFirstLaunch: Bool) -> [String] {
+        var arguments = [
             "-AppleLanguages",
             "(ko)",
             "--codex-gauge-ui-test-fixture-83"
         ]
         guard resetFirstLaunch else {
-            return application
+            return arguments
         }
-        application.launchArguments.append(
+        arguments.append(
             "--codex-gauge-ui-test-reset-first-launch"
         )
-        return application
+        return arguments
     }
 
     @MainActor

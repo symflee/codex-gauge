@@ -19,7 +19,8 @@ private func settingsWindowForegroundPresentationOrderScenario() throws {
     let activation = SettingsWindowActivationSpy(events: events)
     let window = SettingsWindowFrontSpy(events: events)
     let presenter = SettingsWindowForegroundPresenter(
-        applicationActivator: activation
+        applicationActivator: activation,
+        presentationAllowed: { true }
     )
 
     let firstResult = presenter.present(window)
@@ -56,7 +57,8 @@ private func settingsWindowForegroundMissingWindowScenario() throws {
     let activation = SettingsWindowActivationSpy(events: events)
     let window = SettingsWindowFrontSpy(events: events, hasWindow: false)
     let presenter = SettingsWindowForegroundPresenter(
-        applicationActivator: activation
+        applicationActivator: activation,
+        presentationAllowed: { true }
     )
 
     let result = presenter.present(window)

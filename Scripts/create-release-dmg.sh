@@ -3,7 +3,7 @@
 set -euo pipefail
 
 usage() {
-    echo "Usage: create-release-dmg.sh --app <path> --background <png> --guide <path> --output <CodexGauge.dmg>" >&2
+    echo "Usage: create-release-dmg.sh --app <path> --background <png> --guide <path> --output <CodexGauge.dmg> --allow-local-release-effects" >&2
 }
 
 fail() {
@@ -22,6 +22,7 @@ detach_failed=0
 layout_process_id=0
 artifact_created=0
 checksum_created=0
+allows_local_release_effects=0
 
 detach_mounted_image() {
     if [ "$mounted" -ne 1 ]; then
@@ -176,6 +177,10 @@ while [ "$#" -gt 0 ]; do
             output_path="$2"
             shift 2
             ;;
+        --allow-local-release-effects)
+            allows_local_release_effects=1
+            shift
+            ;;
         *)
             usage
             exit 64
@@ -222,6 +227,9 @@ output_path="$output_directory/CodexGauge.dmg"
     || fail "output already exists"
 [ ! -e "$output_path.sha256" ] && [ ! -L "$output_path.sha256" ] \
     || fail "checksum output already exists"
+[ "$allows_local_release_effects" -eq 1 ] \
+    || [ "${CODEX_GAUGE_LOCAL_RELEASE_EFFECTS_ALLOWED:-}" = "1" ] \
+    || fail "pass --allow-local-release-effects to create a DMG"
 
 script_directory="$(cd "$(dirname "$0")" && pwd)"
 layout_script="$script_directory/configure-release-dmg.applescript"

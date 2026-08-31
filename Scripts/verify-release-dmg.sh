@@ -3,7 +3,7 @@
 set -euo pipefail
 
 usage() {
-    echo "Usage: verify-release-dmg.sh --dmg <path> --checksum <path> [--source-app <path>] [--expected-guide <path>] [--sparkle-public-ed-key <base64>] [--expected-third-party-notices <path>] --version <X.Y.Z> --build <number>" >&2
+    echo "Usage: verify-release-dmg.sh --dmg <path> --checksum <path> [--source-app <path>] [--expected-guide <path>] [--sparkle-public-ed-key <base64>] [--expected-third-party-notices <path>] --version <X.Y.Z> --build <number> --allow-local-release-effects" >&2
 }
 
 fail() {
@@ -23,6 +23,7 @@ mount_root=""
 mount_path=""
 mounted=0
 layout_process_id=0
+allows_local_release_effects=0
 
 cleanup() {
     local status="$?"
@@ -121,6 +122,10 @@ while [ "$#" -gt 0 ]; do
             expected_build="$2"
             shift 2
             ;;
+        --allow-local-release-effects)
+            allows_local_release_effects=1
+            shift
+            ;;
         *)
             usage
             exit 64
@@ -162,6 +167,9 @@ printf '%s\n' "$checksum_hash" | grep -E -q '^[0-9a-f]{64}$' \
     || fail "checksum references a different artifact"
 actual_checksum="$(shasum -a 256 "$dmg_path" | awk '{print $1}')"
 [ "$actual_checksum" = "$checksum_hash" ] || fail "checksum does not match"
+[ "$allows_local_release_effects" -eq 1 ] \
+    || [ "${CODEX_GAUGE_LOCAL_RELEASE_EFFECTS_ALLOWED:-}" = "1" ] \
+    || fail "pass --allow-local-release-effects to mount and inspect a DMG"
 
 hdiutil verify "$dmg_path" >/dev/null
 

@@ -11,8 +11,7 @@ func settingsFormTests() -> [TestCase] {
         settingsFormEditsGaugeAppearanceTest(),
         settingsFormPresenterTest(),
         settingsFormReplacesDiscoveredQuotasTest(),
-        settingsFormNormalizesEmptyManualPersistenceTest(),
-        settingsFormValuesAreSendableTest()
+        settingsFormNormalizesEmptyManualPersistenceTest()
     ]
 }
 
@@ -212,6 +211,12 @@ private func settingsFormNormalizesEmptyManualPersistenceTest() -> TestCase {
         let reducer = SettingsFormReducer()
         var state = SettingsFormState(preferences: .default, discoveredQuotaIDs: [])
 
+        try expect(
+            state.formValues == SettingsFormValues(preferences: .default),
+            "Expected stable form defaults"
+        )
+        try expect(state.language == .english, "Expected default form language")
+        try expect(state.statusGaugeAppearance == .default, "Expected default gauge")
         state = reducer.reduce(
             state: state,
             event: .quotaSelectionModeChanged(.manual)
@@ -257,22 +262,6 @@ private func settingsFormReplacesDiscoveredQuotasTest() -> TestCase {
     }
 }
 
-private func settingsFormValuesAreSendableTest() -> TestCase {
-    TestCase(name: "settings form values are immutable and Sendable") {
-        let state = SettingsFormState(preferences: .default, discoveredQuotaIDs: [])
-        requireSettingsFormSendable(state)
-        requireSettingsFormSendable(SettingsFormReducer())
-        requireSettingsFormSendable(SettingsFormPresenter().present(state))
-        requireSettingsFormSendable(state.formValues)
-        try expect(
-            state.formValues == SettingsFormValues(preferences: .default),
-            "Expected stable form defaults"
-        )
-        try expect(state.language == .english, "Expected default form language")
-        try expect(state.statusGaugeAppearance == .default, "Expected default gauge")
-    }
-}
-
 private func settingsPreferences(
     productMode: DisplayProductMode,
     selection: DisplayQuotaSelection
@@ -290,8 +279,4 @@ private func settingsQuotaID(
     duration: Int?
 ) -> QuotaSelectionID {
     QuotaSelectionID(product: product, rawDurationMinutes: duration)
-}
-
-private func requireSettingsFormSendable<Value: Sendable>(_ value: Value) {
-    _ = value
 }

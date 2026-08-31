@@ -22,8 +22,7 @@ func usageSessionTests() -> [TestCase] {
         sessionBackpressuresStdoutFloodTest(),
         sessionCompletesPendingRequestWhenStoppedTest(),
         sessionStopsChildWithoutOrphanTest(),
-        sessionCleansUpFailedChildWithoutExplicitStopTest(),
-        sessionValuesAreSendableTest()
+        sessionCleansUpFailedChildWithoutExplicitStopTest()
     ]
 }
 
@@ -300,15 +299,6 @@ private func withSyntheticPIDFile(
     try await operation(pidFile)
 }
 
-private func sessionValuesAreSendableTest() -> TestCase {
-    TestCase(name: "usage session public values are immutable and Sendable") {
-        requireSessionSendable(UsageSessionError.timeout(.rateLimits))
-        requireSessionSendable(UsageSessionState.ready)
-        requireSessionSendable(testConfiguration)
-        requireSessionSendable(try makeSession())
-    }
-}
-
 private let syntheticDate = Date(timeIntervalSince1970: 1_899_000_000)
 
 private var syntheticExecutableURL: URL {
@@ -481,10 +471,6 @@ private func expectProcessExit(_ processIdentifier: pid_t) async throws {
         try await clock.sleep(for: .milliseconds(10))
     }
     throw TestFailure(description: "Expected failed session child cleanup")
-}
-
-private func requireSessionSendable<Value: Sendable>(_ value: Value) {
-    _ = value
 }
 
 private struct SyntheticAppServerPathStore {

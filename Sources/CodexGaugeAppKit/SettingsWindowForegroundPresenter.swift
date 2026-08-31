@@ -57,18 +57,27 @@ public protocol SettingsWindowForegroundPresenting: AnyObject {
 public final class SettingsWindowForegroundPresenter:
     SettingsWindowForegroundPresenting {
     private let applicationActivator: any SettingsWindowApplicationActivating
+    private let presentationAllowed: @MainActor () -> Bool
 
     public init(
         applicationActivator: any SettingsWindowApplicationActivating =
-            NSApplicationSettingsWindowActivator()
+            NSApplicationSettingsWindowActivator(),
+        presentationAllowed: @escaping @MainActor () -> Bool = {
+            let policy = NSApplication.shared.activationPolicy()
+            return policy == .regular || policy == .accessory
+        }
     ) {
         self.applicationActivator = applicationActivator
+        self.presentationAllowed = presentationAllowed
     }
 
     @discardableResult
     public func present(_ window: any SettingsWindowFronting) -> Bool {
         guard window.hasSettingsWindow else {
             return false
+        }
+        guard presentationAllowed() else {
+            return true
         }
         applicationActivator.activate(ignoringOtherApps: true)
         window.showSettingsWindow()

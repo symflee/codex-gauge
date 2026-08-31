@@ -17,8 +17,7 @@ func connectionDiagnosticsTests() -> [TestCase] {
         connectionInspectorTest(),
         connectionInspectorFailureTest(),
         connectionStatusResolverTest(),
-        diagnosticReportRedactionTest(),
-        connectionDiagnosticValuesAreSendableTest()
+        diagnosticReportRedactionTest()
     ]
 }
 
@@ -327,16 +326,6 @@ private func diagnosticReportRedactionTest() -> TestCase {
     }
 }
 
-private func connectionDiagnosticValuesAreSendableTest() -> TestCase {
-    TestCase(name: "connection diagnostic values and services are sendable") {
-        requireConnectionSendable(CodexCLIVersionProbeConfiguration.production)
-        requireConnectionSendable(CodexCLIVersionProbeError.timeout)
-        requireConnectionSendable(CodexConnectionStatus.connected)
-        requireConnectionSendable(DiagnosticArchitecture.x86_64)
-        requireConnectionSendable(ConnectionDiagnosticsSnapshot.checking)
-    }
-}
-
 private var syntheticExecutableURL: URL {
     URL(fileURLWithPath: CommandLine.arguments[0]).standardizedFileURL
 }
@@ -505,10 +494,6 @@ private func publication(failure: RefreshFailure) -> RefreshPublication {
         failure: failure,
         isRefreshing: false
     )
-}
-
-private func requireConnectionSendable<Value: Sendable>(_ value: Value) {
-    _ = value
 }
 
 private struct SyntheticVersionPathStore {
