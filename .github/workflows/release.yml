@@ -101,7 +101,6 @@ jobs:
       contents: read
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
-      SPARKLE_PUBLIC_ED_KEY: ${{ vars.SPARKLE_PUBLIC_ED_KEY }}
     steps:
       - name: Check out validated release tag
         # actions/checkout v7.0.1
@@ -125,11 +124,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          public_key="$(tr -d '\r\n' < Distribution/SparklePublicEdKey.txt)"
           Scripts/build-release-dmg.sh \
             --output-directory "$RUNNER_TEMP/codex-gauge-release" \
             --version "${{ needs.build_package.outputs.version }}" \
             --build "${{ needs.build_package.outputs.build }}" \
-            --sparkle-public-ed-key "$SPARKLE_PUBLIC_ED_KEY" \
+            --sparkle-public-ed-key "$public_key" \
             --allow-local-release-effects
 
       - name: Add review metadata and public verification tools
@@ -145,8 +145,8 @@ jobs:
           cp Scripts/verify-release-appcast.sh "$release_directory/verification/"
           cp Scripts/verify-sparkle-signature.swift "$release_directory/verification/"
           cp THIRD_PARTY_NOTICES.md "$release_directory/verification/"
-          printf '%s\n' "$SPARKLE_PUBLIC_ED_KEY" \
-            > "$release_directory/verification/SparklePublicEdKey.txt"
+          cp Distribution/SparklePublicEdKey.txt \
+            "$release_directory/verification/SparklePublicEdKey.txt"
           test "$(find "$release_directory" -type f | wc -l | tr -d '[:space:]')" = "10"
 
       - name: Upload unsigned release candidate
@@ -168,7 +168,6 @@ jobs:
       - build_candidate
     runs-on: macos-26
     timeout-minutes: 15
-    environment: release-signing
     permissions:
       actions: read
     env:

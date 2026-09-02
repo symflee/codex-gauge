@@ -181,7 +181,6 @@ ruby -e '
   document = YAML.load_file(ARGV.fetch(0))
   jobs = document.fetch("jobs")
   signing = jobs.fetch("sign_appcast")
-  exit(1) unless signing.fetch("environment") == "release-signing"
   exit(1) if signing.fetch("steps").any? do |step|
     step.fetch("uses", "").start_with?("actions/checkout@")
   end
@@ -208,7 +207,7 @@ ruby -e '
   inline_source = "#{match[1]}\n"
   exit(1) unless inline_source == File.binread(ARGV.fetch(1))
 ' "$workflow" "$key_deriver_source" \
-    || fail "release signing isolation, key derivation, or package locking is incomplete"
+    || fail "release signing secret isolation, key derivation, or package locking is incomplete"
 
 if grep -E -q '^[[:space:]]+[A-Z][A-Z0-9_]*:[[:space:]]+\$\{\{[[:space:]]*runner\.temp' \
     "$ci_workflow" \
@@ -260,7 +259,7 @@ grep -F -q '"$release_directory/verification/verify-release-dmg-layout.applescri
 grep -q 'Scripts/validate-release-context.sh' "$workflow" \
     || fail "release workflow does not validate tags and build numbers"
 grep -F -q '"$tools_directory/generate_appcast"' "$workflow" \
-    || fail "protected signing job does not use official generate_appcast"
+    || fail "signing job does not use official generate_appcast"
 grep -q 'Scripts/verify-release-appcast.sh' "$workflow" \
     || fail "release workflow does not verify the signed appcast"
 grep -q 'Tests/ReleaseAppcastTests/test_release_appcast.sh' "$release_contracts" \
@@ -280,12 +279,10 @@ if grep -q 'Verify draft release' "$workflow"; then
 fi
 grep -q "if: github.event_name == 'push'" "$workflow" \
     || fail "manual workflow runs can reach draft publishing"
-grep -q 'environment: release-signing' "$workflow" \
-    || fail "release signing is not protected by the release environment"
-grep -F -q 'SPARKLE_PUBLIC_ED_KEY: ${{ vars.SPARKLE_PUBLIC_ED_KEY }}' "$workflow" \
-    || fail "release build does not use the protected public key variable"
+grep -F -q 'Distribution/SparklePublicEdKey.txt' "$workflow" \
+    || fail "release build does not use the tracked public key"
 grep -F -q 'SPARKLE_EDDSA_PRIVATE_KEY: ${{ secrets.SPARKLE_EDDSA_PRIVATE_KEY }}' "$workflow" \
-    || fail "appcast signing does not use the protected private key secret"
+    || fail "appcast signing does not use the repository private key secret"
 [ "$(grep -F -c 'SPARKLE_EDDSA_PRIVATE_KEY: ${{ secrets.SPARKLE_EDDSA_PRIVATE_KEY }}' "$workflow")" = "1" ] \
     || fail "private key secret is exposed outside the signing step"
 grep -F -q 'private_ed_key="$SPARKLE_EDDSA_PRIVATE_KEY"' "$workflow" \

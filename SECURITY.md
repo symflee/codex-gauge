@@ -59,7 +59,7 @@ Sparkle 2.9.6 updater는 quota polling·인증 경계와 분리하고 다음 신
 - release notes rendering과 system profiling을 끄고 telemetry, account·quota 값, Codex 인증 또는 사용자 설치 경로를 appcast request에 추가하지 않음
 - 마지막 확인 시각, skipped version과 temporary download cache는 Sparkle의 local metadata로만 유지하고 quota snapshot이나 raw App Server 응답과 결합하지 않음
 
-EdDSA 개인키는 GitHub의 protected `release-signing` environment secret으로만 release signing step의 stdin에 전달한다. 이 environment는 required reviewer를 두며 workflow action은 full commit SHA로 pin하고 권한은 draft Release에 필요한 최소 범위로 제한한다. 개인키를 repository, 일반 CI, shell argument, log, workflow artifact 또는 GitHub Release asset에 기록하지 않는다. 서로 독립된 암호화 offline backup 두 개를 유지하고 정기적으로 복구·검증한 뒤 test key나 폐기된 key material은 production key와 분리한다.
+EdDSA 공개키는 `Distribution/SparklePublicEdKey.txt`에 저장한다. 개인키는 GitHub repository Actions secret에서 release signing step에만 전달하고 repository, command argument, log, workflow artifact 또는 GitHub Release asset에 기록하지 않는다.
 
 공개 main application은 ad-hoc signed Sparkle framework를 process 안에 load하기 위해 entitlement dictionary에 `com.apple.security.cs.disable-library-validation=true` 항목 하나만 둔다. Sparkle framework, `Autoupdate`, `Updater`와 그 밖의 nested executable에는 entitlement를 적용하지 않는다. Hardened Runtime은 모든 실행 코드에서 유지하며 `allow-dyld-environment-variables`, `allow-unsigned-executable-memory`, `disable-executable-page-protection`, `get-task-allow` 같은 다른 runtime 예외는 추가하지 않는다.
 
