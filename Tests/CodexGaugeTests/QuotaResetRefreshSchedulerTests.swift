@@ -109,7 +109,7 @@ private func quotaResetReplacesChangedPublicationTest() -> TestCase {
 }
 
 private func quotaResetRefreshesPastDateOnceTest() -> TestCase {
-    TestCase(name: "past quota reset requests one refresh without inferring usage") {
+    TestCase(name: "previously unobserved past quota reset never triggers a refresh") {
         try await MainActor.run {
             let fixture = ResetSchedulerFixture(nowOffset: 500)
             let productStates = try resetProductStates(
@@ -122,7 +122,7 @@ private func quotaResetRefreshesPastDateOnceTest() -> TestCase {
             fixture.controller.publish(productStates: productStates)
             fixture.postClockChange()
 
-            try expect(fixture.resetRefreshCount == 1, "Expected one past-reset refresh")
+            try expect(fixture.resetRefreshCount == 0, "Expected past response dates never to trigger a read")
             try expect(
                 fixture.controller.scheduledDeadlineDate == resetDate(700),
                 "Expected remaining future reset"
@@ -390,13 +390,12 @@ private func quotaResetPrunesHandledDeadlinesTest() -> TestCase {
             fixture.controller.publish(productStates: secondStates)
             fixture.timer.fireRequest(at: 0)
 
-            try expect(fixture.resetRefreshCount == 2, "Expected both latest resets once")
-            fixture.controller.publish(productStates: firstStates)
-
-            try expect(
-                fixture.resetRefreshCount == 3,
-                "Expected removed handled identities not to remain retained"
-            )
+            try expect(fixture.resetRefreshCount == 0, "Expected alternating past responses not to trigger reads")
+            for _ in 0..<100 {
+                fixture.controller.publish(productStates: firstStates)
+                fixture.controller.publish(productStates: secondStates)
+            }
+            try expect(fixture.resetRefreshCount == 0, "Expected no A/B immediate request chain")
         }
     }
 }

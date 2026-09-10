@@ -22,8 +22,11 @@ func usageSessionTests() -> [TestCase] {
         sessionBackpressuresStdoutFloodTest(),
         sessionCompletesPendingRequestWhenStoppedTest(),
         sessionStopsChildWithoutOrphanTest(),
+        sessionSharesConcurrentStopAndEscalatesTest(),
+        sessionRetainsUnconfirmedChildUntilExitTest(),
+        sessionSharesCancellationAndStopCleanupTest(),
         sessionCleansUpFailedChildWithoutExplicitStopTest()
-    ]
+    ] + processLifecycleTests()
 }
 
 private func sessionUsesProductionEnvironmentBoundaryTest() -> TestCase {
@@ -255,9 +258,119 @@ private func sessionStopsChildWithoutOrphanTest() -> TestCase {
         try await withConfiguredSyntheticSession(.waitForStop, pidFile: pidFile) { session in
             try await session.start()
             let processIdentifier = try await readProcessIdentifier(from: pidFile)
-            await session.stop()
-
+            let result = await session.stop()
+            try expect(result == .exited, "Expected stop to confirm the child's exit")
             try expect(processIsAlive(processIdentifier) == false, "Expected no orphan process")
+        }
+    }
+}
+
+private func sessionSharesConcurrentStopAndEscalatesTest() -> TestCase {
+    TestCase(name: "usage session shares concurrent stop and escalates ignored TERM once") {
+        try await withSyntheticPIDFile { pidFile in
+            try await withSyntheticMode(.ignoreTermination, pidFile: pidFile) {
+                let signals = ProcessSignalRecorder()
+                let session = UsageSession(
+                    executableURL: syntheticExecutableURL,
+                    configuration: testConfiguration,
+                    terminationSignal: signals.forward
+                )
+                try await session.start()
+                let identifier = try await readProcessIdentifier(from: pidFile)
+                defer { if processIsAlive(identifier) { Darwin.kill(identifier, SIGKILL) } }
+                let cancelled = Task { await session.stop() }
+                cancelled.cancel()
+                let results = await withTaskGroup(of: UsageSessionStopResult.self) { group in
+                    for _ in 0..<10 {
+                        group.addTask { await session.stop() }
+                    }
+                    var results: [UsageSessionStopResult] = []
+                    for await result in group {
+                        results.append(result)
+                    }
+                    return results
+                }
+                let cancelledResult = await cancelled.value
+                await session.waitForTermination()
+                let state = await session.state
+
+                try expect(results.allSatisfy { $0 == .exited }, "Every caller must observe exit")
+                try expect(cancelledResult == .exited, "Cancelled stop must still finish cleanup")
+                try expect(signals.values == [SIGTERM, SIGKILL], "Expected one TERM/KILL sequence")
+                try expect(state == .stopped, "Expected stopped only after exit")
+                try expect(!processIsAlive(identifier), "Expected SIGKILL escalation to reap child")
+            }
+        }
+    }
+}
+
+private func sessionRetainsUnconfirmedChildUntilExitTest() -> TestCase {
+    TestCase(name: "usage session retains unconfirmed child and completes on late exit") {
+        try await withSyntheticPIDFile { pidFile in
+            try await withSyntheticMode(.ignoreTermination, pidFile: pidFile) {
+                let signals = ProcessSignalRecorder()
+                let session = UsageSession(
+                    executableURL: syntheticExecutableURL,
+                    configuration: testConfiguration,
+                    terminationSignal: signals.suppress
+                )
+                try await session.start()
+                let identifier = try await readProcessIdentifier(from: pidFile)
+                defer { if processIsAlive(identifier) { Darwin.kill(identifier, SIGKILL) } }
+                let result = await session.stop()
+                let repeated = await session.stop()
+                let state = await session.state
+
+                try expect(result == .unconfirmed && repeated == .unconfirmed, "Expected bounded stop")
+                try expect(state == .stopping, "A live child must not be reported stopped")
+                try expect(processIsAlive(identifier), "Expected the suppressed signals to leave child alive")
+                try expect(signals.hasTerminationObserver, "A live child must retain its exit observer")
+                try expect(signals.values == [SIGTERM, SIGKILL], "Repeated stop cannot resend signals")
+
+                let first = Task { await session.waitForTermination() }
+                let second = Task { await session.waitForTermination() }
+                first.cancel()
+                Darwin.kill(identifier, SIGKILL)
+                await first.value
+                await second.value
+                let confirmed = await session.stop()
+                let stopped = await session.state
+
+                try expect(confirmed == .exited && stopped == .stopped, "Late exit must complete cleanup")
+                try expect(!processIsAlive(identifier), "Expected confirmed process exit")
+                try expect(!signals.hasTerminationObserver, "Release the observer after actual exit")
+            }
+        }
+    }
+}
+
+private func sessionSharesCancellationAndStopCleanupTest() -> TestCase {
+    TestCase(name: "usage session request cancellation and explicit stop share cleanup") {
+        try await withSyntheticPIDFile { pidFile in
+            try await withSyntheticMode(.timeout, pidFile: pidFile) {
+                let signals = ProcessSignalRecorder()
+                let session = UsageSession(
+                    executableURL: syntheticExecutableURL,
+                    configuration: UsageSessionConfiguration(
+                        initializeTimeout: .seconds(2),
+                        requestTimeout: .seconds(1),
+                        stopGracePeriod: .milliseconds(20)
+                    ),
+                    terminationSignal: signals.suppress
+                )
+                let operation = Task { try await session.start() }
+                let identifier = try await readProcessIdentifier(from: pidFile)
+                defer { if processIsAlive(identifier) { Darwin.kill(identifier, SIGKILL) } }
+                operation.cancel()
+                try await expectTaskError(.cancelled, task: operation)
+                let stopResult = await session.stop()
+                try expect(stopResult == .unconfirmed, "Expected the retained live child")
+                try expect(signals.values == [SIGTERM, SIGKILL], "Failure and stop must share escalation")
+                Darwin.kill(identifier, SIGKILL)
+                await session.waitForTermination()
+                let state = await session.state
+                try expect(state == .stopped, "Expected cleanup after the real exit event")
+            }
         }
     }
 }

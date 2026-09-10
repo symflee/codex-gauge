@@ -178,3 +178,23 @@ public struct RefreshPresentationAdapter: Sendable {
         })
     }
 }
+
+/// Scheduling depends on expiry dates, not percentages, freshness, or refresh flags.
+public struct RefreshDeadlineInput: Equatable, Sendable {
+    public let quotaResets: Set<Date>
+    public let validityExpirations: Set<Date>
+
+    public init(productStates: [UsageProduct: ProductUsageState]) {
+        var resets = Set<Date>()
+        var expirations = Set<Date>()
+        for state in productStates.values {
+            guard case .value(let value, _) = state, !value.quotaWindows.isEmpty else { continue }
+            resets.formUnion(value.quotaWindows.compactMap(\.resetsAt))
+            expirations.insert(value.capturedAt.addingTimeInterval(
+                QuotaValueValidityPolicy.maximumValueAge
+            ))
+        }
+        quotaResets = resets
+        validityExpirations = expirations
+    }
+}

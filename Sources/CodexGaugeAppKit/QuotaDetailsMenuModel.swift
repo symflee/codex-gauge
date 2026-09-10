@@ -55,6 +55,19 @@ public struct QuotaDetailsMenuInput: Equatable, Sendable {
         self.codexAvailability = codexAvailability
         self.currentDate = currentDate
     }
+
+    /// Reevaluate validity when deferred content is requested, without fetching a
+    /// new snapshot. The payload remains the most recent in-memory publication.
+    public func replacingCurrentDate(_ date: Date) -> Self {
+        Self(
+            productStates: productStates,
+            spendControlsByProduct: spendControlsByProduct,
+            issuesByProduct: issuesByProduct,
+            lastSuccessfulRefreshByProduct: lastSuccessfulRefreshByProduct,
+            codexAvailability: codexAvailability,
+            currentDate: date
+        )
+    }
 }
 
 public struct QuotaMenuProductSection: Equatable, Sendable {
@@ -63,19 +76,25 @@ public struct QuotaMenuProductSection: Equatable, Sendable {
     public let quotaRows: [String]
     public let spendControlRows: [String]
     public let statusRows: [String]
+    public let quotaRowIDs: [String]
+    public let statusRowIDs: [String]
 
     public init(
         product: UsageProduct,
         title: String,
         quotaRows: [String],
         spendControlRows: [String],
-        statusRows: [String]
+        statusRows: [String],
+        quotaRowIDs: [String]? = nil,
+        statusRowIDs: [String]? = nil
     ) {
         self.product = product
         self.title = title
         self.quotaRows = quotaRows
         self.spendControlRows = spendControlRows
         self.statusRows = statusRows
+        self.quotaRowIDs = quotaRowIDs ?? quotaRows.indices.map { "quota-\($0)" }
+        self.statusRowIDs = statusRowIDs ?? statusRows.indices.map { "status-\($0)" }
     }
 }
 
@@ -170,6 +189,7 @@ public struct QuotaMenuDateFormatter {
 }
 
 public struct QuotaDetailsMenuModelBuilder {
+    fileprivate let cacheIdentity = UUID()
     private let localization: QuotaMenuLocalization
     private let dateFormatter: QuotaMenuDateFormatter
     private let validityPolicy = QuotaValueValidityPolicy()
@@ -195,105 +215,51 @@ public struct QuotaDetailsMenuModelBuilder {
         _ input: QuotaDetailsMenuInput,
         applicationUpdateState: ApplicationUpdateState = .unavailable
     ) -> QuotaDetailsMenuModel {
-        QuotaDetailsMenuModel(
-            productSections: UsageProduct.allCases.map {
-                productSection(for: $0, input: input)
-            },
-            actionGroups: actionGroups(
-                for: input.codexAvailability,
-                applicationUpdateState: applicationUpdateState
-            )
-        )
+        var cache = QuotaDetailsMenuModelCache()
+        return cache.build(input, using: self, applicationUpdateState: applicationUpdateState)
     }
 
-    private func productSection(
+    fileprivate func sectionInput(
         for product: UsageProduct,
         input: QuotaDetailsMenuInput
-    ) -> QuotaMenuProductSection {
+    ) -> QuotaMenuSectionInput {
         let state = input.productStates[product] ?? .unavailable
-        let explicitSuccess = input.lastSuccessfulRefreshByProduct[product]
         let issue = input.issuesByProduct[product]
-        let spendControl = input.spendControlsByProduct[product]
-        return section(
-            product: product,
-            state: state,
-            explicitSuccess: explicitSuccess,
-            issue: issue,
-            spendControl: spendControl,
-            currentDate: input.currentDate
+        var result = QuotaMenuSectionInput(
+            spendControl: input.spendControlsByProduct[product]
         )
-    }
-
-    private func section(
-        product: UsageProduct,
-        state: ProductUsageState,
-        explicitSuccess: Date?,
-        issue: QuotaMenuIssue?,
-        spendControl: QuotaMenuSpendControl?,
-        currentDate: Date
-    ) -> QuotaMenuProductSection {
         switch state {
         case .loading:
-            return makeSection(
-                product: product,
-                spendControl: spendControl,
-                statusRows: [text(.statusLoading)]
-            )
+            result.status = .loading
         case .unavailable:
-            let status = successRows(explicitSuccess) + [issueText(issue)]
-            return makeSection(
-                product: product,
-                spendControl: spendControl,
-                statusRows: status
-            )
+            result.success = input.lastSuccessfulRefreshByProduct[product]
+            result.status = .unavailable(issue)
         case .value(let value, let freshness):
-            return valueSection(
-                product: product,
-                value: value,
-                freshness: freshness,
-                explicitSuccess: explicitSuccess,
-                issue: issue,
-                spendControl: spendControl,
-                currentDate: currentDate
-            )
+            result.success = input.lastSuccessfulRefreshByProduct[product] ?? value.capturedAt
+            result.status = .value(freshness, issue)
+            result.windows = value.quotaWindows.sorted(by: quotaAscending).map { quota in
+                QuotaMenuWindowInput(
+                    slot: quota.slot,
+                    durationMinutes: quota.windowDurationMinutes,
+                    remainingPercent: validityPolicy.isValid(
+                        quota, capturedAt: value.capturedAt, now: input.currentDate
+                    ) ? quota.remainingPercent : nil,
+                    resetsAt: quota.resetsAt
+                )
+            }
         }
+        return result
     }
 
-    private func valueSection(
-        product: UsageProduct,
-        value: ProductQuotaValue,
-        freshness: ProductValueFreshness,
-        explicitSuccess: Date?,
-        issue: QuotaMenuIssue?,
-        spendControl: QuotaMenuSpendControl?,
-        currentDate: Date
-    ) -> QuotaMenuProductSection {
-        let success = explicitSuccess ?? value.capturedAt
-        let rows = value.quotaWindows.sorted(by: quotaAscending).map {
-            quotaRow($0, capturedAt: value.capturedAt, currentDate: currentDate)
+    fileprivate func statusRows(_ status: QuotaMenuSectionInput.Status) -> [String] {
+        switch status {
+        case .loading:
+            [text(.statusLoading)]
+        case .unavailable(let issue):
+            [issueText(issue)]
+        case .value(let freshness, let issue):
+            freshnessRows(freshness, issue: issue)
         }
-        let status = successRows(success) + freshnessRows(freshness, issue: issue)
-        return makeSection(
-            product: product,
-            quotaRows: rows,
-            spendControl: spendControl,
-            statusRows: status
-        )
-    }
-
-    private func makeSection(
-        product: UsageProduct,
-        quotaRows: [String] = [],
-        spendControl: QuotaMenuSpendControl?,
-        statusRows: [String]
-    ) -> QuotaMenuProductSection {
-        QuotaMenuProductSection(
-            product: product,
-            title: productTitle(product),
-            quotaRows: quotaRows,
-            spendControlRows: spendControl.map { [spendControlRow($0)] } ?? [],
-            statusRows: statusRows
-        )
     }
 
     private func quotaAscending(_ left: QuotaWindow, _ right: QuotaWindow) -> Bool {
@@ -314,43 +280,20 @@ public struct QuotaDetailsMenuModelBuilder {
         }
     }
 
-    private func quotaRow(
-        _ quota: QuotaWindow,
-        capturedAt: Date,
-        currentDate: Date
-    ) -> String {
-        guard validityPolicy.isValid(
-            quota,
-            capturedAt: capturedAt,
-            now: currentDate
-        ) else {
-            return expiredQuotaRow(quota)
+    fileprivate func quotaRow(_ quota: QuotaMenuWindowInput) -> String {
+        var values = ["duration": DurationBadge(windowDurationMinutes: quota.durationMinutes).label]
+        if let remaining = quota.remainingPercent {
+            values["remaining"] = String(remaining)
         }
-        let values = [
-            "duration": quota.durationBadge.label,
-            "remaining": String(quota.remainingPercent)
-        ]
+        let valid = quota.remainingPercent != nil
         guard let reset = quota.resetsAt else {
-            return template(.quotaWithoutReset, values: values)
+            return template(valid ? .quotaWithoutReset : .quotaExpiredWithoutReset, values: values)
         }
-        return template(
-            .quotaWithReset,
-            values: values.merging(["reset": dateFormatter.string(from: reset)]) { _, new in new }
-        )
+        values["reset"] = dateFormatter.string(from: reset)
+        return template(valid ? .quotaWithReset : .quotaExpiredWithReset, values: values)
     }
 
-    private func expiredQuotaRow(_ quota: QuotaWindow) -> String {
-        let values = ["duration": quota.durationBadge.label]
-        guard let reset = quota.resetsAt else {
-            return template(.quotaExpiredWithoutReset, values: values)
-        }
-        return template(
-            .quotaExpiredWithReset,
-            values: values.merging(["reset": dateFormatter.string(from: reset)]) { _, new in new }
-        )
-    }
-
-    private func spendControlRow(_ spendControl: QuotaMenuSpendControl) -> String {
+    fileprivate func spendControlRow(_ spendControl: QuotaMenuSpendControl) -> String {
         switch spendControl {
         case .reached:
             text(.spendControlReached)
@@ -364,7 +307,7 @@ public struct QuotaDetailsMenuModelBuilder {
         }
     }
 
-    private func successRows(_ date: Date?) -> [String] {
+    fileprivate func successRows(_ date: Date?) -> [String] {
         guard let date else {
             return []
         }
@@ -392,7 +335,7 @@ public struct QuotaDetailsMenuModelBuilder {
         return text(issue.textKey)
     }
 
-    private func productTitle(_ product: UsageProduct) -> String {
+    fileprivate func productTitle(_ product: UsageProduct) -> String {
         switch product {
         case .codex:
             text(.productCodex)
@@ -401,7 +344,7 @@ public struct QuotaDetailsMenuModelBuilder {
         }
     }
 
-    private func actionGroups(
+    fileprivate func actionGroups(
         for availability: CodexMenuAvailability,
         applicationUpdateState: ApplicationUpdateState
     ) -> [[QuotaMenuActionItem]] {
@@ -472,6 +415,112 @@ public struct QuotaDetailsMenuModelBuilder {
             result.replacingOccurrences(of: "{\(value.key)}", with: value.value)
         }
     }
+}
+
+/// Stores only the current rows. A new success timestamp does not reformat quota dates.
+public struct QuotaDetailsMenuModelCache {
+    private var sections: [UsageProduct: CachedSection] = [:]
+    private var builderIdentity: UUID?
+    private var actionInput: ActionInput?
+    private var actions: [[QuotaMenuActionItem]] = []
+
+    public init() {}
+
+    public mutating func build(
+        _ input: QuotaDetailsMenuInput,
+        using builder: QuotaDetailsMenuModelBuilder,
+        applicationUpdateState: ApplicationUpdateState = .unavailable
+    ) -> QuotaDetailsMenuModel {
+        if builderIdentity != builder.cacheIdentity {
+            self = Self()
+            builderIdentity = builder.cacheIdentity
+        }
+        let productSections = UsageProduct.allCases.map { product in
+            let semantic = builder.sectionInput(for: product, input: input)
+            let previous = sections[product]
+            if previous?.input == semantic, let previous { return previous.section }
+            let windows = semantic.windows.map { window in
+                if let oldIndex = previous?.input.windows.firstIndex(of: window),
+                   let previous {
+                    return previous.section.quotaRows[oldIndex]
+                }
+                return builder.quotaRow(window)
+            }
+            let success: [String]
+            if previous?.input.success == semantic.success, let previous {
+                success = previous.successRows
+            } else {
+                success = builder.successRows(semantic.success)
+            }
+            let status: [String]
+            if previous?.input.status == semantic.status, let previous {
+                status = previous.statusRows
+            } else {
+                status = builder.statusRows(semantic.status)
+            }
+            let spend: [String]
+            if previous?.input.spendControl == semantic.spendControl, let previous {
+                spend = previous.section.spendControlRows
+            } else {
+                spend = semantic.spendControl.map { [builder.spendControlRow($0)] } ?? []
+            }
+            let section = QuotaMenuProductSection(
+                product: product,
+                title: previous?.section.title ?? builder.productTitle(product),
+                quotaRows: windows,
+                spendControlRows: spend,
+                statusRows: success + status,
+                quotaRowIDs: semantic.windows.map { $0.slot.rawValue },
+                statusRowIDs: success.map { _ in "last-success" } + status.map { _ in "condition" }
+            )
+            sections[product] = CachedSection(
+                input: semantic, section: section, successRows: success, statusRows: status
+            )
+            return section
+        }
+        let nextActionInput = ActionInput(
+            availability: input.codexAvailability, update: applicationUpdateState
+        )
+        if nextActionInput != actionInput {
+            actions = builder.actionGroups(
+                for: input.codexAvailability, applicationUpdateState: applicationUpdateState
+            )
+            actionInput = nextActionInput
+        }
+        return QuotaDetailsMenuModel(productSections: productSections, actionGroups: actions)
+    }
+
+    private struct CachedSection {
+        let input: QuotaMenuSectionInput
+        let section: QuotaMenuProductSection
+        let successRows: [String]
+        let statusRows: [String]
+    }
+
+    private struct ActionInput: Equatable {
+        let availability: CodexMenuAvailability
+        let update: ApplicationUpdateState
+    }
+}
+
+fileprivate struct QuotaMenuSectionInput: Equatable {
+    enum Status: Equatable {
+        case loading
+        case unavailable(QuotaMenuIssue?)
+        case value(ProductValueFreshness, QuotaMenuIssue?)
+    }
+
+    var windows: [QuotaMenuWindowInput] = []
+    var success: Date?
+    var status: Status = .loading
+    let spendControl: QuotaMenuSpendControl?
+}
+
+fileprivate struct QuotaMenuWindowInput: Equatable {
+    let slot: QuotaSlot
+    let durationMinutes: Int?
+    let remainingPercent: Int?
+    let resetsAt: Date?
 }
 
 private enum QuotaMenuTextKey: String, CaseIterable {

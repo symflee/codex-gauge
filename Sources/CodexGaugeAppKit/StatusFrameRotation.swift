@@ -9,7 +9,7 @@ public enum StatusRotationPauseReason: Hashable, Sendable, CaseIterable {
 }
 
 @MainActor
-public protocol StatusRotationScheduling: AnyObject {
+public protocol StatusRotationScheduling: AnyObject, Sendable {
     func schedule(
         interval: TimeInterval,
         tolerance: TimeInterval,
@@ -84,6 +84,11 @@ final class StatusFrameRotation {
         self.present = present
     }
 
+    deinit {
+        let scheduler = scheduler
+        Task { @MainActor in scheduler.cancel() }
+    }
+
     func setFrames(_ frames: [RenderedStatusFrame]) {
         stopSchedule()
         self.frames = frames
@@ -97,6 +102,16 @@ final class StatusFrameRotation {
         updatePauseReasons(paused, reason: reason)
         let isPaused = !pauseReasons.isEmpty
         handlePauseTransition(from: wasPaused, to: isPaused)
+    }
+
+    func replaceRenderedFrames(_ frames: [RenderedStatusFrame]) {
+        guard frames.count == self.frames.count else {
+            return
+        }
+        let changed = frames.indices.contains(currentIndex)
+            && !frames[currentIndex].hasSamePresentation(as: self.frames[currentIndex])
+        self.frames = frames
+        if changed { presentCurrentFrame() }
     }
 
     private func updatePauseReasons(_ paused: Bool, reason: StatusRotationPauseReason) {

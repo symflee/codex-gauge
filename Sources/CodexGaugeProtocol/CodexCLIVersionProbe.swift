@@ -1,4 +1,3 @@
-import Darwin
 import Foundation
 
 public struct CodexCLIVersion: Equatable, Sendable, CustomStringConvertible {
@@ -200,10 +199,14 @@ public protocol CodexCLIVersionProbing: Sendable {
 
 public actor CodexCLIVersionProbe: CodexCLIVersionProbing {
     private let configuration: CodexCLIVersionProbeConfiguration
+    private let terminationSignal: ProcessLifecycle.Signal
     private let parser = CodexCLIVersionParser()
     private let clock = ContinuousClock()
 
     private var process: Process?
+    private var processLifecycle: ProcessLifecycle?
+    private var isProbing = false
+    private var isCleaningUp = false
     private var outputReader: FileHandle?
     private var output = Data()
     private var reachedEndOfOutput = false
@@ -215,26 +218,37 @@ public actor CodexCLIVersionProbe: CodexCLIVersionProbing {
         configuration: CodexCLIVersionProbeConfiguration = .production
     ) {
         self.configuration = configuration
+        terminationSignal = ProcessLifecycle.sendSignal
+    }
+
+    package init(
+        configuration: CodexCLIVersionProbeConfiguration,
+        terminationSignal: @escaping ProcessLifecycle.Signal
+    ) {
+        self.configuration = configuration
+        self.terminationSignal = terminationSignal
     }
 
     public func version(
         of executableURL: URL
     ) async throws(CodexCLIVersionProbeError) -> CodexCLIVersion {
-        guard process == nil, pendingProbe == nil else {
+        guard isProbing == false, process == nil, pendingProbe == nil else {
             throw .processFailed
         }
+        isProbing = true
+        defer { isProbing = false }
         nextGeneration &+= 1
         let generation = nextGeneration
         do {
             try launch(executableURL: executableURL, generation: generation)
             let data = try await waitForOutput(generation: generation)
-            await cleanUpProcess()
+            await cleanUpProcess(generation: generation)
             return try parser.parse(data)
         } catch let error as CodexCLIVersionProbeError {
-            await cleanUpProcess()
+            await cleanUpProcess(generation: generation)
             throw error
         } catch {
-            await cleanUpProcess()
+            await cleanUpProcess(generation: generation)
             throw .processFailed
         }
     }
@@ -259,6 +273,7 @@ public actor CodexCLIVersionProbe: CodexCLIVersionProbing {
             try child.run()
         } catch {
             removeCallbacks(child, reader: outputPipe.fileHandleForReading)
+            processLifecycle = nil
             close(outputPipe)
             throw .launchFailed
         }
@@ -286,11 +301,8 @@ public actor CodexCLIVersionProbe: CodexCLIVersionProbing {
         generation: UInt64
     ) {
         installOutputHandler(reader, generation: generation)
-        child.terminationHandler = { [weak self] terminatedChild in
-            let status = terminatedChild.terminationStatus
-            Task { [weak self, status] in
-                await self?.receiveTermination(status, generation: generation)
-            }
+        processLifecycle = ProcessLifecycle.observe(child, signal: terminationSignal) { status in
+            await self.receiveTermination(status, generation: generation)
         }
     }
 
@@ -367,10 +379,14 @@ public actor CodexCLIVersionProbe: CodexCLIVersionProbing {
         _ status: Int32,
         generation: UInt64
     ) {
-        guard generation == pendingProbe?.generation else {
+        guard generation == nextGeneration, process != nil else {
             return
         }
         recordedExitStatus = status
+        if isCleaningUp {
+            finishConfirmedCleanup(generation: generation)
+            return
+        }
         guard status == 0 else {
             complete(generation: generation, throwing: .processFailed)
             return
@@ -426,45 +442,34 @@ public actor CodexCLIVersionProbe: CodexCLIVersionProbing {
         return pending
     }
 
-    private func cleanUpProcess() async {
+    private func cleanUpProcess(generation: UInt64) async {
+        guard generation == nextGeneration, let processLifecycle else {
+            return
+        }
+        isCleaningUp = true
         pendingProbe?.timeoutTask.cancel()
         pendingProbe = nil
         outputReader?.readabilityHandler = nil
-        process?.terminationHandler = nil
-        await terminateProcessIfNeeded()
+        let result = await processLifecycle.stop(gracePeriod: configuration.stopGracePeriod)
+        if result == .exited {
+            finishConfirmedCleanup(generation: generation)
+        }
+        // If unconfirmed, keep the process, lifecycle and termination observer.
+        // A late event completes cleanup and only then permits another probe.
+    }
+
+    private func finishConfirmedCleanup(generation: UInt64) {
+        guard generation == nextGeneration else {
+            return
+        }
         try? outputReader?.close()
         process = nil
+        processLifecycle = nil
         outputReader = nil
         output = Data()
         reachedEndOfOutput = false
         recordedExitStatus = nil
-    }
-
-    private func terminateProcessIfNeeded() async {
-        guard let process, process.isRunning else {
-            return
-        }
-        process.terminate()
-        await waitForExit(for: configuration.stopGracePeriod)
-        guard process.isRunning else {
-            return
-        }
-        Darwin.kill(process.processIdentifier, SIGKILL)
-        await waitForExit(for: configuration.stopGracePeriod)
-    }
-
-    private func waitForExit(for duration: Duration) async {
-        let deadline = clock.now.advanced(by: duration)
-        while process?.isRunning == true, clock.now < deadline {
-            await cancellationIndependentPause()
-        }
-    }
-
-    private func cancellationIndependentPause() async {
-        let pause = Task.detached {
-            try? await ContinuousClock().sleep(for: .milliseconds(5))
-        }
-        await pause.value
+        isCleaningUp = false
     }
 
     private func removeCallbacks(_ child: Process, reader: FileHandle) {

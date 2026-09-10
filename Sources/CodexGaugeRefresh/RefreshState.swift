@@ -15,10 +15,16 @@ public enum RefreshRequestReason: Equatable, Sendable {
 public struct RefreshRequest: Equatable, Sendable {
     public let generation: UInt64
     public let reason: RefreshRequestReason
+    public let isUserInitiated: Bool
 
-    public init(generation: UInt64, reason: RefreshRequestReason) {
+    public init(
+        generation: UInt64,
+        reason: RefreshRequestReason,
+        isUserInitiated: Bool = false
+    ) {
         self.generation = generation
         self.reason = reason
+        self.isUserInitiated = isUserInitiated || reason == .manual
     }
 }
 
@@ -26,6 +32,9 @@ public enum RefreshScheduleReason: Equatable, Sendable {
     case normal
     case burst
     case retry
+    case wakeBaseline
+    case quotaReset
+    case burstExpiry
 }
 
 public struct RefreshSchedule: Equatable, Sendable {
@@ -50,6 +59,10 @@ public struct RefreshState: Equatable, Sendable {
     public internal(set) var isRunning: Bool
     public internal(set) var baseline: SelectedQuotaSamples?
     public internal(set) var burstDeadline: ContinuousClock.Instant?
+    public internal(set) var burstCooldownDeadline: ContinuousClock.Instant?
+    public internal(set) var lastRequestCompletedAt: ContinuousClock.Instant?
+    internal var requiresNormalBurstRearm = false
+    internal var retryNotBefore: ContinuousClock.Instant?
     public internal(set) var consecutiveTransientFailures: Int
     public internal(set) var inFlightRequest: RefreshRequest?
     public internal(set) var scheduledRefresh: RefreshSchedule?
@@ -91,6 +104,10 @@ public enum RefreshEvent: Equatable, Sendable {
         profile: RefreshProfile,
         at: ContinuousClock.Instant
     )
+    case requestAdmission(
+        generation: UInt64,
+        at: ContinuousClock.Instant
+    )
     case requestSucceeded(
         generation: UInt64,
         samples: SelectedQuotaSamples,
@@ -100,7 +117,8 @@ public enum RefreshEvent: Equatable, Sendable {
         generation: UInt64,
         at: ContinuousClock.Instant
     )
-    case terminalFailure(generation: UInt64)
+    case terminalFailure(generation: UInt64, at: ContinuousClock.Instant? = nil)
+    case suspend(at: ContinuousClock.Instant)
     case stop
 }
 

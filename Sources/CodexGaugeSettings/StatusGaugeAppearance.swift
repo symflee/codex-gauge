@@ -31,6 +31,7 @@ public struct StatusGaugeColor: Equatable, Hashable, Sendable {
 }
 
 public enum StatusGaugePreset: String, CaseIterable, Equatable, Hashable, Sendable {
+    case neutral
     case blue
     case graphite
     case green
@@ -39,6 +40,8 @@ public enum StatusGaugePreset: String, CaseIterable, Equatable, Hashable, Sendab
 
     public var borderColor: StatusGaugeColor {
         switch self {
+        case .neutral:
+            fillColor
         case .blue:
             StatusGaugeColor(red: 0x00, green: 0x4C, blue: 0x99)
         case .graphite:
@@ -54,6 +57,8 @@ public enum StatusGaugePreset: String, CaseIterable, Equatable, Hashable, Sendab
 
     public var fillColor: StatusGaugeColor {
         switch self {
+        case .neutral:
+            StatusGaugeColor(red: 0xD8, green: 0xDE, blue: 0xE6)
         case .blue:
             StatusGaugeColor(red: 0x0A, green: 0x84, blue: 0xFF)
         case .graphite:
@@ -75,7 +80,7 @@ public enum StatusGaugeAppearance: Equatable, Hashable, Sendable {
         fillColor: StatusGaugeColor
     )
 
-    public static let `default` = StatusGaugeAppearance.preset(.blue)
+    public static let `default` = StatusGaugeAppearance.preset(.neutral)
 
     public var borderColor: StatusGaugeColor {
         switch self {

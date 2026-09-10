@@ -28,8 +28,7 @@ public enum StatusGaugeTextContrast {
 public final class StatusGaugeImageCache {
     private struct Key: Hashable {
         let label: String
-        let borderHex: String
-        let fillHex: String
+        let palette: StatusGaugePalette
     }
 
     private let capacity: Int
@@ -46,12 +45,12 @@ public final class StatusGaugeImageCache {
 
     public func image(
         label: String,
-        appearance: StatusGaugeAppearance
+        appearance: StatusGaugeAppearance,
+        systemAppearance: NSAppearance? = nil
     ) -> NSImage {
         image(
             label: label,
-            borderColor: appearance.borderColor,
-            fillColor: appearance.fillColor
+            palette: StatusGaugePalette(appearance: appearance, systemAppearance: systemAppearance)
         )
     }
 
@@ -60,16 +59,18 @@ public final class StatusGaugeImageCache {
         borderColor: StatusGaugeColor,
         fillColor: StatusGaugeColor
     ) -> NSImage {
-        let key = Key(
+        image(
             label: label,
-            borderHex: borderColor.hexString,
-            fillHex: fillColor.hexString
+            palette: StatusGaugePalette(borderColor: borderColor, fillColor: fillColor)
         )
+    }
+
+    private func image(label: String, palette: StatusGaugePalette) -> NSImage {
+        let key = Key(label: label, palette: palette)
         guard let cachedImage = images[key] else {
             return makeAndCacheImage(
                 label: label,
-                borderColor: borderColor,
-                fillColor: fillColor,
+                palette: palette,
                 key: key
             )
         }
@@ -79,14 +80,12 @@ public final class StatusGaugeImageCache {
 
     private func makeAndCacheImage(
         label: String,
-        borderColor: StatusGaugeColor,
-        fillColor: StatusGaugeColor,
+        palette: StatusGaugePalette,
         key: Key
     ) -> NSImage {
         let image = makeImage(
             label: label,
-            borderColor: borderColor,
-            fillColor: fillColor
+            palette: palette
         )
         images[key] = image
         markMostRecentlyUsed(key)
@@ -109,17 +108,15 @@ public final class StatusGaugeImageCache {
 
     private func makeImage(
         label: String,
-        borderColor: StatusGaugeColor,
-        fillColor: StatusGaugeColor
+        palette: StatusGaugePalette
     ) -> NSImage {
-        let metrics = StatusGaugeImageMetrics(label: label, fillColor: fillColor)
+        let metrics = StatusGaugeImageMetrics(label: label, textColor: palette.textColor)
         let image = NSImage(size: metrics.imageSize)
         for scale in [1, 2] {
             guard let representation = Self.makeBitmapRepresentation(
                 label: label,
                 metrics: metrics,
-                borderColor: borderColor,
-                fillColor: fillColor,
+                palette: palette,
                 scale: scale
             ) else {
                 continue
@@ -133,8 +130,7 @@ public final class StatusGaugeImageCache {
     private static func makeBitmapRepresentation(
         label: String,
         metrics: StatusGaugeImageMetrics,
-        borderColor: StatusGaugeColor,
-        fillColor: StatusGaugeColor,
+        palette: StatusGaugePalette,
         scale: Int
     ) -> NSBitmapImageRep? {
         guard let context = bitmapContext(
@@ -146,8 +142,7 @@ public final class StatusGaugeImageCache {
         draw(
             label: label,
             metrics: metrics,
-            borderColor: borderColor,
-            fillColor: fillColor,
+            palette: palette,
             scale: scale,
             context: context
         )
@@ -182,8 +177,7 @@ public final class StatusGaugeImageCache {
     private static func draw(
         label: String,
         metrics: StatusGaugeImageMetrics,
-        borderColor: StatusGaugeColor,
-        fillColor: StatusGaugeColor,
+        palette: StatusGaugePalette,
         scale: Int,
         context: CGContext
     ) {
@@ -201,8 +195,7 @@ public final class StatusGaugeImageCache {
             label: label,
             bounds: NSRect(origin: .zero, size: metrics.imageSize),
             metrics: metrics,
-            borderColor: borderColor,
-            fillColor: fillColor
+            palette: palette
         )
         context.flush()
     }
@@ -211,28 +204,29 @@ public final class StatusGaugeImageCache {
         label: String,
         bounds: NSRect,
         metrics: StatusGaugeImageMetrics,
-        borderColor: StatusGaugeColor,
-        fillColor: StatusGaugeColor
+        palette: StatusGaugePalette
     ) {
-        drawFill(in: bounds, color: fillColor)
-        drawBorder(in: bounds, color: borderColor)
+        drawFill(in: bounds, color: palette.fillColor)
+        if let borderColor = palette.borderColor {
+            drawBorder(in: bounds, color: borderColor)
+        }
         drawLabel(label, in: bounds, metrics: metrics)
     }
 
     private static func drawFill(in bounds: NSRect, color: StatusGaugeColor) {
-        let path = NSBezierPath(roundedRect: bounds, xRadius: 10, yRadius: 10)
+        let path = NSBezierPath(roundedRect: bounds, xRadius: 5, yRadius: 5)
         color.appKitColor.setFill()
         path.fill()
     }
 
     private static func drawBorder(in bounds: NSRect, color: StatusGaugeColor) {
-        let borderBounds = bounds.insetBy(dx: 0.5, dy: 0.5)
+        let borderBounds = bounds.insetBy(dx: 0.25, dy: 0.25)
         let path = NSBezierPath(
             roundedRect: borderBounds,
-            xRadius: 9.5,
-            yRadius: 9.5
+            xRadius: 4.75,
+            yRadius: 4.75
         )
-        path.lineWidth = 1
+        path.lineWidth = 0.5
         color.appKitColor.setStroke()
         path.stroke()
     }
@@ -252,18 +246,17 @@ public final class StatusGaugeImageCache {
 
 @MainActor
 private struct StatusGaugeImageMetrics {
-    static let height: CGFloat = 20
-    static let horizontalPadding: CGFloat = 10
+    static let height: CGFloat = 18
+    static let horizontalPadding: CGFloat = 7
 
     let labelSize: NSSize
     let textAttributes: [NSAttributedString.Key: Any]
 
-    init(label: String, fillColor: StatusGaugeColor) {
-        let font = NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .semibold)
-        let usesDarkText = StatusGaugeTextContrast.usesDarkText(for: fillColor)
+    init(label: String, textColor: StatusGaugeColor) {
+        let font = NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .medium)
         textAttributes = [
             .font: font,
-            .foregroundColor: usesDarkText ? NSColor.black : NSColor.white
+            .foregroundColor: textColor.appKitColor
         ]
         labelSize = (label as NSString).size(withAttributes: textAttributes)
     }
@@ -272,6 +265,43 @@ private struct StatusGaugeImageMetrics {
         NSSize(
             width: ceil(labelSize.width) + Self.horizontalPadding * 2,
             height: Self.height
+        )
+    }
+}
+
+private struct StatusGaugePalette: Hashable {
+    let borderColor: StatusGaugeColor?
+    let fillColor: StatusGaugeColor
+    let textColor: StatusGaugeColor
+
+    private init(borderColor: StatusGaugeColor?, fillColor: StatusGaugeColor, textColor: StatusGaugeColor) {
+        self.borderColor = borderColor
+        self.fillColor = fillColor
+        self.textColor = textColor
+    }
+
+    init(borderColor: StatusGaugeColor, fillColor: StatusGaugeColor) {
+        self.borderColor = borderColor
+        self.fillColor = fillColor
+        let component: UInt8 = StatusGaugeTextContrast.usesDarkText(for: fillColor) ? 0 : 255
+        textColor = StatusGaugeColor(red: component, green: component, blue: component)
+    }
+
+    @MainActor
+    init(appearance: StatusGaugeAppearance, systemAppearance: NSAppearance?) {
+        guard appearance == .preset(.neutral) else {
+            self.init(borderColor: appearance.borderColor, fillColor: appearance.fillColor)
+            return
+        }
+        let isDark = systemAppearance?.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        self.init(
+            borderColor: nil,
+            fillColor: isDark
+                ? StatusGaugeColor(red: 0x42, green: 0x4B, blue: 0x5B)
+                : StatusGaugePreset.neutral.fillColor,
+            textColor: isDark
+                ? StatusGaugeColor(red: 0xF0, green: 0xF2, blue: 0xF6)
+                : StatusGaugeColor(red: 0x25, green: 0x28, blue: 0x30)
         )
     }
 }

@@ -56,7 +56,8 @@
 "settings.selection.accessibility" = "한도 선택 방식";
 "settings.section.gauge-colors" = "게이지 색상";
 "settings.gauge.preset.accessibility" = "게이지 색상 프리셋";
-"settings.gauge.preset.blue" = "선명한 파랑 — 기본";
+"settings.gauge.preset.neutral" = "무채색 — 기본, 자동 명암";
+"settings.gauge.preset.blue" = "선명한 파랑";
 "settings.gauge.preset.graphite" = "그라파이트";
 "settings.gauge.preset.green" = "선명한 초록";
 "settings.gauge.preset.orange" = "선명한 주황";

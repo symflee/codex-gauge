@@ -4,7 +4,9 @@ import Foundation
 public protocol RefreshUsageSession: Sendable {
     func start() async throws
     func readRateLimits(capturedAt: Date) async throws -> RateLimitReadResult
-    func stop() async
+    @discardableResult
+    func stop() async -> UsageSessionStopResult
+    func waitForTermination() async
 }
 
 extension UsageSession: RefreshUsageSession {}

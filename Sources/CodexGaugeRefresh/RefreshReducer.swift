@@ -44,12 +44,16 @@ public struct RefreshReducer: Sendable {
             changeLowPowerMode(isEnabled, at: now, state: &state, commands: &commands)
         case .profileChanged(let profile, let now):
             changeProfile(profile, at: now, state: &state, commands: &commands)
+        case .requestAdmission(let generation, let now):
+            admitRequest(generation, at: now, state: &state, commands: &commands)
         case .requestSucceeded(let generation, let samples, let now):
             succeed(generation, samples: samples, at: now, state: &state, commands: &commands)
         case .transientFailure(let generation, let now):
             fail(generation, at: now, state: &state, commands: &commands)
-        case .terminalFailure(let generation):
-            failPermanently(generation, state: &state)
+        case .terminalFailure(let generation, let now):
+            failPermanently(generation, at: now, state: &state, commands: &commands)
+        case .suspend(let now):
+            suspend(at: now, state: &state, commands: &commands)
         case .stop:
             stop(state: &state, commands: &commands)
         }
@@ -71,7 +75,7 @@ public struct RefreshReducer: Sendable {
         guard state.scheduledRefresh?.reason != .retry else {
             return
         }
-        expireBurst(at: now, state: &state)
+        expireBurst(at: now, state: &state, commands: &commands)
         scheduleNext(at: now, state: &state, commands: &commands)
     }
 
@@ -84,9 +88,10 @@ public struct RefreshReducer: Sendable {
         guard state.profile != profile else {
             return
         }
+        if profile == .manual { endBurst(at: now, state: &state) }
         state.profile = profile
         guard profile != .manual else {
-            enterManual(state: &state, commands: &commands)
+            enterManual(at: now, state: &state, commands: &commands)
             return
         }
         guard state.isRunning, state.inFlightRequest == nil else {
@@ -95,17 +100,19 @@ public struct RefreshReducer: Sendable {
         guard state.scheduledRefresh?.reason != .retry else {
             return
         }
-        expireBurst(at: now, state: &state)
+        expireBurst(at: now, state: &state, commands: &commands)
         scheduleNext(at: now, state: &state, commands: &commands)
     }
 
     private func enterManual(
+        at now: ContinuousClock.Instant,
         state: inout RefreshState,
         commands: inout [RefreshCommand]
     ) {
         cancelSchedule(state: &state, commands: &commands)
         if let request = state.inFlightRequest {
             commands.append(.cancelRequest(generation: request.generation))
+            state.lastRequestCompletedAt = now
         }
         state.inFlightRequest = nil
         state.burstDeadline = nil
@@ -149,11 +156,10 @@ public struct RefreshReducer: Sendable {
         state.isRunning = true
         state.baseline = nil
         state.burstDeadline = nil
-        state.consecutiveTransientFailures = 0
         guard state.profile != .manual else {
             return
         }
-        beginRequest(.wakeBaseline, state: &state, commands: &commands)
+        request(.wakeBaseline, at: now, state: &state, commands: &commands)
     }
 
     private func quotaReset(
@@ -176,8 +182,60 @@ public struct RefreshReducer: Sendable {
         guard state.isRunning else {
             return
         }
-        expireBurst(at: now, state: &state)
+        expireBurst(at: now, state: &state, commands: &commands)
+        if state.inFlightRequest != nil {
+            coalesce(reason, state: &state)
+            return
+        }
+        if reason != .manual, let retry = state.retryNotBefore, retry > now {
+            schedule(deadline: automaticDeadline(retry, state: state), reason: .retry, state: &state, commands: &commands)
+            return
+        }
+        if reason != .manual, let floor = automaticFloor(state), floor > now {
+            let scheduledReason: RefreshScheduleReason
+            if reason == .quotaReset || state.scheduledRefresh?.reason == .quotaReset {
+                scheduledReason = .quotaReset
+            } else {
+                scheduledReason = .wakeBaseline
+            }
+            schedule(deadline: floor, reason: scheduledReason, state: &state, commands: &commands)
+            return
+        }
         beginRequest(reason, state: &state, commands: &commands)
+    }
+
+    private func admitRequest(
+        _ generation: UInt64,
+        at now: ContinuousClock.Instant,
+        state: inout RefreshState,
+        commands: inout [RefreshCommand]
+    ) {
+        guard state.isRunning, state.inFlightRequest?.generation == generation else { return }
+        expireBurst(at: now, state: &state, commands: &commands)
+        guard let request = state.inFlightRequest else {
+            scheduleNext(at: now, state: &state, commands: &commands)
+            return
+        }
+        guard !request.isUserInitiated, request.reason != .startup else { return }
+        let deadline = max(automaticFloor(state) ?? now, state.retryNotBefore ?? now)
+        guard deadline > now else { return }
+        // A request waiting for retirement or a factory result has not consumed
+        // its policy admission yet. Recheck before launching under a new policy.
+        state.inFlightRequest = nil
+        let reason: RefreshScheduleReason
+        if let retry = state.retryNotBefore, retry > now {
+            reason = .retry
+        } else {
+            switch request.reason {
+            case .normal: reason = .normal
+            case .burst: reason = .burst
+            case .retry: reason = .retry
+            case .quotaReset: reason = .quotaReset
+            case .wakeBaseline: reason = .wakeBaseline
+            case .startup, .manual: return
+            }
+        }
+        schedule(deadline: deadline, reason: reason, state: &state, commands: &commands)
     }
 
     private func beginRequest(
@@ -197,6 +255,9 @@ public struct RefreshReducer: Sendable {
         )
         state.inFlightRequest = request
         commands.append(.startRequest(request))
+        if let deadline = state.burstDeadline {
+            schedule(deadline: deadline, reason: .burstExpiry, state: &state, commands: &commands)
+        }
     }
 
     private func coalesce(
@@ -206,13 +267,15 @@ public struct RefreshReducer: Sendable {
         guard let current = state.inFlightRequest else {
             return
         }
+        let isUserInitiated = current.isUserInitiated || reason == .manual
         let reason = coalescedReason(current: current.reason, incoming: reason)
-        guard reason != current.reason else {
+        guard reason != current.reason || isUserInitiated != current.isUserInitiated else {
             return
         }
         state.inFlightRequest = RefreshRequest(
             generation: current.generation,
-            reason: reason
+            reason: reason,
+            isUserInitiated: isUserInitiated
         )
     }
 
@@ -241,30 +304,28 @@ public struct RefreshReducer: Sendable {
         guard schedule.generation == generation else {
             return
         }
+        guard now >= schedule.deadline else { return }
         state.scheduledRefresh = nil
-        expireBurst(at: now, state: &state)
-        guard schedule.reason != .burst || state.burstDeadline != nil else {
+        let wasBurst = state.burstDeadline != nil
+        expireBurst(at: now, state: &state, commands: &commands)
+        if schedule.reason == .burstExpiry || (wasBurst && state.burstDeadline == nil) {
             scheduleNext(at: now, state: &state, commands: &commands)
             return
         }
-        beginRequest(
-            requestReason(for: schedule.reason),
-            state: &state,
-            commands: &commands
-        )
-    }
-
-    private func requestReason(
-        for scheduleReason: RefreshScheduleReason
-    ) -> RefreshRequestReason {
-        switch scheduleReason {
-        case .normal:
-            .normal
-        case .burst:
-            .burst
-        case .retry:
-            .retry
+        let reason: RefreshRequestReason
+        switch schedule.reason {
+        case .normal: reason = .normal
+        case .burst: reason = .burst
+        case .retry: reason = .retry
+        case .wakeBaseline: reason = .wakeBaseline
+        case .quotaReset: reason = .quotaReset
+        case .burstExpiry: return
         }
+        if let floor = automaticFloor(state), floor > now {
+            self.schedule(deadline: floor, reason: schedule.reason, state: &state, commands: &commands)
+            return
+        }
+        beginRequest(reason, state: &state, commands: &commands)
     }
 
     private func succeed(
@@ -280,9 +341,15 @@ public struct RefreshReducer: Sendable {
         guard request.generation == generation else {
             return
         }
+        if let deadline = state.burstDeadline, now >= deadline {
+            expireBurst(at: now, state: &state, commands: &commands)
+            scheduleNext(at: now, state: &state, commands: &commands)
+            return
+        }
         state.inFlightRequest = nil
+        state.lastRequestCompletedAt = now
+        state.retryNotBefore = nil
         state.consecutiveTransientFailures = 0
-        expireBurst(at: now, state: &state)
         applySuccess(samples, reason: request.reason, at: now, state: &state)
         scheduleNext(at: now, state: &state, commands: &commands)
     }
@@ -295,7 +362,7 @@ public struct RefreshReducer: Sendable {
     ) {
         guard !reason.establishesBaseline else {
             state.baseline = samples
-            state.burstDeadline = nil
+            endBurst(at: now, state: &state)
             return
         }
         guard let baseline = state.baseline else {
@@ -305,6 +372,13 @@ public struct RefreshReducer: Sendable {
         }
         let change = sampleChange(from: baseline, to: samples)
         state.baseline = samples
+        if state.requiresNormalBurstRearm {
+            guard reason == .normal, state.burstCooldownDeadline.map({ now >= $0 }) ?? true else {
+                return
+            }
+            state.requiresNormalBurstRearm = false
+            state.burstCooldownDeadline = nil
+        }
         apply(change, at: now, state: &state)
     }
 
@@ -319,9 +393,11 @@ public struct RefreshReducer: Sendable {
         }
         switch change {
         case .increased:
-            state.burstDeadline = now.advanced(by: Self.burstDuration)
+            if state.burstDeadline == nil {
+                state.burstDeadline = now.advanced(by: Self.burstDuration)
+            }
         case .baselineChanged:
-            state.burstDeadline = nil
+            endBurst(at: now, state: &state)
         case .unchanged:
             return
         }
@@ -359,11 +435,10 @@ public struct RefreshReducer: Sendable {
             return
         }
         state.inFlightRequest = nil
-        expireBurst(at: now, state: &state)
+        state.lastRequestCompletedAt = now
+        endBurst(at: now, state: &state)
+        cancelSchedule(state: &state, commands: &commands)
         incrementFailureCount(state: &state)
-        if state.burstDeadline != nil, state.consecutiveTransientFailures >= 3 {
-            state.burstDeadline = nil
-        }
         guard state.profile != .manual else {
             return
         }
@@ -380,14 +455,21 @@ public struct RefreshReducer: Sendable {
 
     private func failPermanently(
         _ generation: UInt64,
-        state: inout RefreshState
+        at now: ContinuousClock.Instant?,
+        state: inout RefreshState,
+        commands: inout [RefreshCommand]
     ) {
-        guard state.isRunning, state.inFlightRequest?.generation == generation else {
-            return
+        guard state.isRunning, state.inFlightRequest?.generation == generation else { return }
+        if let now {
+            state.lastRequestCompletedAt = now
+            endBurst(at: now, state: &state)
+        } else {
+            state.burstDeadline = nil
         }
+        cancelSchedule(state: &state, commands: &commands)
         state.inFlightRequest = nil
         state.baseline = nil
-        state.burstDeadline = nil
+        state.retryNotBefore = nil
         state.consecutiveTransientFailures = 0
     }
 
@@ -398,8 +480,10 @@ public struct RefreshReducer: Sendable {
     ) {
         let index = max(state.consecutiveTransientFailures - 1, 0)
         let delay = Self.backoffIntervals[index]
+        let deadline = automaticDeadline(now.advanced(by: delay), state: state)
+        state.retryNotBefore = deadline
         schedule(
-            deadline: now.advanced(by: delay),
+            deadline: deadline,
             reason: .retry,
             state: &state,
             commands: &commands
@@ -419,7 +503,7 @@ public struct RefreshReducer: Sendable {
             let deadline = min(proposed, burstDeadline)
             schedule(
                 deadline: deadline,
-                reason: .burst,
+                reason: deadline == burstDeadline ? .burstExpiry : .burst,
                 state: &state,
                 commands: &commands
             )
@@ -429,7 +513,7 @@ public struct RefreshReducer: Sendable {
             return
         }
         schedule(
-            deadline: now.advanced(by: interval),
+            deadline: max(now.advanced(by: interval), state.burstCooldownDeadline ?? now),
             reason: .normal,
             state: &state,
             commands: &commands
@@ -442,6 +526,15 @@ public struct RefreshReducer: Sendable {
         state: inout RefreshState,
         commands: inout [RefreshCommand]
     ) {
+        var deadline = deadline
+        var reason = reason
+        if let burstDeadline = state.burstDeadline, burstDeadline <= deadline {
+            deadline = burstDeadline
+            reason = .burstExpiry
+        }
+        if let current = state.scheduledRefresh, current.deadline == deadline, current.reason == reason {
+            return
+        }
         cancelSchedule(state: &state, commands: &commands)
         state.nextScheduleGeneration += 1
         let schedule = RefreshSchedule(
@@ -464,14 +557,57 @@ public struct RefreshReducer: Sendable {
         commands.append(.cancelScheduledRefresh(generation: schedule.generation))
     }
 
+    private func automaticFloor(_ state: RefreshState) -> ContinuousClock.Instant? {
+        guard let completed = state.lastRequestCompletedAt,
+              let interval = state.profile.effectiveIntervals(lowPowerModeEnabled: state.lowPowerModeEnabled).burst else {
+            return nil
+        }
+        return completed.advanced(by: interval)
+    }
+
+    private func automaticDeadline(_ deadline: ContinuousClock.Instant, state: RefreshState) -> ContinuousClock.Instant {
+        max(deadline, automaticFloor(state) ?? deadline)
+    }
+
+    private func endBurst(at now: ContinuousClock.Instant, state: inout RefreshState) {
+        guard state.burstDeadline != nil else { return }
+        state.burstDeadline = nil
+        state.requiresNormalBurstRearm = true
+        if let interval = state.profile.effectiveIntervals(lowPowerModeEnabled: state.lowPowerModeEnabled).normal {
+            state.burstCooldownDeadline = now.advanced(by: interval)
+        }
+    }
+
     private func expireBurst(
         at now: ContinuousClock.Instant,
-        state: inout RefreshState
+        state: inout RefreshState,
+        commands: inout [RefreshCommand]
     ) {
-        guard let deadline = state.burstDeadline, now >= deadline else {
-            return
+        guard let deadline = state.burstDeadline, now >= deadline else { return }
+        if let request = state.inFlightRequest {
+            commands.append(.cancelRequest(generation: request.generation))
+            state.inFlightRequest = nil
+            state.lastRequestCompletedAt = now
         }
-        state.burstDeadline = nil
+        endBurst(at: now, state: &state)
+        cancelSchedule(state: &state, commands: &commands)
+    }
+
+    private func suspend(
+        at now: ContinuousClock.Instant,
+        state: inout RefreshState,
+        commands: inout [RefreshCommand]
+    ) {
+        cancelSchedule(state: &state, commands: &commands)
+        if let request = state.inFlightRequest {
+            commands.append(.cancelRequest(generation: request.generation))
+            state.lastRequestCompletedAt = now
+        }
+        endBurst(at: now, state: &state)
+        state.isRunning = false
+        state.inFlightRequest = nil
+        state.baseline = nil
+        // Sleeping must not reset a server failure's retry deadline or ladder.
     }
 
     private func stop(

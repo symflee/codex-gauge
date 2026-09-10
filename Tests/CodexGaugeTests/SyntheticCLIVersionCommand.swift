@@ -7,6 +7,7 @@ enum SyntheticCLIVersionMode: String {
     case oversized
     case nonzeroExit
     case timeout
+    case ignoreTermination
     case stderrFlood
     case standardInputEndOfFile
     case environmentIsolation
@@ -26,6 +27,9 @@ enum SyntheticCLIVersionCommand {
         }
         guard isVersionInvocation(mode: mode) else {
             Darwin.exit(64)
+        }
+        if mode == .ignoreTermination {
+            Darwin.signal(SIGTERM, SIG_IGN)
         }
         recordProcessIdentifier()
         run(mode)
@@ -64,7 +68,7 @@ enum SyntheticCLIVersionCommand {
             FileHandle.standardOutput.write(Data(repeating: 0x78, count: 8_192))
         case .nonzeroExit:
             Darwin.exit(23)
-        case .timeout:
+        case .timeout, .ignoreTermination:
             sleepUntilTerminated()
         case .stderrFlood:
             FileHandle.standardError.write(Data(repeating: 0x78, count: 2_097_152))

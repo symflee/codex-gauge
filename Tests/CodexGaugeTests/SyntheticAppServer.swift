@@ -26,6 +26,7 @@ enum SyntheticAppServerMode: String {
     case stderrFlood
     case stopDuringRequest
     case waitForStop
+    case ignoreTermination
     case environmentBoundary
     case safeSearchPath
 }
@@ -49,6 +50,9 @@ enum SyntheticAppServer {
         }
         guard let mode else {
             Darwin.exit(65)
+        }
+        if mode == .ignoreTermination {
+            Darwin.signal(SIGTERM, SIG_IGN)
         }
         recordProcessIdentifier()
         run(mode)
@@ -104,6 +108,10 @@ enum SyntheticAppServer {
         writeLine("{\"id\":1,\"result\":{\"synthetic\":true}}")
         guard readNotification(method: "initialized") else {
             Darwin.exit(67)
+        }
+        if mode == .ignoreTermination {
+            sleepUntilTerminated()
+            return
         }
         guard mode != .waitForStop else {
             waitForInputEnd()

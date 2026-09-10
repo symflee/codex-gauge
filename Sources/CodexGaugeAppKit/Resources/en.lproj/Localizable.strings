@@ -56,7 +56,8 @@
 "settings.selection.accessibility" = "Quota selection mode";
 "settings.section.gauge-colors" = "Gauge colors";
 "settings.gauge.preset.accessibility" = "Gauge color preset";
-"settings.gauge.preset.blue" = "Vivid Blue — Default";
+"settings.gauge.preset.neutral" = "Neutral — Default, Adaptive";
+"settings.gauge.preset.blue" = "Vivid Blue";
 "settings.gauge.preset.graphite" = "Graphite";
 "settings.gauge.preset.green" = "Vivid Green";
 "settings.gauge.preset.orange" = "Vivid Orange";

@@ -4,7 +4,8 @@ import Foundation
 public protocol AppServerSmokeSession: Sendable {
     func start() async throws
     func readRateLimits(capturedAt: Date) async throws -> RateLimitReadResult
-    func stop() async
+    @discardableResult
+    func stop() async -> UsageSessionStopResult
 }
 
 extension UsageSession: AppServerSmokeSession {}
@@ -47,6 +48,7 @@ public enum AppServerSmokeFailure: Equatable, Sendable {
     case incompatibleProtocol
     case timeout
     case processFailure
+    case cleanupUnconfirmed
     case protocolFailure
     case cancelled
     case internalFailure
@@ -115,14 +117,17 @@ public struct AppServerSmokeRunner: Sendable {
         let stopper = AppServerSmokeStopper()
         return await withTaskCancellationHandler {
             let result = await execute(session: session)
-            await stopper.stop(session)
+            let stopResult = await stopper.stop(session)
+            guard stopResult == .exited else {
+                return .failure(.cleanupUnconfirmed)
+            }
             guard Task.isCancelled == false else {
                 return .failure(.cancelled)
             }
             return result
         } onCancel: {
             Task {
-                await stopper.stop(session)
+                _ = await stopper.stop(session)
             }
         }
     }
@@ -216,18 +221,17 @@ public struct AppServerSmokeRunner: Sendable {
 }
 
 private actor AppServerSmokeStopper {
-    private var stopTask: Task<Void, Never>?
+    private var stopTask: Task<UsageSessionStopResult, Never>?
 
-    func stop(_ session: any AppServerSmokeSession) async {
+    func stop(_ session: any AppServerSmokeSession) async -> UsageSessionStopResult {
         if let stopTask {
-            await stopTask.value
-            return
+            return await stopTask.value
         }
         let task = Task {
             await session.stop()
         }
         stopTask = task
-        await task.value
+        return await task.value
     }
 }
 
@@ -265,6 +269,8 @@ private extension AppServerSmokeFailure {
             "timeout"
         case .processFailure:
             "process_failure"
+        case .cleanupUnconfirmed:
+            "cleanup_unconfirmed"
         case .protocolFailure:
             "protocol_failure"
         case .cancelled:
@@ -282,7 +288,7 @@ private extension AppServerSmokeFailure {
             3
         case .unsupportedVersion, .incompatibleProtocol, .protocolFailure:
             4
-        case .timeout, .processFailure:
+        case .timeout, .processFailure, .cleanupUnconfirmed:
             5
         case .cancelled, .internalFailure:
             6

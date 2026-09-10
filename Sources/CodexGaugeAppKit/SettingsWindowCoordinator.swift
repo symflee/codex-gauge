@@ -50,6 +50,7 @@ public final class SettingsWindowCoordinator {
     private var selectedExecutableURL: URL?
     private var language: AppLanguage = .english
     private var latestConnectionStatus: CodexConnectionStatus
+    private var latestDiscoveredQuotaIDs: Set<QuotaSelectionID>?
     private var latestConnectionDiagnostics = ConnectionDiagnosticsSnapshot.checking
     private var latestLaunchAtLoginState: LaunchAtLoginSettingsState
 
@@ -178,12 +179,16 @@ public final class SettingsWindowCoordinator {
     }
 
     public func updateDiscoveredQuotaIDs(_ identifiers: Set<QuotaSelectionID>) {
+        guard latestDiscoveredQuotaIDs != identifiers else { return }
+        latestDiscoveredQuotaIDs = identifiers
         activeWindowController?.settingsViewController.updateDiscoveredQuotaIDs(
             identifiers
         )
     }
 
     public func updateConnectionStatus(_ status: CodexConnectionStatus) {
+        guard latestConnectionStatus != status
+                || latestConnectionDiagnostics.connectionStatus != status else { return }
         connectionStatusRevision &+= 1
         latestConnectionStatus = status
         let diagnostics = replacingConnectionStatus(
@@ -199,6 +204,7 @@ public final class SettingsWindowCoordinator {
     public func updateLaunchAtLoginState(
         _ state: LaunchAtLoginSettingsState
     ) {
+        guard latestLaunchAtLoginState != state else { return }
         latestLaunchAtLoginState = state
         activeWindowController?.settingsViewController.applyLaunchAtLoginState(
             state
@@ -206,6 +212,7 @@ public final class SettingsWindowCoordinator {
     }
 
     public func updateLanguage(_ language: AppLanguage) {
+        guard self.language != language else { return }
         self.language = language
         activeWindowController?.updateLanguage(language)
     }
@@ -221,7 +228,7 @@ public final class SettingsWindowCoordinator {
         language = preferences.language
         let state = SettingsFormState(
             preferences: preferences,
-            discoveredQuotaIDs: discoveredQuotaProvider()
+            discoveredQuotaIDs: latestDiscoveredQuotaIDs ?? discoveredQuotaProvider()
         )
         let initialDiagnostics = ConnectionDiagnosticsSnapshot(
             executableSource: preferences.selectedExecutableURL == nil
@@ -327,8 +334,10 @@ public final class SettingsWindowCoordinator {
             snapshot,
             scheduledStatusRevision: statusRevision
         )
-        latestConnectionDiagnostics = diagnostics
-        controller.settingsViewController.applyConnectionDiagnostics(diagnostics)
+        if latestConnectionDiagnostics != diagnostics {
+            latestConnectionDiagnostics = diagnostics
+            controller.settingsViewController.applyConnectionDiagnostics(diagnostics)
+        }
         diagnosticsTask = nil
     }
 

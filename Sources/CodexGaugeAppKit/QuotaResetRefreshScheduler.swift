@@ -41,7 +41,14 @@ public final class QuotaResetRefreshScheduler {
             return
         }
         let deadlines = deadlines(in: productStates)
+        let currentDate = now()
+        // Only a reset observed in the future may later request a read. Repeated
+        // responses containing alternating past reset dates cannot create work.
+        let newlyObservedPastResets = deadlines.subtracting(latestDeadlines).filter {
+            $0.reason == .quotaReset && $0.date <= currentDate
+        }
         handledDeadlines.formIntersection(deadlines)
+        handledDeadlines.formUnion(newlyObservedPastResets)
         latestDeadlines = deadlines
         reevaluate(forceReschedule: false)
     }

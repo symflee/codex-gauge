@@ -13,13 +13,23 @@ func applicationRuntimeTests() -> [TestCase] {
         applicationRuntimeStartsFirstLaunchAfterRefreshTest(),
         applicationRuntimeDefersInitialWakeBaselineTest(),
         applicationRuntimePublishesOnePresentationTransactionTest(),
+        applicationRuntimePartitionsUnchangedPublicationsTest(),
+        applicationRuntimeDefersNativeMenuTest(),
+        applicationRuntimeCoalescesRefreshDispatchTest(),
+        applicationRuntimeMergesDuringActiveDispatchTest(),
+        applicationRuntimeExpiresCachedValuesTest(),
         applicationRuntimeRoutesMenuAndSettingsTest(),
         applicationRuntimeRoutesUpdatesWithoutQuotaRefreshTest(),
         applicationRuntimeRelocalizesWithoutRefreshingTest(),
         applicationRuntimeRestylesWithoutRefreshingTest(),
         applicationRuntimePublishesLaunchAtLoginStateTest(),
         applicationRuntimeReplacesRefreshGenerationTest(),
+        applicationRuntimeWaitsForConfirmedRetirementTest(),
+        applicationRuntimeBoundsExecutableReplacementTest(),
+        applicationRuntimeReplacesBeforeFirstStartupHookTest(),
+        applicationRuntimeShutdownSkipsUnconfirmedRetirementTest(),
         applicationRuntimePreservesPendingWakeAcrossReplacementTest(),
+        applicationRuntimePreservesSameTurnWakeAcrossReplacementTest(),
         applicationRuntimeReplacesAcrossSystemTransitionTest(),
         applicationRuntimeOrdersOverlappingResumeTest(),
         applicationRuntimeHandlesPresentationOnlyDeadlinesTest(),
@@ -28,6 +38,319 @@ func applicationRuntimeTests() -> [TestCase] {
         applicationRuntimeStopsStartThatResumesDuringShutdownTest(),
         applicationRuntimeDrainsReplacementOnShutdownTest()
     ]
+}
+
+private func applicationRuntimeDefersNativeMenuTest() -> TestCase {
+    TestCase(name: "application runtime defers native menu with latest language metadata and open-time validity") {
+        try await applicationRuntimeDefersNativeMenuScenario()
+    }
+}
+
+@MainActor
+private func applicationRuntimeDefersNativeMenuScenario() async throws {
+    let presenter = RuntimeNativeMenuPresenter()
+    let controller = StatusMenuController(
+        presenter: presenter,
+        statusItemController: StatusItemController(presenter: presenter),
+        actions: StatusMenuActions(refresh: {}, openCodex: {}, selectCodex: {},
+                                   checkForUpdates: {}, settings: {}, quit: {})
+    )
+    let harness = RuntimeHarness(menuRuntime: StatusMenuRuntimeAdapter(controller: controller))
+    harness.coordinator.start()
+    await harness.coordinator.waitForPendingOperations()
+    await harness.refreshBuilder.emit(try runtimePublication(usedPercent: 17), from: 0)
+    await harness.refreshBuilder.emit(try runtimePublication(usedPercent: 29), from: 0)
+    harness.coordinator.settingsFormValuesDidChange(SettingsFormValues(
+        displayPreference: .default, refreshProfile: .balanced,
+        launchAtLoginIntent: false, language: .korean,
+        statusGaugeAppearance: .default
+    ))
+    harness.update.emit(ApplicationUpdateState(currentVersion: "9.1.0", status: .failed))
+    await harness.coordinator.waitForPendingOperations()
+    guard let menu = presenter.menu else { throw TestFailure(description: "Expected native menu attached") }
+    try expect(menu.items.isEmpty, "Expected no native rows for closed publications or language changes")
+    let refreshEvents = await harness.refreshBuilder.coordinators[0].events
+    controller.menuNeedsUpdate(menu)
+    let items = menu.items
+    try expect(items.contains { $0.title.contains("71%") }, "Expected latest quota at first open")
+    try expect(items.contains { $0.title == "새로 고침" }, "Expected latest language at first open")
+    try expect(items.contains { $0.title.contains("9.1.0") }, "Expected latest updater metadata")
+
+    // Queue a closed publication before advancing the clock. First materialization
+    // must use request time even when the deadline callback has not yet run.
+    await harness.refreshBuilder.emit(try runtimePublication(usedPercent: 29), from: 0)
+    harness.clock.date = Date(timeIntervalSince1970: 1_900_003_600)
+    controller.menuNeedsUpdate(menu)
+    try expect(!menu.items.contains { $0.title.contains("71%") }, "Expected exact reset expiry at deferred materialization")
+    try expect(zip(items, menu.items).allSatisfy { pair in pair.0 === pair.1 }, "Expected validity updates to preserve native row identities")
+    let finalRefreshEvents = await harness.refreshBuilder.coordinators[0].events
+    try expect(finalRefreshEvents == refreshEvents, "Expected menu opening without provider or refresh work")
+    await harness.coordinator.shutdown()
+}
+
+private func applicationRuntimePartitionsUnchangedPublicationsTest() -> TestCase {
+    TestCase(name: "application runtime routes metadata changes only to affected consumers") {
+        try await applicationRuntimePartitionsUnchangedPublicationsScenario()
+    }
+}
+
+@MainActor
+private func applicationRuntimePartitionsUnchangedPublicationsScenario() async throws {
+    let harness = RuntimeHarness()
+    harness.coordinator.start()
+    await harness.coordinator.waitForPendingOperations()
+    let original = try runtimePublication(usedPercent: 17)
+    await harness.refreshBuilder.emit(original, from: 0)
+    let statusCount = harness.status.presentedFrames.count
+    let menuCount = harness.menu.models.count
+    let settingsCount = harness.settings.connectionStatuses.count
+    let quotaCount = harness.settings.discoveredQuotaIDs.count
+    let deadlineCount = harness.deadlineScheduler.productStates.count
+    let refreshing = RefreshPublication(
+        products: original.products,
+        lastSuccessfulRefresh: original.lastSuccessfulRefresh,
+        failure: nil,
+        isRefreshing: true
+    )
+    for _ in 0..<100 {
+        await harness.refreshBuilder.emit(refreshing, from: 0)
+    }
+    try expect(harness.status.presentedFrames.count == statusCount, "Expected no status render for refresh flags")
+    try expect(harness.menu.models.count == menuCount, "Expected no menu work for refresh flags")
+    try expect(harness.settings.connectionStatuses.count == settingsCount + 1, "Expected checking status delivered once")
+    try expect(harness.settings.discoveredQuotaIDs.count == quotaCount, "Expected unchanged quota discovery skipped")
+    try expect(harness.deadlineScheduler.productStates.count == deadlineCount, "Expected unchanged deadlines skipped")
+
+    let later = Date(timeIntervalSince1970: 1_900_000_180)
+    let products = original.products.mapValues { product in
+        guard case .value(let value, let freshness) = product.usageState else { return product }
+        return RefreshProductResult(
+            usageState: .value(ProductQuotaValue(capturedAt: later, quotaWindows: value.quotaWindows), freshness: freshness),
+            rateLimits: product.rateLimits,
+            issue: product.issue,
+            lastSuccessfulRefresh: later
+        )
+    }
+    await harness.refreshBuilder.emit(RefreshPublication(
+        products: products, lastSuccessfulRefresh: later, failure: nil, isRefreshing: false
+    ), from: 0)
+    try expect(harness.status.presentedFrames.count == statusCount, "Expected identical quota values to preserve status presentation")
+    try expect(harness.menu.models.count == menuCount + 1, "Expected new last-success details")
+    try expect(harness.deadlineScheduler.productStates.count == deadlineCount + 1, "Expected capture time to update validity deadlines")
+    await harness.coordinator.shutdown()
+}
+
+private func applicationRuntimeCoalescesRefreshDispatchTest() -> TestCase {
+    TestCase(name: "application runtime bounds queued refresh signals and keeps latest configuration") {
+        try await applicationRuntimeCoalescesRefreshDispatchScenario()
+    }
+}
+
+@MainActor
+private func applicationRuntimeCoalescesRefreshDispatchScenario() async throws {
+    let loader = RuntimePreferencesGate(preferences: .default)
+    let harness = RuntimeHarness(preferencesLoader: loader)
+    harness.coordinator.start()
+    try await waitForRuntimeCondition { await loader.hasStarted }
+    for index in 0..<100 {
+        harness.coordinator.performMenuAction(.refresh)
+        harness.systemMonitor.emit(.lowPowerModeChanged(isEnabled: index.isMultiple(of: 2)))
+        harness.coordinator.settingsFormValuesDidChange(SettingsFormValues(
+            displayPreference: .default,
+            refreshProfile: index.isMultiple(of: 2) ? .eco : .fast,
+            launchAtLoginIntent: false
+        ))
+    }
+    await loader.resume()
+    await harness.coordinator.waitForPendingOperations()
+    let events = await harness.refreshBuilder.coordinators[0].events
+    try expect(events.filter { $0 == .manualRefresh }.count == 1, "Expected one merged manual request")
+    try expect(!events.contains(.profile(.eco)), "Expected intermediate profiles discarded")
+    try expect(!events.contains(.lowPowerMode(true)), "Expected intermediate power states discarded")
+    try expect(harness.refreshBuilder.configurations[0].preferences.refreshProfile == .fast, "Expected latest profile at startup")
+    try expect(!harness.refreshBuilder.configurations[0].lowPowerModeEnabled, "Expected latest power state at startup")
+    await harness.coordinator.shutdown()
+}
+
+private func applicationRuntimeMergesDuringActiveDispatchTest() -> TestCase {
+    TestCase(name: "application runtime merges signals while dispatch is suspended") {
+        try await applicationRuntimeMergesDuringActiveDispatchScenario()
+    }
+}
+
+@MainActor
+private func applicationRuntimeMergesDuringActiveDispatchScenario() async throws {
+    let gate = RuntimeStopGate()
+    let harness = RuntimeHarness(firstManualGate: gate)
+    harness.coordinator.start()
+    await harness.coordinator.waitForPendingOperations()
+    harness.coordinator.performMenuAction(.refresh)
+    try await waitForRuntimeCondition { await gate.hasStarted }
+    for index in 0..<100 {
+        harness.coordinator.performMenuAction(.refresh)
+        harness.coordinator.settingsFormValuesDidChange(SettingsFormValues(
+            displayPreference: .default,
+            refreshProfile: index.isMultiple(of: 2) ? .eco : .fast,
+            launchAtLoginIntent: false
+        ))
+        harness.systemMonitor.emit(.lowPowerModeChanged(isEnabled: index.isMultiple(of: 2)))
+    }
+    await gate.resume()
+    await harness.coordinator.waitForPendingOperations()
+    let events = await harness.refreshBuilder.coordinators[0].events
+    try expect(events.filter { $0 == .manualRefresh }.count == 1, "Expected active manual request shared")
+    try expect(events.filter { $0 == .profile(.fast) }.count == 1 && !events.contains(.profile(.eco)), "Expected only latest pending profile")
+    try expect(events.filter { $0 == .lowPowerMode(false) }.count == 1 && !events.contains(.lowPowerMode(true)), "Expected only latest pending power state")
+    await harness.coordinator.shutdown()
+}
+
+private func applicationRuntimeExpiresCachedValuesTest() -> TestCase {
+    TestCase(name: "application presentation cache reevaluates validity without a new response") {
+        try await applicationRuntimeExpiresCachedValuesScenario()
+    }
+}
+
+@MainActor
+private func applicationRuntimeExpiresCachedValuesScenario() async throws {
+    let harness = RuntimeHarness()
+    harness.coordinator.start()
+    await harness.coordinator.waitForPendingOperations()
+    await harness.refreshBuilder.emit(try runtimePublication(usedPercent: 17), from: 0)
+    let frames = harness.status.presentedFrames.last
+    let events = await harness.refreshBuilder.coordinators[0].events
+    harness.clock.date = Date(timeIntervalSince1970: 1_900_003_600)
+    harness.deadlineScheduler.emit(.validityExpired)
+    try expect(harness.status.presentedFrames.last != frames, "Expected reset boundary to expire cached percent")
+    guard case .single(let quota)? = harness.status.presentedFrames.last?.first else {
+        throw TestFailure(description: "Expected single expired frame")
+    }
+    try expect(quota.value == .unavailable, "Expected expired value unavailable")
+    harness.clock.date = Date(timeIntervalSince1970: 1_900_003_599)
+    harness.deadlineScheduler.emit(.validityExpired)
+    try expect(harness.status.presentedFrames.last == frames, "Expected backward clock movement to reevaluate cache")
+    let after = await harness.refreshBuilder.coordinators[0].events
+    try expect(after == events, "Expected validity-only reevaluation without IO")
+    await harness.coordinator.shutdown()
+}
+
+private func applicationRuntimeWaitsForConfirmedRetirementTest() -> TestCase {
+    TestCase(name: "application replacement awaits actual exit across queued executable changes") {
+        try await applicationRuntimeWaitsForConfirmedRetirementScenario()
+    }
+}
+
+@MainActor
+private func applicationRuntimeWaitsForConfirmedRetirementScenario() async throws {
+    let gate = RuntimeStopGate()
+    let harness = RuntimeHarness(firstTerminationGate: gate)
+    harness.coordinator.start()
+    await harness.coordinator.waitForPendingOperations()
+    harness.coordinator.selectedExecutableDidChange(URL(fileURLWithPath: "/Synthetic/first/codex"))
+    try await waitForRuntimeCondition { await gate.hasStarted }
+    let stopped = await harness.refreshBuilder.coordinators[0].events
+    try expect(stopped.contains(.stop), "Expected stop returned before termination confirmation")
+    try expect(harness.refreshBuilder.coordinators.count == 1, "Expected no replacement while child exit is unconfirmed")
+    let latest = URL(fileURLWithPath: "/Synthetic/latest/codex")
+    harness.coordinator.selectedExecutableDidChange(latest)
+    await Task.yield()
+    try expect(harness.refreshBuilder.coordinators.count == 1, "Expected queued replacement to retain retiring predecessor")
+    await gate.resume()
+    await harness.coordinator.waitForPendingOperations()
+    try expect(harness.refreshBuilder.coordinators.count == 2, "Expected only latest replacement after confirmed exit")
+    try expect(harness.refreshBuilder.configurations.last?.preferences.selectedExecutableURL == latest, "Expected latest executable after retirement")
+    await harness.coordinator.shutdown()
+}
+
+private func applicationRuntimeBoundsExecutableReplacementTest() -> TestCase {
+    TestCase(name: "application executable replacement has one task while exit confirmation is blocked") {
+        try await applicationRuntimeBoundsExecutableReplacementScenario()
+    }
+}
+
+@MainActor
+private func applicationRuntimeBoundsExecutableReplacementScenario() async throws {
+    let gate = RuntimeStopGate()
+    let harness = RuntimeHarness(firstTerminationGate: gate)
+    harness.coordinator.start()
+    await harness.coordinator.waitForPendingOperations()
+    harness.coordinator.selectedExecutableDidChange(URL(fileURLWithPath: "/Synthetic/first/codex"))
+    try await waitForRuntimeCondition { await gate.hasStarted }
+    try expect(harness.coordinator.pendingRuntimeOperationCount == 1, "Expected one active replacement task")
+    for index in 0..<1_000 {
+        harness.coordinator.selectedExecutableDidChange(
+            URL(fileURLWithPath: "/Synthetic/replacement-\(index)/codex")
+        )
+        try expect(harness.coordinator.pendingRuntimeOperationCount == 1, "Expected bounded task count during unconfirmed exit")
+    }
+    try expect(harness.refreshBuilder.coordinators.count == 1, "Expected original child to retain exclusive admission")
+    await gate.resume()
+    await harness.coordinator.waitForPendingOperations()
+    try expect(harness.coordinator.pendingRuntimeOperationCount == 0, "Expected replacement mailbox drained")
+    try expect(harness.refreshBuilder.coordinators.count == 2, "Expected one replacement for the latest URL")
+    try expect(harness.refreshBuilder.configurations.last?.preferences.selectedExecutableURL
+        == URL(fileURLWithPath: "/Synthetic/replacement-999/codex"), "Expected latest executable only")
+    let oldEvents = await harness.refreshBuilder.coordinators[0].events
+    try expect(oldEvents.filter { $0 == .stop }.count == 1, "Expected one retirement attempt for the predecessor")
+    try expect(harness.startupRecorder.preferences.count == 1, "Expected no repeated first-launch hook")
+    await harness.coordinator.shutdown()
+}
+
+private func applicationRuntimeReplacesBeforeFirstStartupHookTest() -> TestCase {
+    TestCase(name: "application coalesces executable changes before the first startup hook") {
+        try await applicationRuntimeReplacesBeforeFirstStartupHookScenario()
+    }
+}
+
+@MainActor
+private func applicationRuntimeReplacesBeforeFirstStartupHookScenario() async throws {
+    let gate = RuntimeStartGate()
+    let harness = RuntimeHarness(firstStartGate: gate)
+    harness.coordinator.start()
+    try await waitForRuntimeCondition { await gate.hasStarted }
+    for index in 0..<100 {
+        harness.coordinator.selectedExecutableDidChange(
+            URL(fileURLWithPath: "/Synthetic/startup-\(index)/codex")
+        )
+    }
+    try expect(harness.coordinator.pendingRuntimeOperationCount == 2, "Expected initial startup and one queued replacement")
+    try expect(harness.startupRecorder.preferences.isEmpty, "Expected superseded startup not to run the first-launch hook")
+    await gate.resume()
+    await harness.coordinator.waitForPendingOperations()
+    try expect(harness.refreshBuilder.coordinators.count == 2, "Expected one latest replacement after initial startup drains")
+    try expect(harness.startupRecorder.preferences.count == 1, "Expected the first-launch hook exactly once")
+    try expect(harness.startupRecorder.preferences.first?.selectedExecutableURL
+        == URL(fileURLWithPath: "/Synthetic/startup-99/codex"), "Expected first launch to use the admitted executable")
+    await harness.coordinator.shutdown()
+}
+
+private func applicationRuntimeShutdownSkipsUnconfirmedRetirementTest() -> TestCase {
+    TestCase(name: "application shutdown does not await unconfirmed process exit forever") {
+        try await applicationRuntimeShutdownSkipsUnconfirmedRetirementScenario()
+    }
+}
+
+@MainActor
+private func applicationRuntimeShutdownSkipsUnconfirmedRetirementScenario() async throws {
+    let gate = RuntimeStopGate()
+    let harness = RuntimeHarness(firstTerminationGate: gate)
+    harness.coordinator.start()
+    await harness.coordinator.waitForPendingOperations()
+    harness.coordinator.selectedExecutableDidChange(URL(fileURLWithPath: "/Synthetic/replacement/codex"))
+    try await waitForRuntimeCondition { await gate.hasStarted }
+    for index in 0..<100 {
+        harness.coordinator.selectedExecutableDidChange(
+            URL(fileURLWithPath: "/Synthetic/shutdown-\(index)/codex")
+        )
+    }
+    try expect(harness.coordinator.pendingRuntimeOperationCount == 1, "Expected one retirement task before shutdown")
+    let shutdown = Task { @MainActor in await harness.coordinator.shutdown() }
+    try await waitForRuntimeCondition { harness.settings.shutdownCount == 1 }
+    await shutdown.value
+    try expect(harness.refreshBuilder.coordinators.count == 1, "Expected shutdown to cancel replacement admission")
+    try expect(harness.status.pauseValues[.sleeping] == true, "Expected no surviving rotation timer during exit wait")
+    await gate.resume()
+    await Task.yield()
+    try expect(harness.refreshBuilder.coordinators.count == 1, "Expected late exit confirmation not to launch a replacement")
 }
 
 private func applicationRuntimeRoutesUpdatesWithoutQuotaRefreshTest() -> TestCase {
@@ -573,6 +896,37 @@ private func applicationRuntimePreservesPendingWakeAcrossReplacementScenario() a
     )
 }
 
+private func applicationRuntimePreservesSameTurnWakeAcrossReplacementTest() -> TestCase {
+    TestCase(name: "application runtime preserves same-turn wake delay across replacement") {
+        try await applicationRuntimePreservesSameTurnWakeAcrossReplacementScenario()
+    }
+}
+
+@MainActor
+private func applicationRuntimePreservesSameTurnWakeAcrossReplacementScenario() async throws {
+    let harness = RuntimeHarness()
+    harness.coordinator.start()
+    await harness.coordinator.waitForPendingOperations()
+
+    // No suspension point between these callbacks: the old generation's activity
+    // dispatch cannot run before the executable replacement invalidates it.
+    harness.systemMonitor.emit(.sleep)
+    harness.systemMonitor.emit(.wake)
+    harness.coordinator.selectedExecutableDidChange(
+        URL(fileURLWithPath: "/Synthetic/same-turn-wake/codex")
+    )
+    await harness.coordinator.waitForPendingOperations()
+
+    try expect(harness.refreshBuilder.coordinators.count == 2, "Expected one replacement")
+    let previousEvents = await harness.refreshBuilder.coordinators[0].events
+    try expect(previousEvents == [.start, .stop], "Expected queued activity not to reach the retired generation")
+    let replacementEvents = await harness.refreshBuilder.coordinators[1].events
+    try expect(
+        replacementEvents == [.suspend, .resume],
+        "Expected pending wake to establish the five-second resume phase without an immediate start; got \(replacementEvents)"
+    )
+}
+
 @MainActor
 private func applicationRuntimeReplacesRefreshGenerationScenario() async throws {
     let stopGate = RuntimeStopGate()
@@ -631,6 +985,12 @@ private func applicationRuntimeReplacesAcrossSystemTransitionScenario() async th
     try await waitForRuntimeCondition { await stopGate.hasStarted }
     harness.systemMonitor.emit(.sleep)
     harness.systemMonitor.emit(.wake)
+    for index in 0..<100 {
+        harness.coordinator.selectedExecutableDidChange(
+            URL(fileURLWithPath: "/Synthetic/wake-\(index)/codex")
+        )
+    }
+    try expect(harness.coordinator.pendingRuntimeOperationCount == 2, "Expected one replacement plus one merged activity dispatch")
     await stopGate.resume()
     await harness.coordinator.waitForPendingOperations()
 
@@ -709,7 +1069,7 @@ private func applicationRuntimeHandlesPresentationOnlyDeadlinesScenario() async 
         harness.workspace.applicationURLReadCount == workspaceReadCount,
         "Expected no workspace lookup"
     )
-    try expect(harness.status.presentedFrames.count == presentationCount + 1, "Expected rerender")
+    try expect(harness.status.presentedFrames.count == presentationCount, "Expected unchanged loading frame to remain cached")
     try expect(harness.status.pauseValues[.voiceOver] == true, "Expected VoiceOver pause")
     try expect(harness.status.pauseValues[.reduceMotion] == true, "Expected motion pause")
 }
@@ -797,8 +1157,8 @@ private func applicationRuntimeRefreshesQuotaResetScenario() async throws {
     let events = await refresh.events
     try expect(events.contains(.quotaReset), "Expected quota reset refresh")
     try expect(
-        harness.status.presentedFrames.count == presentationCount + 1,
-        "Expected reset boundary rerender"
+        harness.status.presentedFrames.count == presentationCount,
+        "Expected unchanged loading presentation at reset"
     )
 }
 
@@ -819,6 +1179,7 @@ private func applicationRuntimeSharesShutdownDrainScenario() async throws {
     await Task.yield()
 
     try expect(harness.settings.shutdownCount == 0, "Expected shutdown to await refresh stop")
+    try expect(harness.status.pauseValues[.sleeping] == true, "Expected rotation stopped before shutdown awaits process cleanup")
     await stopGate.resume()
     await first.value
     await second.value
@@ -846,26 +1207,33 @@ private final class RuntimeHarness {
     let workspace = RuntimeWorkspaceSpy()
     let terminator = RuntimeTerminatorSpy()
     let startupRecorder = RuntimeStartupRecorder()
+    let clock = RuntimeClock()
     let coordinator: CodexGaugeApplicationCoordinator
 
     init(
         preferencesLoader: any ApplicationPreferencesLoading = RuntimePreferencesLoader(),
+        menuRuntime: (any ApplicationMenuRuntime)? = nil,
         firstStartGate: RuntimeStartGate? = nil,
         firstStopGate: RuntimeStopGate? = nil,
+        firstManualGate: RuntimeStopGate? = nil,
+        firstTerminationGate: RuntimeStopGate? = nil,
         afterStartupRecorded: @escaping CodexGaugeApplicationCoordinator.StartupHook = {
             _ in
         }
     ) {
         refreshBuilder = RuntimeRefreshBuilderSpy(
             firstStartGate: firstStartGate,
-            firstStopGate: firstStopGate
+            firstStopGate: firstStopGate,
+            firstManualGate: firstManualGate,
+            firstTerminationGate: firstTerminationGate
         )
+        let clock = clock
         let scheduler = deadlineScheduler
         let statusRuntime = status
         let refreshBuilder = refreshBuilder
         coordinator = CodexGaugeApplicationCoordinator(
             statusRuntime: status,
-            menuRuntime: menu,
+            menuRuntime: menuRuntime ?? menu,
             settingsRuntime: settings,
             applicationUpdateRuntime: update,
             systemActivityMonitor: systemMonitor,
@@ -881,7 +1249,7 @@ private final class RuntimeHarness {
             preferencesLoader: preferencesLoader,
             workspace: workspace,
             terminator: terminator,
-            now: { Date(timeIntervalSince1970: 1_900_000_000) },
+            now: { clock.date },
             startupHook: { [startupRecorder] preferences in
                 let refreshEvents = await refreshBuilder.coordinators.last?.events ?? []
                 startupRecorder.record(
@@ -893,6 +1261,11 @@ private final class RuntimeHarness {
             }
         )
     }
+}
+
+@MainActor
+private final class RuntimeClock {
+    var date = Date(timeIntervalSince1970: 1_900_000_000)
 }
 
 @MainActor
@@ -975,6 +1348,15 @@ private final class RuntimeMenuSpy: ApplicationMenuRuntime {
     func update(_ model: QuotaDetailsMenuModel) {
         models.append(model)
     }
+}
+
+@MainActor
+private final class RuntimeNativeMenuPresenter: StatusMenuPresenting, StatusItemPresenting {
+    private(set) var menu: NSMenu?
+    let effectiveAppearance = NSAppearance(named: .aqua)
+    func setMenu(_ menu: NSMenu) { self.menu = menu }
+    func setLength(_ length: CGFloat) {}
+    func present(_ frame: RenderedStatusFrame) {}
 }
 
 @MainActor
@@ -1169,11 +1551,18 @@ private actor RuntimeRefreshSpy: ApplicationRefreshCoordinating {
     private(set) var events = [Event]()
     private let startGate: RuntimeStartGate?
     private let stopGate: RuntimeStopGate?
+    private let manualGate: RuntimeStopGate?
+    private let terminationGate: RuntimeStopGate?
     private var awaitingSystemResume = false
 
-    init(startGate: RuntimeStartGate?, stopGate: RuntimeStopGate?) {
+    init(
+        startGate: RuntimeStartGate?, stopGate: RuntimeStopGate?,
+        manualGate: RuntimeStopGate?, terminationGate: RuntimeStopGate?
+    ) {
         self.startGate = startGate
         self.stopGate = stopGate
+        self.manualGate = manualGate
+        self.terminationGate = terminationGate
     }
 
     func start() async {
@@ -1184,6 +1573,7 @@ private actor RuntimeRefreshSpy: ApplicationRefreshCoordinating {
 
     func refreshManually() async {
         events.append(.manualRefresh)
+        await manualGate?.wait()
     }
 
     func refreshAfterQuotaReset() async {
@@ -1221,6 +1611,10 @@ private actor RuntimeRefreshSpy: ApplicationRefreshCoordinating {
         events.append(.stop)
         await stopGate?.wait()
     }
+
+    func waitForTermination() async {
+        await terminationGate?.wait()
+    }
 }
 
 @MainActor
@@ -1230,13 +1624,19 @@ private final class RuntimeRefreshBuilderSpy: ApplicationRefreshCoordinatorBuild
     private var handlers = [RefreshPublicationHandler]()
     private let firstStartGate: RuntimeStartGate?
     private let firstStopGate: RuntimeStopGate?
+    private let firstManualGate: RuntimeStopGate?
+    private let firstTerminationGate: RuntimeStopGate?
 
     init(
         firstStartGate: RuntimeStartGate?,
-        firstStopGate: RuntimeStopGate?
+        firstStopGate: RuntimeStopGate?,
+        firstManualGate: RuntimeStopGate?,
+        firstTerminationGate: RuntimeStopGate?
     ) {
         self.firstStartGate = firstStartGate
         self.firstStopGate = firstStopGate
+        self.firstManualGate = firstManualGate
+        self.firstTerminationGate = firstTerminationGate
     }
 
     func makeCoordinator(
@@ -1245,7 +1645,9 @@ private final class RuntimeRefreshBuilderSpy: ApplicationRefreshCoordinatorBuild
     ) -> any ApplicationRefreshCoordinating {
         let coordinator = RuntimeRefreshSpy(
             startGate: coordinators.isEmpty ? firstStartGate : nil,
-            stopGate: coordinators.isEmpty ? firstStopGate : nil
+            stopGate: coordinators.isEmpty ? firstStopGate : nil,
+            manualGate: coordinators.isEmpty ? firstManualGate : nil,
+            terminationGate: coordinators.isEmpty ? firstTerminationGate : nil
         )
         configurations.append(configuration)
         coordinators.append(coordinator)

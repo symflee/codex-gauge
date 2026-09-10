@@ -7,6 +7,7 @@ func appPreferencesTests() -> [TestCase] {
     [
         preferredAppLanguageResolverTest(),
         statusGaugeAppearanceDomainTest(),
+        slimCapsulePreferencesMigrationTest(),
         appPreferencesDefaultsTest(),
         appPreferencesRoundTripTest(),
         appPreferencesVividPresetRoundTripTest(),
@@ -28,9 +29,44 @@ func appPreferencesTests() -> [TestCase] {
     ]
 }
 
+private func slimCapsulePreferencesMigrationTest() -> TestCase {
+    TestCase(name: "slim capsule gauge migration adopts neutral once and preserves custom colors") {
+        let store = try PreferencesTestStore()
+        defer { store.cleanUp() }
+        let repository = try store.repository()
+        let cases: [([String: String], String)] = [
+            (["mode": "preset", "preset": "blue"], "neutral"),
+            (["mode": "preset", "preset": "green"], "green"),
+            (["mode": "custom", "borderColor": "#004C99", "fillColor": "#0A84FF"], "custom")
+        ]
+        for (savedAppearance, expected) in cases {
+            let payload: [String: Any] = [
+                "version": 3, "language": "ko", "hasCompletedFirstLaunch": true,
+                "refreshProfile": "manual", "statusGaugeAppearance": savedAppearance
+            ]
+            store.userDefaults.set(try preferencesJSON(payload), forKey: AppPreferencesRepository.storageKey)
+            let loaded = await repository.load()
+            let encoded = try preferencesJSONObject(from: storedPreferencesData(in: store.userDefaults))
+            let appearance = encoded["statusGaugeAppearance"] as? [String: String]
+            try expect(encoded["version"] as? Int == 4, "Expected one-time v4 migration")
+            try expect(loaded.language == .korean && loaded.hasCompletedFirstLaunch, "Expected other settings preserved")
+            if expected == "custom" {
+                try expect(appearance == savedAppearance, "Expected exact custom colors preserved")
+                continue
+            }
+            try expect(appearance?["preset"] == expected, "Expected the correct migrated preset")
+        }
+        let blue = AppPreferences(statusGaugeAppearance: .preset(.blue))
+        try await repository.save(blue)
+        let reloaded = await repository.load()
+        try expect(reloaded == blue, "Expected a newly selected blue preset to survive reload")
+    }
+}
+
 private func statusGaugeAppearanceDomainTest() -> TestCase {
     TestCase(name: "status gauge presets expose stable colors and custom identity") {
         let expected: [(StatusGaugePreset, String, String)] = [
+            (.neutral, "#D8DEE6", "#D8DEE6"),
             (.blue, "#004C99", "#0A84FF"),
             (.graphite, "#343A40", "#7B8490"),
             (.green, "#147A3D", "#30D158"),
@@ -40,7 +76,7 @@ private func statusGaugeAppearanceDomainTest() -> TestCase {
         try expect(StatusGaugePreset.allCases == expected.map(\.0), "Expected stable order")
         try expect(
             StatusGaugePreset.allCases.map(\.rawValue)
-                == ["blue", "graphite", "green", "orange", "purple"],
+                == ["neutral", "blue", "graphite", "green", "orange", "purple"],
             "Expected stable preset identifiers"
         )
         for (preset, border, fill) in expected {
@@ -100,14 +136,14 @@ private func appPreferencesDefaultsTest() -> TestCase {
         try expect(AppPreferences.default == AppPreferences(), "Expected stable defaults")
         try expect(AppPreferences.default.language == .english, "Expected English fallback")
         try expect(preferences.displayPreference == .default, "Expected default display")
-        try expect(preferences.statusGaugeAppearance == .default, "Expected blue gauge")
+        try expect(preferences.statusGaugeAppearance == .default, "Expected neutral gauge")
         try expect(
-            preferences.statusGaugeAppearance.borderColor.hexString == "#004C99",
-            "Expected vivid default border"
+            preferences.statusGaugeAppearance.borderColor.hexString == "#D8DEE6",
+            "Expected neutral default border"
         )
         try expect(
-            preferences.statusGaugeAppearance.fillColor.hexString == "#0A84FF",
-            "Expected vivid default fill"
+            preferences.statusGaugeAppearance.fillColor.hexString == "#D8DEE6",
+            "Expected neutral default fill"
         )
         try expect(preferences.refreshProfile == .balanced, "Expected balanced refresh")
         try expect(!preferences.launchAtLoginIntent, "Expected login launch disabled")
@@ -117,11 +153,11 @@ private func appPreferencesDefaultsTest() -> TestCase {
         let persisted = try preferencesJSONObject(
             from: storedPreferencesData(in: store.userDefaults)
         )
-        try expect(persisted["version"] as? Int == 3, "Expected initial v3 persistence")
+        try expect(persisted["version"] as? Int == 4, "Expected initial v4 persistence")
         try expect(persisted["language"] as? String == "ko", "Expected concrete language")
         try expect(
             persisted["statusGaugeAppearance"] as? [String: String]
-                == ["mode": "preset", "preset": "blue"],
+                == ["mode": "preset", "preset": "neutral"],
             "Expected persisted default appearance"
         )
 
@@ -246,7 +282,7 @@ private func appPreferencesRoundTripTest() -> TestCase {
 }
 
 private func appPreferencesVersionTwoMigrationTest() -> TestCase {
-    TestCase(name: "preferences migrate version two with the default blue gauge") {
+    TestCase(name: "preferences migrate version two with the default neutral gauge") {
         let store = try PreferencesTestStore()
         defer { store.cleanUp() }
         let repository = try store.repository(defaultLanguage: .korean)
@@ -269,17 +305,17 @@ private func appPreferencesVersionTwoMigrationTest() -> TestCase {
         try expect(preferences.language == .english, "Expected stored v2 language")
         try expect(preferences.statusGaugeAppearance == .default, "Expected blue migration")
         try expect(
-            preferences.statusGaugeAppearance.borderColor.hexString == "#004C99",
+            preferences.statusGaugeAppearance.borderColor.hexString == "#D8DEE6",
             "Expected vivid migrated border"
         )
         try expect(
-            preferences.statusGaugeAppearance.fillColor.hexString == "#0A84FF",
+            preferences.statusGaugeAppearance.fillColor.hexString == "#D8DEE6",
             "Expected vivid migrated fill"
         )
         let migrated = try preferencesJSONObject(
             from: storedPreferencesData(in: store.userDefaults)
         )
-        try expect(migrated["version"] as? Int == 3, "Expected automatic v3 migration")
+        try expect(migrated["version"] as? Int == 4, "Expected automatic v4 migration")
     }
 }
 
@@ -515,7 +551,7 @@ private func appPreferencesFieldRecoveryTest() -> TestCase {
         let invalidPreset = await repository.load()
         try expect(invalidPreset.statusGaugeAppearance == .default, "Expected preset fallback")
         try expect(
-            invalidPreset.statusGaugeAppearance.fillColor.hexString == "#0A84FF",
+            invalidPreset.statusGaugeAppearance.fillColor.hexString == "#D8DEE6",
             "Expected fallback to vivid blue"
         )
     }
@@ -553,7 +589,7 @@ private func appPreferencesVersionOneMigrationTest() -> TestCase {
             from: storedPreferencesData(in: store.userDefaults)
         )
         try expect(
-            automaticallyMigrated["version"] as? Int == 3,
+            automaticallyMigrated["version"] as? Int == 4,
             "Expected version one migrated during load"
         )
         try expect(
@@ -565,11 +601,11 @@ private func appPreferencesVersionOneMigrationTest() -> TestCase {
         let migrated = try preferencesJSONObject(
             from: storedPreferencesData(in: store.userDefaults)
         )
-        try expect(migrated["version"] as? Int == 3, "Expected version three save")
+        try expect(migrated["version"] as? Int == 4, "Expected version four save")
         try expect(migrated["language"] as? String == "ko", "Expected language persisted")
         try expect(preferences.statusGaugeAppearance == .default, "Expected blue migration")
         try expect(
-            preferences.statusGaugeAppearance.fillColor.hexString == "#0A84FF",
+            preferences.statusGaugeAppearance.fillColor.hexString == "#D8DEE6",
             "Expected vivid v1 migration"
         )
     }
@@ -619,7 +655,7 @@ private func appPreferencesVersionZeroMigrationTest() -> TestCase {
             from: storedPreferencesData(in: store.userDefaults)
         )
         try expect(
-            automaticallyMigrated["version"] as? Int == 3,
+            automaticallyMigrated["version"] as? Int == 4,
             "Expected version zero migrated during load"
         )
         try expect(
@@ -630,11 +666,11 @@ private func appPreferencesVersionZeroMigrationTest() -> TestCase {
         try await repository.save(preferences)
         let migratedData = try storedPreferencesData(in: store.userDefaults)
         let migratedObject = try preferencesJSONObject(from: migratedData)
-        try expect(migratedObject["version"] as? Int == 3, "Expected current schema on save")
+        try expect(migratedObject["version"] as? Int == 4, "Expected current schema on save")
         try expect(migratedObject["language"] as? String == "ko", "Expected language on save")
         try expect(preferences.statusGaugeAppearance == .default, "Expected blue migration")
         try expect(
-            preferences.statusGaugeAppearance.fillColor.hexString == "#0A84FF",
+            preferences.statusGaugeAppearance.fillColor.hexString == "#D8DEE6",
             "Expected vivid v0 migration"
         )
 

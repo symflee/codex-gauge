@@ -4,7 +4,7 @@ import CoreFoundation
 import Foundation
 
 enum PreferencesCodec {
-    private static let currentVersion = 3
+    private static let currentVersion = 4
 
     static func encode(_ preferences: AppPreferences) throws -> Data {
         let object: [String: Any] = [
@@ -55,6 +55,8 @@ enum PreferencesCodec {
                 dictionary,
                 defaultLanguage: defaultLanguage
             )
+        case 3:
+            return decodeVersionThree(dictionary, defaultLanguage: defaultLanguage)
         case currentVersion:
             return decodeCurrent(
                 dictionary,
@@ -75,7 +77,7 @@ enum PreferencesCodec {
         guard let version = integer(dictionary["version"]) else {
             return false
         }
-        return (0...2).contains(version)
+        return (0...3).contains(version)
     }
 
     private static func encodeDisplay(
@@ -165,6 +167,18 @@ enum PreferencesCodec {
                 defaultLanguage: defaultLanguage
             ),
             appearance: decodeAppearance(dictionary["statusGaugeAppearance"])
+        )
+    }
+
+    private static func decodeVersionThree(
+        _ dictionary: [String: Any],
+        defaultLanguage: AppLanguage
+    ) -> AppPreferences {
+        let appearance = decodeAppearance(dictionary["statusGaugeAppearance"])
+        return decodeShared(
+            dictionary,
+            language: decodeLanguage(dictionary["language"], defaultLanguage: defaultLanguage),
+            appearance: appearance == .preset(.blue) ? .default : appearance
         )
     }
 

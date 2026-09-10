@@ -27,8 +27,110 @@ func adaptiveRefreshReducerTests() -> [TestCase] {
         retryProfileChangeTest(),
         manualEntryCleanupTest(),
         manualToAutomaticTest(),
-        lowPowerProfileChangeTest()
+        lowPowerProfileChangeTest(),
+        boundedBurstCancellationAndCooldownTest(),
+        automaticFloorAndRetryProtectionTest(),
+        automaticFloorCannotDisplaceBurstCapTest(),
+        suspendPreservesBackoffAndFloorTest(),
+        lowPowerRetryFloorTest()
     ]
+}
+
+private func boundedBurstCancellationAndCooldownTest() -> TestCase {
+    TestCase(name: "hard burst cap cancels inflight work and only a normal response can rearm") {
+        var harness = RefreshHarness()
+        try establishBaseline(&harness, samples: refreshSamples(codexUsed: 10))
+        _ = try completeManualRefresh(&harness, samples: refreshSamples(codexUsed: 11), at: refreshInstant(10))
+        let running = try refreshRequest(from: harness.send(.manualRefresh(at: refreshInstant(309))))
+        guard let expiry = harness.state.scheduledRefresh else {
+            throw TestFailure(description: "Expected hard cap while the request is held")
+        }
+        try expect(expiry.deadline == refreshInstant(310), "Expected fixed cap during inflight request")
+        let expired = harness.send(.scheduledRefreshFired(generation: expiry.generation, at: expiry.deadline))
+        try expect(expired.contains(.cancelRequest(generation: running.generation)), "Expected cancellation at cap")
+        try expect(harness.state.inFlightRequest == nil, "Expected no inflight request after cap")
+        try expect(harness.state.burstCooldownDeadline == refreshInstant(490), "Expected one normal interval cooldown")
+        let afterExpiry = harness.state
+        try expect(harness.send(.requestSucceeded(generation: running.generation, samples: refreshSamples(codexUsed: 99), at: refreshInstant(311))).isEmpty, "Expected cancelled completion ignored")
+        try expect(harness.state == afterExpiry, "Expected late result not to affect cooldown")
+
+        _ = try completeManualRefresh(&harness, samples: refreshSamples(codexUsed: 12), at: refreshInstant(320))
+        try expect(harness.state.burstDeadline == nil, "Expected manual refresh during cooldown without rearming")
+        _ = try completeManualRefresh(&harness, samples: refreshSamples(codexUsed: 13), at: refreshInstant(500))
+        try expect(harness.state.burstDeadline == nil, "Expected manual refresh after cooldown still not to rearm")
+        guard let normal = harness.state.scheduledRefresh else {
+            throw TestFailure(description: "Expected next normal request")
+        }
+        let request = try refreshRequest(from: harness.send(.scheduledRefreshFired(generation: normal.generation, at: normal.deadline)))
+        _ = harness.send(.requestSucceeded(generation: request.generation, samples: refreshSamples(codexUsed: 14), at: normal.deadline))
+        try expect(harness.state.burstDeadline == normal.deadline.advanced(by: .seconds(300)), "Expected next normal response to rearm")
+    }
+}
+
+private func automaticFloorAndRetryProtectionTest() -> TestCase {
+    TestCase(name: "automatic triggers share a completion floor and cannot accelerate retries") {
+        var harness = RefreshHarness()
+        try establishBaseline(&harness, samples: refreshSamples(codexUsed: 10))
+        let first = harness.send(.quotaReset(at: refreshInstant(1)))
+        let floor = try refreshSchedule(from: first)
+        try expect(refreshRequests(in: first).isEmpty, "Expected no immediate automatic request")
+        try expect(floor.deadline == refreshInstant(20), "Expected floor measured from completion")
+        for _ in 0..<100 {
+            try expect(harness.send(.quotaReset(at: refreshInstant(2))).isEmpty, "Expected identical timer and bounded repeated triggers")
+        }
+        let request = try refreshRequest(from: harness.send(.scheduledRefreshFired(generation: floor.generation, at: floor.deadline)))
+        let retry = try refreshSchedule(from: harness.send(.transientFailure(generation: request.generation, at: refreshInstant(20))))
+        try expect(harness.send(.wakeBaseline(at: refreshInstant(21))).isEmpty, "Expected wake not to replace backoff")
+        try expect(harness.send(.quotaReset(at: refreshInstant(22))).isEmpty, "Expected reset not to replace backoff")
+        try expect(harness.state.scheduledRefresh == retry, "Expected original backoff deadline retained")
+        let manual = try refreshRequest(from: harness.send(.manualRefresh(at: refreshInstant(23))))
+        try expect(manual.reason == .manual, "Expected explicit refresh exempt from automatic floor and backoff")
+    }
+}
+
+private func automaticFloorCannotDisplaceBurstCapTest() -> TestCase {
+    TestCase(name: "a reset deferred by the automatic floor cannot displace the burst hard cap") {
+        var harness = RefreshHarness()
+        try establishBaseline(&harness, samples: refreshSamples(codexUsed: 10))
+        _ = try completeManualRefresh(&harness, samples: refreshSamples(codexUsed: 11), at: refreshInstant(10))
+        _ = try completeManualRefresh(&harness, samples: refreshSamples(codexUsed: 12), at: refreshInstant(309))
+        let original = harness.state.scheduledRefresh
+        let commands = harness.send(.quotaReset(at: refreshInstant(309)))
+        try expect(commands.isEmpty, "Expected existing hard-cap timer retained")
+        try expect(harness.state.scheduledRefresh == original, "Expected no timer churn near burst boundary")
+        try expect(harness.state.scheduledRefresh?.deadline == refreshInstant(310), "Expected cap before 329-second floor")
+    }
+}
+
+private func suspendPreservesBackoffAndFloorTest() -> TestCase {
+    TestCase(name: "suspend and automatic resume preserve retry deadline and exponential ladder") {
+        var harness = RefreshHarness()
+        let initial = try refreshRequest(from: harness.send(.start(at: refreshInstant(0))))
+        _ = harness.send(.transientFailure(generation: initial.generation, at: refreshInstant(0)))
+        _ = harness.send(.suspend(at: refreshInstant(1)))
+        let commands = harness.send(.resumeAfterSystemWake(at: refreshInstant(6)))
+        let resumed = try refreshSchedule(from: commands)
+        try expect(resumed.reason == .retry && resumed.deadline == refreshInstant(30), "Expected original backoff after resume")
+        let retry = try refreshRequest(from: harness.send(.scheduledRefreshFired(generation: resumed.generation, at: resumed.deadline)))
+        let next = try refreshSchedule(from: harness.send(.transientFailure(generation: retry.generation, at: resumed.deadline)))
+        try expect(next.deadline == refreshInstant(90), "Expected second failure's 60-second backoff")
+
+        var held = RefreshHarness()
+        _ = try refreshRequest(from: held.send(.start(at: refreshInstant(0))))
+        _ = held.send(.suspend(at: refreshInstant(2)))
+        let resumedHeld = try refreshSchedule(from: held.send(.resumeAfterSystemWake(at: refreshInstant(7))))
+        try expect(resumedHeld.deadline == refreshInstant(22), "Expected cancellation to count toward automatic floor")
+    }
+}
+
+private func lowPowerRetryFloorTest() -> TestCase {
+    TestCase(name: "low-power automatic request floor also applies to the first retry") {
+        var harness = RefreshHarness(lowPowerModeEnabled: true)
+        let initial = try refreshRequest(from: harness.send(.start(at: refreshInstant(0))))
+        let retry = try refreshSchedule(from: harness.send(.transientFailure(generation: initial.generation, at: refreshInstant(0))))
+        try expect(retry.deadline == refreshInstant(60), "Expected 60-second power floor over 30-second backoff")
+        try expect(harness.send(.quotaReset(at: refreshInstant(10))).isEmpty, "Expected automatic reset to retain retry")
+    }
 }
 
 private func firstSuccessBaselineTest() -> TestCase {
@@ -108,7 +210,7 @@ private func wakeBaselineTest() -> TestCase {
 }
 
 private func increaseAndExtensionTest() -> TestCase {
-    TestCase(name: "same-cycle increase starts and re-extends burst") {
+    TestCase(name: "same-cycle increase starts but never extends the hard burst deadline") {
         var harness = RefreshHarness()
         try establishBaseline(&harness, samples: refreshSamples(codexUsed: 10))
 
@@ -130,7 +232,7 @@ private func increaseAndExtensionTest() -> TestCase {
 
         try expect(firstDeadline == refreshInstant(310), "Expected five-minute burst")
         try expect(unchangedDeadline == firstDeadline, "Expected unchanged sample not to extend")
-        try expect(extendedDeadline == refreshInstant(330), "Expected increase to re-extend burst")
+        try expect(extendedDeadline == firstDeadline, "Expected increases to preserve the hard cap")
     }
 }
 
@@ -275,7 +377,7 @@ private func successResetsBackoffTest() -> TestCase {
 }
 
 private func burstFailureCutoffTest() -> TestCase {
-    TestCase(name: "three consecutive transient failures cut off burst") {
+    TestCase(name: "first transient failure cuts off burst and subsequent failures retain backoff") {
         var harness = RefreshHarness()
         try establishBaseline(&harness, samples: refreshSamples(codexUsed: 10))
         _ = try completeManualRefresh(
@@ -287,7 +389,7 @@ private func burstFailureCutoffTest() -> TestCase {
         guard var schedule = harness.state.scheduledRefresh else {
             throw TestFailure(description: "Expected active burst schedule")
         }
-        for failure in 1...3 {
+        for _ in 1...3 {
             let request = try refreshRequest(
                 from: harness.send(
                     .scheduledRefreshFired(
@@ -304,9 +406,7 @@ private func burstFailureCutoffTest() -> TestCase {
                     )
                 )
             )
-            if failure < 3 {
-                try expect(harness.state.burstDeadline != nil, "Expected burst before cutoff")
-            }
+            try expect(harness.state.burstDeadline == nil, "Expected first failure to end burst")
         }
 
         try expect(harness.state.burstDeadline == nil, "Expected burst failure cutoff")
@@ -424,7 +524,7 @@ private func systemResumeReducerTest() -> TestCase {
         _ = automatic.send(.stop)
 
         let commands = automatic.send(
-            .resumeAfterSystemWake(at: refreshInstant(5))
+            .resumeAfterSystemWake(at: refreshInstant(20))
         )
         let request = try refreshRequest(from: commands)
         try expect(automatic.state.isRunning, "Expected automatic refresh restored")
@@ -434,13 +534,13 @@ private func systemResumeReducerTest() -> TestCase {
         try establishBaseline(&manual, samples: refreshSamples(codexUsed: 10))
         _ = manual.send(.stop)
         let manualCommands = manual.send(
-            .resumeAfterSystemWake(at: refreshInstant(5))
+            .resumeAfterSystemWake(at: refreshInstant(20))
         )
 
         try expect(manualCommands.isEmpty, "Expected no automatic manual-profile request")
         try expect(manual.state.isRunning, "Expected manual coordinator restored")
         _ = try refreshRequest(
-            from: manual.send(.manualRefresh(at: refreshInstant(6)))
+            from: manual.send(.manualRefresh(at: refreshInstant(21)))
         )
     }
 }

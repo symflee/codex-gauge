@@ -120,6 +120,7 @@ struct TestRunner {
             TestGroup(suite: .protocol, tests: protocolTests()),
             TestGroup(suite: .process, tests: appServerSmokeTests()),
             TestGroup(suite: .process, tests: codexExecutableLocatorTests()),
+            TestGroup(suite: .process, tests: processLifecycleTests()),
             TestGroup(suite: .process, tests: usageSessionTests())
         ]
     }

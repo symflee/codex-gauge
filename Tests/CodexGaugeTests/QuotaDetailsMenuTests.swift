@@ -15,8 +15,185 @@ func quotaDetailsMenuTests() -> [TestCase] {
         quotaMenuSelectsConnectionActionTest(),
         quotaMenuReflectsApplicationUpdateAvailabilityTest(),
         quotaMenuAdapterUsesCachedModelTest(),
+        quotaMenuCachesIndependentRowsTest(),
+        quotaMenuPreservesNativeRowIdentityTest(),
+        quotaMenuDefersClosedUpdatesTest(),
         quotaMenuDispatchesInjectedActionsTest()
     ]
+}
+
+private func quotaMenuDefersClosedUpdatesTest() -> TestCase {
+    TestCase(name: "quota native menu defers one thousand closed providers and reuses open rows") {
+        try await MainActor.run {
+            let presenter = RecordingStatusMenuPresenter()
+            let controller = StatusMenuController(
+                presenter: presenter,
+                statusItemController: StatusItemController(presenter: MenuStatusItemPresenter()),
+                actions: menuActions(recorder: MenuCallRecorder())
+            )
+            // Exercise the production protocol witness, not only the controller API.
+            let runtime: any ApplicationMenuRuntime = StatusMenuRuntimeAdapter(controller: controller)
+            let calls = MenuCallRecorder()
+            let builder = QuotaDetailsMenuModelBuilder(
+                localization: menuLocalization(),
+                dateFormatter: QuotaMenuDateFormatter { date in
+                    calls.record("date")
+                    return "D\(Int(date.timeIntervalSince1970))"
+                }
+            )
+            var cache = QuotaDetailsMenuModelCache()
+            let captured = Date(timeIntervalSince1970: 1_900_000_000)
+            let quota = try menuQuota(slot: .primary, used: 17, duration: 300,
+                                      reset: captured.addingTimeInterval(3_600).timeIntervalSince1970)
+            func input(_ index: Int, includeQuota: Bool = true) -> QuotaDetailsMenuInput {
+                QuotaDetailsMenuInput(
+                    productStates: [.codex: .value(ProductQuotaValue(
+                        capturedAt: captured, quotaWindows: includeQuota ? [quota] : []
+                    ), freshness: .fresh)],
+                    lastSuccessfulRefreshByProduct: [.codex: captured.addingTimeInterval(Double(index))],
+                    codexAvailability: .available, currentDate: captured
+                )
+            }
+            var providerCalls: [Int] = []
+            weak var previousCapture: MenuDeferredCapture?
+            for index in 0..<1_000 {
+                let capture = MenuDeferredCapture(index: index)
+                runtime.updateDeferred {
+                    providerCalls.append(capture.index)
+                    return cache.build(input(capture.index), using: builder)
+                }
+                try expect(previousCapture == nil, "Expected obsolete provider captures released immediately")
+                previousCapture = capture
+            }
+            guard let menu = presenter.menu else { throw TestFailure(description: "Expected attached menu") }
+            try expect(providerCalls.isEmpty && calls.values.isEmpty, "Expected no closed model building or date formatting")
+            try expect(menu.items.isEmpty, "Expected no native rows before first request")
+            try expect(previousCapture != nil, "Expected only the latest provider retained")
+
+            controller.menuNeedsUpdate(menu)
+            try expect(providerCalls == [999], "Expected exactly the latest provider at first request")
+            try expect(previousCapture == nil, "Expected provider capture released after materialization")
+            let items = menu.items
+            try expect(items.count > 2, "Expected product, quota, and success rows")
+            try expect(items[2].title == "Last success: D1900000999", "Expected latest cached publication")
+            let formatCount = calls.values.count
+            controller.menuWillOpen(menu)
+            controller.menuDidClose(menu)
+            controller.menuNeedsUpdate(menu)
+            controller.menuWillOpen(menu)
+            try expect(providerCalls == [999] && calls.values.count == formatCount, "Expected unchanged reopening without rebuilding")
+            try expect(zip(items, menu.items).allSatisfy { pair in pair.0 === pair.1 }, "Expected unchanged native items")
+
+            runtime.updateDeferred {
+                providerCalls.append(1_000)
+                return cache.build(input(1_000), using: builder)
+            }
+            try expect(providerCalls == [999, 1_000], "Expected immediate incremental update while tracking")
+            try expect(items[2].title == "Last success: D1900001000", "Expected changed status row in place")
+            try expect(calls.values.count == formatCount + 1, "Expected only the changed success date formatted")
+            try expect(zip(items, menu.items).allSatisfy { pair in pair.0 === pair.1 }, "Expected no native row replacement for a value change")
+
+            controller.menuDidClose(menu)
+            runtime.updateDeferred {
+                providerCalls.append(1_001)
+                return cache.build(input(1_001, includeQuota: false), using: builder)
+            }
+            try expect(providerCalls == [999, 1_000], "Expected updates deferred again after close")
+            try expect(menu.items[1] === items[1], "Expected closed native rows left intact")
+            controller.menuNeedsUpdate(menu)
+            try expect(providerCalls == [999, 1_000, 1_001], "Expected one latest model on reopening")
+            try expect(menu.items[1] === items[2], "Expected status identity after preceding quota removal")
+            try expect(menu.items.last === items.last, "Expected stable action identity across deferred structural change")
+            try expect(items[1].menu == nil, "Expected obsolete native quota row detached")
+        }
+    }
+}
+
+private final class MenuDeferredCapture {
+    let index: Int
+    init(index: Int) { self.index = index }
+}
+
+private func quotaMenuCachesIndependentRowsTest() -> TestCase {
+    TestCase(name: "quota menu caches semantic rows and still expires exact boundaries") {
+        try await MainActor.run {
+            let calls = MenuCallRecorder()
+            let builder = QuotaDetailsMenuModelBuilder(
+                localization: menuLocalization(),
+                dateFormatter: QuotaMenuDateFormatter { date in
+                    calls.record("date")
+                    return "D\(Int(date.timeIntervalSince1970))"
+                }
+            )
+            var cache = QuotaDetailsMenuModelCache()
+            let captured = Date(timeIntervalSince1970: 1_900_000_000)
+            let reset = captured.addingTimeInterval(3_600)
+            let quota = try menuQuota(slot: .primary, used: 17, duration: 300,
+                                      reset: reset.timeIntervalSince1970)
+            func input(success: Date, now: Date) -> QuotaDetailsMenuInput {
+                QuotaDetailsMenuInput(
+                    productStates: [.codex: .value(ProductQuotaValue(
+                        capturedAt: success, quotaWindows: [quota]
+                    ), freshness: .fresh)],
+                    codexAvailability: .available, currentDate: now
+                )
+            }
+            let original = cache.build(input(success: captured, now: captured), using: builder)
+            let initialCalls = calls.values.count
+            for index in 1...100 {
+                let repeated = cache.build(input(success: captured, now: captured.addingTimeInterval(Double(index))), using: builder)
+                try expect(repeated == original, "Expected wall clock movement without expiry to reuse the model")
+            }
+            try expect(calls.values.count == initialCalls, "Expected no repeated formatting")
+            let later = captured.addingTimeInterval(180)
+            let changed = cache.build(input(success: later, now: later), using: builder)
+            try expect(calls.values.count == initialCalls + 1, "Expected only last-success date formatting")
+            try expect(changed.productSections[0].quotaRows == original.productSections[0].quotaRows, "Expected retained quota rows")
+            let expired = cache.build(input(success: later, now: reset), using: builder)
+            try expect(expired.productSections[0].quotaRows[0].contains("refresh required"), "Expected exact reset expiry")
+            try expect(expired.productSections[0].quotaRowIDs == original.productSections[0].quotaRowIDs, "Expected stable quota identity at expiry")
+            let backwards = cache.build(input(success: later, now: reset.addingTimeInterval(-1)), using: builder)
+            try expect(backwards.productSections[0].quotaRows == original.productSections[0].quotaRows, "Expected backward clock changes to reevaluate validity")
+            let relocalized = cache.build(input(success: later, now: later), using: .bundled(language: .korean))
+            try expect(relocalized.actionGroups[0][0].title != original.actionGroups[0][0].title, "Expected a changed builder to invalidate localized text")
+        }
+    }
+}
+
+private func quotaMenuPreservesNativeRowIdentityTest() -> TestCase {
+    TestCase(name: "quota menu mutates changed rows and preserves unrelated native items") {
+        try await MainActor.run {
+            let presenter = RecordingStatusMenuPresenter()
+            let controller = StatusMenuController(
+                presenter: presenter,
+                statusItemController: StatusItemController(presenter: MenuStatusItemPresenter()),
+                actions: menuActions(recorder: MenuCallRecorder())
+            )
+            func model(success: String, includeQuota: Bool, available: Bool) -> QuotaDetailsMenuModel {
+                QuotaDetailsMenuModel(productSections: [QuotaMenuProductSection(
+                    product: .codex, title: "Codex",
+                    quotaRows: includeQuota ? ["83%"] : [], spendControlRows: [],
+                    statusRows: [success], quotaRowIDs: includeQuota ? ["primary"] : [],
+                    statusRowIDs: ["last-success"]
+                )], actionGroups: [[QuotaMenuActionItem(action: .refresh, title: "Refresh"),
+                                     QuotaMenuActionItem(action: .checkForUpdates, title: "Update", isEnabled: available)]])
+            }
+            let initial = model(success: "first", includeQuota: true, available: false)
+            controller.update(initial)
+            guard let menu = presenter.menu else { throw TestFailure(description: "Expected native menu") }
+            let items = menu.items
+            controller.update(initial)
+            try expect(zip(items, menu.items).allSatisfy { pair in pair.0 === pair.1 }, "Expected identical publication to retain every native item")
+            controller.update(model(success: "later", includeQuota: true, available: true))
+            try expect(zip(items, menu.items).allSatisfy { pair in pair.0 === pair.1 }, "Expected only row properties to change")
+            try expect(items[2].title == "later", "Expected updated success title on the same item")
+            try expect(items.last?.isEnabled == true, "Expected updated action availability")
+            controller.update(model(success: "later", includeQuota: false, available: true))
+            try expect(menu.items[1] === items[2], "Expected last-success identity to survive removal before it")
+            try expect(menu.items.last === items.last, "Expected stable action identity across structural changes")
+            try expect(items[1].menu == nil, "Expected obsolete quota row removed")
+        }
+    }
 }
 
 private func quotaMenuExplicitLanguageFactoryTest() -> TestCase {

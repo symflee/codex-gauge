@@ -53,6 +53,11 @@ public final class StatusMenuController: NSObject, NSMenuDelegate {
     private let menu = NSMenu()
     private let statusItemController: StatusItemController
     private let actions: StatusMenuActions
+    private var currentModel: QuotaDetailsMenuModel?
+    private var rowsByID: [String: NSMenuItem] = [:]
+    private var currentRows: [String: Row] = [:]
+    private var pendingModelProvider: (@MainActor () -> QuotaDetailsMenuModel?)?
+    private var isOpen = false
 
     public init(
         presenter: StatusMenuPresenting,
@@ -68,20 +73,69 @@ public final class StatusMenuController: NSObject, NSMenuDelegate {
     }
 
     public func update(_ model: QuotaDetailsMenuModel) {
-        menu.removeAllItems()
-        addProductSections(model.productSections)
-        let actionGroups = model.actionGroups.filter { !$0.isEmpty }
-        addSeparatorIfNeeded(hasFollowingItems: !actionGroups.isEmpty)
-        addActionGroups(actionGroups)
+        pendingModelProvider = nil
+        guard model != currentModel else { return }
+        let rows = flattenedRows(model)
+        let identifiers = Set(rows.map(\.id))
+        for identifier in Array(rowsByID.keys) where !identifiers.contains(identifier) {
+            if let item = rowsByID.removeValue(forKey: identifier) {
+                menu.removeItem(item)
+            }
+            currentRows.removeValue(forKey: identifier)
+        }
+        for (index, row) in rows.enumerated() {
+            let item: NSMenuItem
+            if let existing = rowsByID[row.id] {
+                item = existing
+                if currentRows[row.id] != row {
+                    if item.title != row.title { item.title = row.title }
+                    if item.isEnabled != row.isEnabled { item.isEnabled = row.isEnabled }
+                    if item.indentationLevel != row.indentation {
+                        item.indentationLevel = row.indentation
+                    }
+                }
+            } else {
+                item = makeItem(row)
+                rowsByID[row.id] = item
+            }
+            if menu.index(of: item) != index {
+                if item.menu === menu { menu.removeItem(item) }
+                menu.insertItem(item, at: index)
+            }
+            currentRows[row.id] = row
+        }
+        currentModel = model
+    }
+
+    /// Retains at most one pending provider. It may only read already-held local
+    /// state and format it; never fetch data or perform blocking I/O here.
+    public func updateDeferred(
+        _ modelProvider: @escaping @MainActor () -> QuotaDetailsMenuModel?
+    ) {
+        pendingModelProvider = modelProvider
+        if isOpen { applyPendingModel() }
+    }
+
+    public func menuNeedsUpdate(_ menu: NSMenu) {
+        guard menu === self.menu else { return }
+        applyPendingModel()
+    }
+
+    private func applyPendingModel() {
+        guard let provider = pendingModelProvider else { return }
+        pendingModelProvider = nil
+        if let model = provider() { update(model) }
     }
 
     public func menuWillOpen(_ menu: NSMenu) {
         _ = menu
+        isOpen = true
         statusItemController.setPaused(true, for: .menuOpen)
     }
 
     public func menuDidClose(_ menu: NSMenu) {
         _ = menu
+        isOpen = false
         statusItemController.setPaused(false, for: .menuOpen)
     }
 
@@ -89,74 +143,61 @@ public final class StatusMenuController: NSObject, NSMenuDelegate {
         actions.perform(action)
     }
 
-    private func addProductSections(_ sections: [QuotaMenuProductSection]) {
-        for (index, section) in sections.enumerated() {
-            guard index > 0 else {
-                addProductSection(section)
-                continue
+    private struct Row: Equatable {
+        let id: String
+        var title = ""
+        var indentation = 0
+        var isEnabled = false
+        var action: QuotaMenuAction?
+        var isSeparator = false
+    }
+
+    private func flattenedRows(_ model: QuotaDetailsMenuModel) -> [Row] {
+        var rows: [Row] = []
+        for section in model.productSections {
+            let prefix = "product-\(section.product.rawValue)"
+            if !rows.isEmpty { rows.append(Row(id: "before-\(prefix)", isSeparator: true)) }
+            rows.append(Row(id: prefix, title: section.title))
+            for (index, title) in section.quotaRows.enumerated() {
+                let identifier = section.quotaRowIDs.indices.contains(index)
+                    ? section.quotaRowIDs[index] : String(index)
+                rows.append(Row(id: "\(prefix)-quota-\(identifier)", title: title, indentation: 1))
             }
-            menu.addItem(.separator())
-            addProductSection(section)
-        }
-    }
-
-    private func addProductSection(_ section: QuotaMenuProductSection) {
-        menu.addItem(informationItem(title: section.title, indentation: 0))
-        section.quotaRows.forEach { title in
-            menu.addItem(informationItem(title: title, indentation: 1))
-        }
-        section.spendControlRows.forEach { title in
-            menu.addItem(informationItem(title: title, indentation: 1))
-        }
-        section.statusRows.forEach { title in
-            menu.addItem(informationItem(title: title, indentation: 1))
-        }
-    }
-
-    private func informationItem(title: String, indentation: Int) -> NSMenuItem {
-        let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
-        item.isEnabled = false
-        item.indentationLevel = indentation
-        return item
-    }
-
-    private func addActionGroups(_ groups: [[QuotaMenuActionItem]]) {
-        for (index, group) in groups.enumerated() {
-            guard index > 0 else {
-                addActions(group)
-                continue
+            for (index, title) in section.spendControlRows.enumerated() {
+                rows.append(Row(id: "\(prefix)-spend-\(index)", title: title, indentation: 1))
             }
-            menu.addItem(.separator())
-            addActions(group)
+            for (index, title) in section.statusRows.enumerated() {
+                let identifier = section.statusRowIDs.indices.contains(index)
+                    ? section.statusRowIDs[index] : String(index)
+                rows.append(Row(id: "\(prefix)-status-\(identifier)", title: title, indentation: 1))
+            }
         }
+        for group in model.actionGroups where !group.isEmpty {
+            if let first = group.first, !rows.isEmpty {
+                rows.append(Row(id: "before-action-\(first.action.rawValue)", isSeparator: true))
+            }
+            rows += group.map { item in
+                Row(id: "action-\(item.action.rawValue)", title: item.title,
+                    isEnabled: item.isEnabled, action: item.action)
+            }
+        }
+        return rows
     }
 
-    private func addActions(_ actionItems: [QuotaMenuActionItem]) {
-        actionItems.forEach { item in
-            menu.addItem(actionItem(item))
+    private func makeItem(_ row: Row) -> NSMenuItem {
+        if row.isSeparator { return .separator() }
+        let item = NSMenuItem(title: row.title, action: nil, keyEquivalent: "")
+        item.isEnabled = row.isEnabled
+        item.indentationLevel = row.indentation
+        if let action = row.action {
+            item.action = #selector(actionSelected(_:))
+            item.target = self
+            item.representedObject = action.rawValue
+            item.setAccessibilityIdentifier(
+                CodexGaugeAccessibilityIdentifier.menuAction(action.rawValue)
+            )
         }
-    }
-
-    private func actionItem(_ model: QuotaMenuActionItem) -> NSMenuItem {
-        let item = NSMenuItem(
-            title: model.title,
-            action: #selector(actionSelected(_:)),
-            keyEquivalent: ""
-        )
-        item.target = self
-        item.representedObject = model.action.rawValue
-        item.isEnabled = model.isEnabled
-        item.setAccessibilityIdentifier(
-            CodexGaugeAccessibilityIdentifier.menuAction(model.action.rawValue)
-        )
         return item
-    }
-
-    private func addSeparatorIfNeeded(hasFollowingItems: Bool) {
-        guard !menu.items.isEmpty, hasFollowingItems else {
-            return
-        }
-        menu.addItem(.separator())
     }
 
     @objc

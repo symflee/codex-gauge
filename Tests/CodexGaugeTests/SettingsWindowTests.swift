@@ -29,6 +29,7 @@ func settingsWindowTests() -> [TestCase] {
         settingsWindowCommittedSelectionUpdatesReopenedWindowTest(),
         settingsWindowSelectionIdentityTest(),
         settingsWindowDiscoveryUpdateTest(),
+        settingsWindowCachesClosedMetadataTest(),
         settingsWindowSerializesDiagnosticsTest(),
         settingsWindowPendingDiagnosticsReleaseTest(),
         settingsWindowShutdownDrainsPendingWorkTest(),
@@ -106,7 +107,7 @@ private func settingsWindowRelocalizesInPlaceScenario() async throws {
     )
     try expect(
         viewController.renderedGaugePresetOptionTitles == [
-            "선명한 파랑 — 기본", "그라파이트", "선명한 초록",
+            "무채색 — 기본, 자동 명암", "선명한 파랑", "그라파이트", "선명한 초록",
             "선명한 주황", "선명한 보라", "사용자 지정"
         ],
         "Expected Korean gauge preset names"
@@ -152,7 +153,7 @@ private func settingsWindowRelocalizesInPlaceScenario() async throws {
     )
     try expect(
         viewController.renderedGaugePresetOptionTitles == [
-            "Vivid Blue — Default", "Graphite", "Vivid Green",
+            "Neutral — Default, Adaptive", "Vivid Blue", "Graphite", "Vivid Green",
             "Vivid Orange", "Vivid Purple", "Custom"
         ],
         "Expected English gauge preset names"
@@ -516,17 +517,17 @@ private func verifyInitialGaugeControls(
 ) throws {
     try expect(
         viewController.renderedGaugePresetOptionTitles == [
-            "선명한 파랑 — 기본", "그라파이트", "선명한 초록",
+            "무채색 — 기본, 자동 명암", "선명한 파랑", "그라파이트", "선명한 초록",
             "선명한 주황", "선명한 보라", "사용자 지정"
         ],
-        "Expected five ordered presets and custom"
+        "Expected six ordered presets and custom"
     )
     try expect(
         viewController.renderedGaugePresetSeparatorCount == 1,
         "Expected one separator before custom"
     )
     try expect(
-        viewController.renderedGaugePresetSwatchCount == 6,
+        viewController.renderedGaugePresetSwatchCount == 7,
         "Expected programmatic two-color swatches"
     )
     try expect(
@@ -773,6 +774,7 @@ private func settingsGaugeLocalizationParityTest() -> TestCase {
         let required = Set([
             "settings.section.gauge-colors",
             "settings.gauge.preset.accessibility",
+            "settings.gauge.preset.neutral",
             "settings.gauge.preset.blue",
             "settings.gauge.preset.graphite",
             "settings.gauge.preset.green",
@@ -1194,14 +1196,15 @@ private func settingsWindowShutdownFinishesCommittedSelectionScenario() async th
         onExecutableSelectionChanged: { callbackURL = $0 }
     )
     coordinator.requestExecutableSelection()
-    try await waitForSettingsCondition { await saveGate.hasStarted }
+    try await saveGate.waitUntilStarted()
 
+    try expect(coordinator.activeWindowController != nil, "Expected selected executable save to start with its settings window")
     let shutdownTask = Task { @MainActor in
         await coordinator.shutdown()
         completion.didFinish = true
     }
-    for _ in 0..<20 {
-        await Task.yield()
+    try await waitForSelectionCondition("shutdown reaches committed-save drain") {
+        coordinator.activeWindowController == nil
     }
     try expect(!completion.didFinish, "Expected committed save to drain before shutdown")
     try expect(callbackURL == nil, "Expected runtime callback after the save")
@@ -1344,7 +1347,7 @@ private func settingsWindowCommittedSelectionUpdatesReopenedWindowScenario() asy
 
     var controller: SettingsWindowController? = await coordinator.showSettings()
     coordinator.requestExecutableSelection()
-    try await waitForSettingsCondition { await saveGate.hasStarted }
+    try await saveGate.waitUntilStarted()
     controller?.close()
     controller = nil
 
@@ -1396,7 +1399,7 @@ private func settingsWindowCommittedSelectionCallbackScenario() async throws {
     )
 
     coordinator.requestExecutableSelection()
-    try await waitForSettingsCondition { await saveGate.hasStarted }
+    try await saveGate.waitUntilStarted()
     coordinator.activeWindowController?.close()
     await saveGate.finish()
     try await waitForSettingsCondition { callbackURL == selectedURL }
@@ -1430,7 +1433,9 @@ private func settingsWindowSelectionIdentityScenario() async throws {
     )
 
     coordinator.requestExecutableSelection()
-    try await waitForSettingsCondition { selector.callCount == 1 }
+    try await waitForSelectionCondition("first selector presentation") {
+        selector.callCount == 1
+    }
     var firstController = coordinator.activeWindowController
     weak let weakFirstController = firstController
     firstController?.close()
@@ -1439,7 +1444,9 @@ private func settingsWindowSelectionIdentityScenario() async throws {
     try expect(weakFirstController == nil, "Expected pending selection not to retain settings")
 
     coordinator.requestExecutableSelection()
-    try await waitForSettingsCondition { selector.callCount == 2 }
+    try await waitForSelectionCondition("replacement selector presentation") {
+        selector.callCount == 2
+    }
     selector.finish(call: 1, url: URL(fileURLWithPath: "/Synthetic/Stale/codex"))
     for _ in 0..<20 {
         await Task.yield()
@@ -1452,9 +1459,31 @@ private func settingsWindowSelectionIdentityScenario() async throws {
 
     let currentURL = URL(fileURLWithPath: "/Synthetic/Current/codex")
     selector.finish(call: 2, url: currentURL)
-    try await waitForSettingsCondition { await recorder.savedURLs == [currentURL] }
+    try await waitForSelectionCondition("current selection save and runtime callback") {
+        let savedURLs = await recorder.savedURLs
+        return savedURLs == [currentURL] && callbackURLs == [currentURL]
+    }
+    let savedURLs = await recorder.savedURLs
+    try expect(savedURLs == [currentURL], "Expected only current selection saved")
     try expect(callbackURLs == [currentURL], "Expected only current selection applied")
     coordinator.activeWindowController?.close()
+}
+
+// Scheduler yields are not elapsed time and can finish before repository/actor work
+// runs. Keep the exact selection assertions, with a bounded monotonic wait and a
+// distinct phase in failures so a lifecycle regression remains diagnosable.
+@MainActor
+private func waitForSelectionCondition(
+    _ phase: String,
+    condition: @escaping @MainActor () async -> Bool
+) async throws {
+    let clock = ContinuousClock()
+    let deadline = clock.now.advanced(by: .seconds(2))
+    while clock.now < deadline {
+        if await condition() { return }
+        try await Task.sleep(for: .milliseconds(1))
+    }
+    throw TestFailure(description: "Timed out waiting for executable selection: \(phase)")
 }
 
 private func settingsWindowSerializesDiagnosticsTest() -> TestCase {
@@ -1887,21 +1916,48 @@ private actor SerializedSettingsDiagnosticsProbe {
 }
 
 private actor SettingsSelectionSaveGate {
-    private(set) var hasStarted = false
     private(set) var savedURL: URL?
+    private(set) var hasStarted = false
     private var continuation: CheckedContinuation<Void, Never>?
+    private var startContinuation: CheckedContinuation<Void, Error>?
+    private var startTimeout: Task<Void, Never>?
+
+    // Registration and the save-entry signal are serialized on this actor. The
+    // timeout only detects a missing event; it does not poll or assume actor fairness.
+    func waitUntilStarted() async throws {
+        guard !hasStarted else { return }
+        try await withCheckedThrowingContinuation { continuation in
+            startContinuation = continuation
+            startTimeout = Task { [weak self] in
+                do { try await Task.sleep(for: .seconds(2)) } catch { return }
+                await self?.expireStartWait()
+            }
+        }
+    }
 
     func save(_ url: URL) async throws {
         savedURL = url
         hasStarted = true
         await withCheckedContinuation { continuation in
             self.continuation = continuation
+            startTimeout?.cancel()
+            startTimeout = nil
+            startContinuation?.resume()
+            startContinuation = nil
         }
     }
 
     func finish() {
         continuation?.resume()
         continuation = nil
+    }
+
+    private func expireStartWait() {
+        startTimeout = nil
+        startContinuation?.resume(throwing: TestFailure(
+            description: "Timed out waiting for committed executable save to start"
+        ))
+        startContinuation = nil
     }
 }
 
@@ -1930,4 +1986,39 @@ private final class OverlappingSettingsExecutableSelectorStub: CodexExecutableSe
     func finish(call: Int, url: URL?) {
         continuations.removeValue(forKey: call)?.resume(returning: url)
     }
+}
+
+private func settingsWindowCachesClosedMetadataTest() -> TestCase {
+    TestCase(name: "closed settings cache metadata without creating views") {
+        try await settingsWindowCachesClosedMetadataScenario()
+    }
+}
+
+@MainActor
+private func settingsWindowCachesClosedMetadataScenario() async throws {
+    let store = try SettingsUITestStore()
+    defer { store.cleanUp() }
+    let repository = try store.repository()
+    let quota = QuotaSelectionID(product: .codex, rawDurationMinutes: 300)
+    var creationCount = 0
+    let coordinator = SettingsWindowCoordinator(
+        repository: repository, discoveredQuotaProvider: { [] },
+        onSettingsWindowCreated: { _ in creationCount += 1 }
+    )
+    for _ in 0..<100 {
+        coordinator.updateDiscoveredQuotaIDs([quota])
+        coordinator.updateConnectionStatus(.connected)
+        coordinator.updateLaunchAtLoginState(LaunchAtLoginSettingsState(status: .enabled))
+    }
+    try expect(coordinator.activeWindowController == nil && creationCount == 0, "Expected no closed settings graph")
+    let controller = try await showSettingsController(coordinator)
+    try expect(creationCount == 1, "Expected a single explicit settings creation")
+    try expect(controller.settingsViewController.connectionDiagnostics.connectionStatus == .connected, "Expected latest cached connection status on open")
+    try expect(controller.settingsViewController.formState.quotaOptions.map(\.identifier).contains(quota), "Expected latest cached quota discovery on open")
+    controller.close()
+    try expect(coordinator.activeWindowController == nil, "Expected close to release the settings graph")
+    coordinator.updateConnectionStatus(.timeout)
+    let reopened = try await showSettingsController(coordinator)
+    try expect(reopened.settingsViewController.connectionDiagnostics.connectionStatus == .timeout, "Expected updated metadata in the new graph")
+    await coordinator.shutdown()
 }

@@ -14,6 +14,8 @@ func connectionDiagnosticsTests() -> [TestCase] {
         cliVersionProbeFailureTest(),
         cliVersionProbeCleanupTest(),
         cliVersionProbeCancellationTest(),
+        cliVersionProbeEscalatesIgnoredTerminationTest(),
+        cliVersionProbeRetainsUnconfirmedChildTest(),
         connectionInspectorTest(),
         connectionInspectorFailureTest(),
         connectionStatusResolverTest(),
@@ -204,6 +206,79 @@ private func connectionInspectorTest() -> TestCase {
             "Expected no absolute path in the value description"
         )
     }
+}
+
+private func cliVersionProbeEscalatesIgnoredTerminationTest() -> TestCase {
+    TestCase(name: "CLI version timeout escalates ignored TERM once and confirms exit") {
+        let pidFile = FileManager.default.temporaryDirectory
+            .appendingPathComponent("codex-gauge-version-kill-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: pidFile) }
+        let signals = ProcessSignalRecorder()
+        let probe = CodexCLIVersionProbe(
+            configuration: versionProbeConfiguration(.ignoreTermination, pidFile: pidFile),
+            terminationSignal: signals.forward
+        )
+        try await expectVersionError(.timeout) {
+            _ = try await probe.version(of: syntheticExecutableURL)
+        }
+        let identifier = try await readSyntheticVersionProcessIdentifier(from: pidFile)
+        defer { if Darwin.kill(identifier, 0) == 0 { Darwin.kill(identifier, SIGKILL) } }
+
+        try expect(signals.values == [SIGTERM, SIGKILL], "Expected one escalation sequence")
+        try expect(Darwin.kill(identifier, 0) != 0, "Expected the child to be reaped before returning")
+    }
+}
+
+private func cliVersionProbeRetainsUnconfirmedChildTest() -> TestCase {
+    TestCase(name: "CLI version retains unconfirmed child and refuses replacement until late exit") {
+        let pidFile = FileManager.default.temporaryDirectory
+            .appendingPathComponent("codex-gauge-version-late-exit-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: pidFile) }
+        let signals = ProcessSignalRecorder()
+        let probe = CodexCLIVersionProbe(
+            configuration: versionProbeConfiguration(.timeout, pidFile: pidFile),
+            terminationSignal: signals.suppress
+        )
+        try await expectVersionError(.timeout) {
+            _ = try await probe.version(of: syntheticExecutableURL)
+        }
+        let identifier = try await readSyntheticVersionProcessIdentifier(from: pidFile)
+        defer { if Darwin.kill(identifier, 0) == 0 { Darwin.kill(identifier, SIGKILL) } }
+
+        try expect(Darwin.kill(identifier, 0) == 0, "Expected the injected signals to leave child alive")
+        try expect(signals.hasTerminationObserver, "Timeout must retain the termination observer")
+        try await expectVersionError(.processFailed) {
+            _ = try await probe.version(of: syntheticExecutableURL)
+        }
+        try expect(signals.values == [SIGTERM, SIGKILL], "Rejected replacement must not restart cleanup")
+
+        Darwin.kill(identifier, SIGKILL)
+        try await expectVersionProbeReleasedChild(probe)
+        try expect(Darwin.kill(identifier, 0) != 0, "Expected an actual exit before replacement")
+        try expect(!signals.hasTerminationObserver, "Expected observer release after the late event")
+    }
+}
+
+private func expectVersionProbeReleasedChild(_ probe: CodexCLIVersionProbe) async throws {
+    // The missing executable cannot create a replacement child. A launch failure
+    // proves the old child has left the actor's lifecycle gate after its event.
+    let missing = FileManager.default.temporaryDirectory
+        .appendingPathComponent("codex-gauge-missing-after-exit-\(UUID().uuidString)")
+    let clock = ContinuousClock()
+    let deadline = clock.now.advanced(by: .seconds(1))
+    while clock.now < deadline {
+        do {
+            _ = try await probe.version(of: missing)
+            throw TestFailure(description: "A missing executable must not return a version")
+        } catch let error as CodexCLIVersionProbeError {
+            if error == .launchFailed {
+                return
+            }
+            try expect(error == .processFailed, "Expected only the retained-child rejection")
+        }
+        try await clock.sleep(for: .milliseconds(20))
+    }
+    throw TestFailure(description: "The late termination event did not release the version probe")
 }
 
 private func connectionInspectorFailureTest() -> TestCase {

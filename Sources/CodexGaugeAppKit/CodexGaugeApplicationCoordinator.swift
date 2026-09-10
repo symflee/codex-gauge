@@ -37,16 +37,34 @@ public final class CodexGaugeApplicationCoordinator {
     private let presentationAdapter = RefreshPresentationAdapter()
     private let connectionStatusResolver = ConnectionStatusResolver()
 
-    private var menuModelBuilder: QuotaDetailsMenuModelBuilder
+    private var menuModelBuilder: QuotaDetailsMenuModelBuilder?
     private var currentMenuInput: QuotaDetailsMenuInput?
+    private var menuModelCache = QuotaDetailsMenuModelCache()
+    private var lastMenuModel: QuotaDetailsMenuModel?
+    private var lastStatusFrames: [DisplayFrame]?
+    private var lastConnectionStatus: CodexConnectionStatus?
+    private var lastDiscoveredQuotaIDs: Set<QuotaSelectionID>?
+    private var lastDeadlineInput: RefreshDeadlineInput?
     private var preferences: AppPreferences
     private var pendingFormValues: SettingsFormValues?
     private var pendingSelectedExecutableURL: URL?
     private var activityState = ApplicationActivityState.active
     private var lowPowerModeEnabled = false
     private var refreshCoordinator: (any ApplicationRefreshCoordinating)?
+    private var retiringRefresh: (any ApplicationRefreshCoordinating)?
+    private var retirementWaitTask: Task<Void, Never>?
+    private var retirementContinuation: CheckedContinuation<Void, Never>?
     private var deadlineScheduler: (any ApplicationUsageDeadlineScheduling)?
     private var pendingOperation: Task<Void, Never>?
+    private var pendingRefreshDispatch = RefreshDispatch()
+    private var activeRefreshDispatch = RefreshDispatch()
+    private var isRefreshDispatchEnqueued = false
+    private var pendingRefreshReplacement: RefreshReplacement?
+    private var isRefreshReplacementEnqueued = false
+    private var installedRefreshGeneration: UInt64?
+    private var appliedRefreshProfile: RefreshProfile?
+    private var appliedDisplayPreference: DisplayPreference?
+    private var appliedLowPowerMode: Bool?
     private var shutdownTask: Task<Void, Never>?
     private var enqueuedOperationIdentifier: UInt64 = 0
     private var completedOperationIdentifier: UInt64 = 0
@@ -97,7 +115,6 @@ public final class CodexGaugeApplicationCoordinator {
         self.workspace = workspace
         self.canOpenCodexApplication = workspace.applicationURL != nil
         self.terminator = terminator
-        menuModelBuilder = .bundled(language: initialLanguage)
         preferences = AppPreferences(language: initialLanguage)
         self.now = now
         self.startupHook = startupHook
@@ -136,10 +153,12 @@ public final class CodexGaugeApplicationCoordinator {
     }
 
     public func performMenuAction(_ action: QuotaMenuAction) {
+        guard !isShuttingDown else { return }
         switch action {
         case .refresh:
-            enqueueRefreshOperation { refresh in
-                await refresh.refreshManually()
+            if !activeRefreshDispatch.manual {
+                pendingRefreshDispatch.manual = true
+                scheduleRefreshDispatch()
             }
         case .openCodex:
             workspace.openCodexApplication()
@@ -157,6 +176,7 @@ public final class CodexGaugeApplicationCoordinator {
     }
 
     public func settingsFormValuesDidChange(_ values: SettingsFormValues) {
+        guard !isShuttingDown else { return }
         let previous = SettingsFormValues(preferences: preferences)
         guard values != previous else {
             return
@@ -169,6 +189,7 @@ public final class CodexGaugeApplicationCoordinator {
     }
 
     public func selectedExecutableDidChange(_ url: URL) {
+        guard !isShuttingDown else { return }
         guard url.isFileURL, preferences.selectedExecutableURL != url else {
             return
         }
@@ -205,6 +226,12 @@ public final class CodexGaugeApplicationCoordinator {
         )
     }
 
+    /// Package-only lifecycle diagnostic derived from the actual operation queue.
+    /// It counts active plus queued operations, without adding logging or counters.
+    package var pendingRuntimeOperationCount: UInt64 {
+        enqueuedOperationIdentifier &- completedOperationIdentifier
+    }
+
     public func waitForPendingOperations() async {
         while completedOperationIdentifier < enqueuedOperationIdentifier {
             let operation = pendingOperation
@@ -218,6 +245,13 @@ public final class CodexGaugeApplicationCoordinator {
             return
         }
         isShuttingDown = true
+        statusRuntime.setRotationPaused(true, for: .sleeping)
+        pendingRefreshDispatch = RefreshDispatch()
+        pendingRefreshReplacement = nil
+        installedRefreshGeneration = nil
+        // Shutdown stops boundedly; only replacement must wait for actual exit.
+        retirementContinuation?.resume()
+        retirementContinuation = nil
         applicationUpdateRuntime.stop()
         refreshGeneration &+= 1
         systemActivityMonitor.stop()
@@ -233,7 +267,7 @@ public final class CodexGaugeApplicationCoordinator {
             await initialRefresh?.stop()
             await pendingOperation?.value
             await initialRefresh?.stop()
-            let lateRefresh = self?.refreshCoordinator
+            let lateRefresh = self?.refreshCoordinator ?? self?.retiringRefresh
             self?.refreshCoordinator = nil
             await lateRefresh?.stop()
             await settingsRuntime.shutdown()
@@ -307,8 +341,10 @@ public final class CodexGaugeApplicationCoordinator {
         let generation = refreshGeneration
         let refresh = makeRefreshCoordinator(generation: generation)
         refreshCoordinator = refresh
+        recordInstalledRefresh(generation: generation, consumesInitialActivity: true)
         await startInitialRefresh(refresh)
         await finishStartupIfNeeded(generation: generation)
+        scheduleRefreshDispatch()
     }
 
     private func startInitialRefresh(
@@ -387,30 +423,48 @@ public final class CodexGaugeApplicationCoordinator {
             canOpenCodexApplication: canOpenCodexApplication,
             now: now()
         )
-        statusRuntime.present(frames: presentation.frames)
+        if lastStatusFrames != presentation.frames {
+            lastStatusFrames = presentation.frames
+            statusRuntime.present(frames: presentation.frames)
+        }
         currentMenuInput = presentation.menuInput
         updateCachedMenu()
         discoveredQuotaIDs = presentation.discoveredQuotaIDs
-        settingsRuntime.updateDiscoveredQuotaIDs(discoveredQuotaIDs)
-        settingsRuntime.updateConnectionStatus(connectionStatus)
-        guard publishDeadlines else {
-            return
+        if lastDiscoveredQuotaIDs != discoveredQuotaIDs {
+            lastDiscoveredQuotaIDs = discoveredQuotaIDs
+            settingsRuntime.updateDiscoveredQuotaIDs(discoveredQuotaIDs)
         }
-        deadlineScheduler?.publish(
-            productStates: presentation.menuInput.productStates
-        )
+        let status = connectionStatus
+        if lastConnectionStatus != status {
+            lastConnectionStatus = status
+            settingsRuntime.updateConnectionStatus(status)
+        }
+        guard publishDeadlines else { return }
+        let deadlines = RefreshDeadlineInput(productStates: presentation.menuInput.productStates)
+        if lastDeadlineInput != deadlines {
+            lastDeadlineInput = deadlines
+            deadlineScheduler?.publish(productStates: presentation.menuInput.productStates)
+        }
     }
 
     private func updateCachedMenu() {
-        guard let currentMenuInput else {
-            return
+        guard currentMenuInput != nil else { return }
+        menuRuntime.updateDeferred { [weak self] in
+            self?.makeCurrentMenuModel()
         }
-        menuRuntime.update(
-            menuModelBuilder.build(
-                currentMenuInput,
-                applicationUpdateState: applicationUpdateState
-            )
+    }
+
+    private func makeCurrentMenuModel() -> QuotaDetailsMenuModel? {
+        guard !isShuttingDown, let currentMenuInput else { return nil }
+        let builder = menuModelBuilder ?? .bundled(language: preferences.language)
+        menuModelBuilder = builder
+        let model = menuModelCache.build(
+            currentMenuInput.replacingCurrentDate(now()), using: builder,
+            applicationUpdateState: applicationUpdateState
         )
+        guard lastMenuModel != model else { return nil }
+        lastMenuModel = model
+        return model
     }
 
     private func applySettingsChanges(
@@ -431,24 +485,23 @@ public final class CodexGaugeApplicationCoordinator {
             presentCurrentPublication(publishDeadlines: false)
         }
         if displayChanged {
-            enqueueRefreshOperation { refresh in
-                await refresh.updateDisplayPreference(current.displayPreference)
-            }
+            pendingRefreshDispatch.displayPreference = current.displayPreference
+            scheduleRefreshDispatch()
         }
         if previous.refreshProfile != current.refreshProfile {
-            enqueueRefreshOperation { refresh in
-                await refresh.updateProfile(current.refreshProfile)
-            }
+            pendingRefreshDispatch.profile = current.refreshProfile
+            scheduleRefreshDispatch()
         }
     }
 
     private func updateLanguage(_ language: AppLanguage) {
-        menuModelBuilder = .bundled(language: language)
+        menuModelBuilder = nil
         updateStatusRenderingConfiguration()
         settingsRuntime.updateLanguage(language)
     }
 
     private func updateStatusRenderingConfiguration() {
+        lastStatusFrames = nil
         statusRuntime.updateRenderingConfiguration(
             language: preferences.language,
             statusGaugeAppearance: preferences.statusGaugeAppearance
@@ -488,42 +541,78 @@ public final class CodexGaugeApplicationCoordinator {
         settingsRuntime.updateLaunchAtLoginState(launchAtLoginState)
     }
 
+    private struct RefreshReplacement {
+        let generation: UInt64
+        let activityRevision: UInt64
+    }
+
     private func replaceRefreshCoordinator() {
         refreshGeneration &+= 1
-        let generation = refreshGeneration
-        let activityRevision = activityCommandRevision
+        installedRefreshGeneration = nil
+        // Query signals belong to the old executable; activity and current settings
+        // remain relevant across replacement, including wake while retirement waits.
+        pendingRefreshDispatch.manual = false
+        pendingRefreshDispatch.quotaReset = false
+        activeRefreshDispatch = RefreshDispatch()
+        pendingRefreshReplacement = RefreshReplacement(
+            generation: refreshGeneration,
+            activityRevision: pendingRefreshReplacement?.activityRevision ?? activityCommandRevision
+        )
         publication = .initial
         presentCurrentPublication(publishDeadlines: true)
+        guard !isRefreshReplacementEnqueued else { return }
+        isRefreshReplacementEnqueued = true
         enqueueOperation { coordinator in
-            await coordinator.replaceRefreshCoordinator(
-                generation: generation,
-                activityRevision: activityRevision
-            )
+            await coordinator.drainRefreshReplacements()
+            coordinator.isRefreshReplacementEnqueued = false
         }
     }
 
-    private func replaceRefreshCoordinator(
-        generation: UInt64,
-        activityRevision: UInt64
+    private func drainRefreshReplacements() async {
+        while pendingRefreshReplacement != nil, !isShuttingDown {
+            let previous = retiringRefresh ?? refreshCoordinator
+            retiringRefresh = previous
+            refreshCoordinator = nil
+            let preservesPendingResume = await previous?.isAwaitingSystemResume() ?? false
+            await previous?.stop()
+            if let previous, !isShuttingDown {
+                await waitForRefreshRetirement(previous)
+            }
+            guard !isShuttingDown, let request = pendingRefreshReplacement else { return }
+            pendingRefreshReplacement = nil
+            guard request.generation == refreshGeneration else { continue }
+            // The mailbox remains occupied throughout retirement. Admission reads
+            // the latest URL from preferences only after actual exit is confirmed.
+            let replacement = makeRefreshCoordinator(generation: request.generation)
+            refreshCoordinator = replacement
+            recordInstalledRefresh(generation: request.generation)
+            await startReplacement(
+                replacement,
+                activityRevision: request.activityRevision,
+                preservesPendingResume: preservesPendingResume
+            )
+            await finishStartupIfNeeded(generation: request.generation)
+            scheduleRefreshDispatch()
+        }
+    }
+
+    private func waitForRefreshRetirement(
+        _ previous: any ApplicationRefreshCoordinating
     ) async {
-        guard generation == refreshGeneration, !isShuttingDown else {
-            return
+        await withCheckedContinuation { continuation in
+            retirementContinuation = continuation
+            retirementWaitTask = Task { @MainActor [weak self] in
+                await previous.waitForTermination()
+                self?.finishRefreshRetirement()
+            }
         }
-        let previous = refreshCoordinator
-        refreshCoordinator = nil
-        let preservesPendingResume = await previous?.isAwaitingSystemResume() ?? false
-        await previous?.stop()
-        guard generation == refreshGeneration, !isShuttingDown else {
-            return
-        }
-        let replacement = makeRefreshCoordinator(generation: generation)
-        refreshCoordinator = replacement
-        await startReplacement(
-            replacement,
-            activityRevision: activityRevision,
-            preservesPendingResume: preservesPendingResume
-        )
-        await finishStartupIfNeeded(generation: generation)
+    }
+
+    private func finishRefreshRetirement() {
+        retiringRefresh = nil
+        retirementWaitTask = nil
+        retirementContinuation?.resume()
+        retirementContinuation = nil
     }
 
     private func startReplacement(
@@ -531,12 +620,23 @@ public final class CodexGaugeApplicationCoordinator {
         activityRevision: UInt64,
         preservesPendingResume: Bool
     ) async {
+        if pendingRefreshDispatch.activity != nil || pendingRefreshDispatch.needsSuspend {
+            // Same-turn sleep/wake may still be in the mailbox when replacement
+            // invalidates the old dispatch. Establish suspension on the new owner
+            // before that mailbox schedules its delayed resume; never start a query.
+            pendingRefreshDispatch.needsSuspend = true
+            await drainRefreshDispatch()
+            return
+        }
         guard activityRevision == activityCommandRevision else {
             await refresh.suspend()
             return
         }
         guard !preservesPendingResume else {
+            let generation = refreshGeneration
             await refresh.suspend()
+            guard canDispatchRefresh(generation),
+                  activityRevision == activityCommandRevision else { return }
             await refresh.resumeAfterSystemWake()
             return
         }
@@ -544,6 +644,7 @@ public final class CodexGaugeApplicationCoordinator {
     }
 
     private func systemActivityChanged(_ event: SystemActivityEvent) {
+        guard !isShuttingDown else { return }
         switch event {
         case .sleep:
             statusRuntime.setRotationPaused(true, for: .sleeping)
@@ -586,14 +687,13 @@ public final class CodexGaugeApplicationCoordinator {
         switch command {
         case .suspend:
             deadlineScheduler?.systemDidSleep()
-            enqueueRefreshOperation { refresh in
-                await refresh.suspend()
-            }
+            pendingRefreshDispatch.needsSuspend = true
+            pendingRefreshDispatch.activity = .suspend
+            scheduleRefreshDispatch()
         case .resume:
             deadlineScheduler?.systemDidWake()
-            enqueueRefreshOperation { refresh in
-                await refresh.resumeAfterSystemWake()
-            }
+            pendingRefreshDispatch.activity = .resume
+            scheduleRefreshDispatch()
         }
     }
 
@@ -602,15 +702,12 @@ public final class CodexGaugeApplicationCoordinator {
             return
         }
         lowPowerModeEnabled = enabled
-        guard refreshCoordinator != nil else {
-            return
-        }
-        enqueueRefreshOperation { refresh in
-            await refresh.setLowPowerMode(enabled)
-        }
+        pendingRefreshDispatch.lowPowerMode = enabled
+        scheduleRefreshDispatch()
     }
 
     private func assistiveDisplayChanged(_ event: AssistiveDisplayEvent) {
+        guard !isShuttingDown else { return }
         let state = event.state
         statusRuntime.setRotationPaused(
             state.isVoiceOverEnabled,
@@ -623,29 +720,115 @@ public final class CodexGaugeApplicationCoordinator {
     }
 
     private func usageDeadlineReached(_ reason: UsageDeadlineReason) {
+        guard !isShuttingDown else { return }
         switch reason {
         case .quotaReset:
             presentCurrentPublication(publishDeadlines: false)
-            enqueueRefreshOperation { refresh in
-                await refresh.refreshAfterQuotaReset()
+            if !activeRefreshDispatch.quotaReset {
+                pendingRefreshDispatch.quotaReset = true
+                scheduleRefreshDispatch()
             }
         case .validityExpired:
             presentCurrentPublication(publishDeadlines: false)
         }
     }
 
-    private func enqueueRefreshOperation(
-        _ operation: @escaping @MainActor (
-            any ApplicationRefreshCoordinating
-        ) async -> Void
+    private struct RefreshDispatch {
+        var profile: RefreshProfile?
+        var displayPreference: DisplayPreference?
+        var lowPowerMode: Bool?
+        var activity: ApplicationActivityCommand?
+        var needsSuspend = false
+        var manual = false
+        var quotaReset = false
+
+        var isEmpty: Bool {
+            profile == nil && displayPreference == nil && lowPowerMode == nil
+                && activity == nil && !needsSuspend && !manual && !quotaReset
+        }
+    }
+
+    private func recordInstalledRefresh(
+        generation: UInt64,
+        consumesInitialActivity: Bool = false
     ) {
-        let generation = refreshGeneration
+        installedRefreshGeneration = generation
+        appliedRefreshProfile = preferences.refreshProfile
+        appliedDisplayPreference = preferences.displayPreference
+        appliedLowPowerMode = lowPowerModeEnabled
+        // Initial startup already reconciles activity observed while preferences loaded.
+        // Replacement retains transitions observed during the old coordinator's stop.
+        if consumesInitialActivity {
+            pendingRefreshDispatch.activity = nil
+            pendingRefreshDispatch.needsSuspend = false
+        }
+    }
+
+    private func scheduleRefreshDispatch() {
+        guard !isShuttingDown, !pendingRefreshDispatch.isEmpty,
+              !isRefreshDispatchEnqueued else { return }
+        isRefreshDispatchEnqueued = true
+        // One queue entry preserves ordering with executable/settings operations.
+        // Further refresh events overwrite this bounded mailbox, not another Task.
         enqueueOperation { coordinator in
-            guard generation == coordinator.refreshGeneration,
-                  let refresh = coordinator.refreshCoordinator else {
-                return
+            await coordinator.drainRefreshDispatch()
+            coordinator.isRefreshDispatchEnqueued = false
+            if coordinator.installedRefreshGeneration == coordinator.refreshGeneration {
+                coordinator.scheduleRefreshDispatch()
             }
-            await operation(refresh)
+        }
+    }
+
+    private func drainRefreshDispatch() async {
+        while !pendingRefreshDispatch.isEmpty {
+            let generation = refreshGeneration
+            guard canDispatchRefresh(generation), let refresh = refreshCoordinator else { return }
+            let dispatch = pendingRefreshDispatch
+            pendingRefreshDispatch = RefreshDispatch()
+            activeRefreshDispatch = dispatch
+            await applyRefreshDispatch(dispatch, to: refresh, generation: generation)
+            activeRefreshDispatch = RefreshDispatch()
+        }
+    }
+
+    private func canDispatchRefresh(_ generation: UInt64) -> Bool {
+        !isShuttingDown && generation == refreshGeneration
+            && installedRefreshGeneration == generation
+    }
+
+    private func applyRefreshDispatch(
+        _ dispatch: RefreshDispatch,
+        to refresh: any ApplicationRefreshCoordinating,
+        generation: UInt64
+    ) async {
+        if dispatch.needsSuspend || dispatch.activity == .suspend {
+            await refresh.suspend()
+            guard canDispatchRefresh(generation) else { return }
+        }
+        if let profile = dispatch.profile, profile != appliedRefreshProfile {
+            await refresh.updateProfile(profile)
+            guard canDispatchRefresh(generation) else { return }
+            appliedRefreshProfile = profile
+        }
+        if let enabled = dispatch.lowPowerMode, enabled != appliedLowPowerMode {
+            await refresh.setLowPowerMode(enabled)
+            guard canDispatchRefresh(generation) else { return }
+            appliedLowPowerMode = enabled
+        }
+        if let preference = dispatch.displayPreference, preference != appliedDisplayPreference {
+            await refresh.updateDisplayPreference(preference)
+            guard canDispatchRefresh(generation) else { return }
+            appliedDisplayPreference = preference
+        }
+        // Reset is latched before wake, preserving the delayed resume baseline.
+        if dispatch.manual {
+            await refresh.refreshManually()
+        } else if dispatch.quotaReset {
+            await refresh.refreshAfterQuotaReset()
+        }
+        guard canDispatchRefresh(generation) else { return }
+        if dispatch.activity == .resume, !activityState.isSuspended {
+            await refresh.resumeAfterSystemWake()
         }
     }
 

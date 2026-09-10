@@ -25,8 +25,389 @@ func refreshCoordinatorTests() -> [TestCase] {
         lowPowerCoordinatorSchedulingTest(),
         incompatibleRateLimitResponseStopsPollingTest(),
         refreshPublicationMalformedWithoutPriorTest(),
-        refreshPublicationPartialProductTest()
+        refreshPublicationPartialProductTest(),
+        delayedStopCoalescesPendingRequestTest(),
+        unconfirmedStopWaitsForLateExitTest(),
+        hardBurstCapClosesInflightSessionTest(),
+        cancelledFactoryCannotStartNewSessionTest(),
+        terminationBarrierWaitsForRetirementTest(),
+        retirementLowPowerFloorTest(),
+        retirementProfileFloorTest(),
+        retirementManualRequestFloorExemptionTest(),
+        retirementManualUpgradeFloorExemptionTest(),
+        factoryPolicyFloorRevalidationTest(),
+        factoryManualFloorExemptionTest()
     ]
+}
+
+private func retirementLowPowerFloorTest() -> TestCase {
+    TestCase(name: "pending retirement automatic request honors a newly enabled low-power floor") {
+        try await verifyRetirementPolicyFloor(policy: .lowPower, manualIntent: .none)
+    }
+}
+
+private func retirementProfileFloorTest() -> TestCase {
+    TestCase(name: "pending retirement automatic request honors a newly selected eco floor") {
+        try await verifyRetirementPolicyFloor(policy: .ecoProfile, manualIntent: .none)
+    }
+}
+
+private func retirementManualRequestFloorExemptionTest() -> TestCase {
+    TestCase(name: "pending retirement manual request remains exempt from a changed policy floor") {
+        for policy in RetirementPolicyChange.allCases {
+            try await verifyRetirementPolicyFloor(policy: policy, manualIntent: .queued)
+        }
+    }
+}
+
+private func retirementManualUpgradeFloorExemptionTest() -> TestCase {
+    TestCase(name: "pending retirement automatic request explicitly refreshed by user becomes floor exempt") {
+        for policy in RetirementPolicyChange.allCases {
+            try await verifyRetirementPolicyFloor(policy: policy, manualIntent: .upgrade)
+        }
+    }
+}
+
+private enum RetirementPolicyChange: CaseIterable {
+    case lowPower
+    case ecoProfile
+}
+
+private enum RetirementManualIntent: Equatable {
+    case none
+    case queued
+    case upgrade
+}
+
+private func verifyRetirementPolicyFloor(
+    policy: RetirementPolicyChange,
+    manualIntent: RetirementManualIntent
+) async throws {
+    let exitGate = TestReadGate()
+    let readGate = TestReadGate()
+    let clock = TestRefreshClock()
+    let origin = await clock.now()
+    let provider = TestRefreshSessionProvider(plans: [
+        [.success(coordinatorResult(codexUsed: 10))],
+        [.gated(readGate, coordinatorResult(codexUsed: 10))]
+    ], exitGates: [1: exitGate])
+    let coordinator = makeCoordinator(clock: clock, provider: provider)
+    do {
+        await coordinator.start()
+        try await eventually { await provider.metrics().stopAttempts == 1 }
+        let completed = await coordinator.state
+        try expect(completed.lastRequestCompletedAt == origin, "Expected startup completion at t=0")
+
+        await clock.advance(by: .seconds(20))
+        if manualIntent == .queued {
+            await coordinator.refreshManually()
+        } else {
+            await coordinator.refreshAfterQuotaReset()
+        }
+        let pending = await coordinator.state
+        try expect(pending.inFlightRequest != nil, "Expected one request queued behind retirement at t=20")
+        let beforePolicy = await provider.metrics()
+        try expect(beforePolicy.created == 1, "Expected no second factory before prior exit")
+
+        await clock.advance(by: .seconds(1))
+        switch policy {
+        case .lowPower:
+            await coordinator.setLowPowerMode(true)
+        case .ecoProfile:
+            await coordinator.updateProfile(.eco)
+        }
+        if manualIntent == .upgrade { await coordinator.refreshManually() }
+
+        await clock.advance(by: .seconds(1))
+        await exitGate.release()
+        if manualIntent == .none {
+            // Wait for an observable decision: premature launch in the old
+            // implementation, or a deferred timer in the corrected engine.
+            try await eventually {
+                let metrics = await provider.metrics()
+                let state = await coordinator.state
+                return metrics.starts > 1 || (metrics.stops == 1 && state.scheduledRefresh != nil)
+            }
+            let retired = await provider.metrics()
+            try expect(
+                retired.created == 1 && retired.starts == 1 && retired.reads == 1,
+                "Expected pending automatic request not to create, start or read at t=22 before the new t=60 floor"
+            )
+            let deferred = await coordinator.state
+            try expect(
+                deferred.scheduledRefresh?.deadline == origin.advanced(by: .seconds(60)),
+                "Expected floor anchored to t=0 completion, not retirement or policy-change time"
+            )
+            try await eventually { await clock.pendingSleeperCount() == 1 }
+            await clock.advance(by: .seconds(37))
+            let beforeFloor = await provider.metrics()
+            try expect(beforeFloor.starts == 1 && beforeFloor.reads == 1, "Expected no request before t=60")
+            await clock.advance(by: .seconds(1))
+        }
+        try await expectMetrics(provider, starts: 2, reads: 2, stops: 1)
+        let startedAt = await clock.now()
+        let expectedStartOffset: Duration = manualIntent == .none ? .seconds(60) : .seconds(22)
+        try expect(
+            startedAt == origin.advanced(by: expectedStartOffset),
+            "Expected automatic request at t=60 and an explicit manual request immediately after t=22 exit"
+        )
+        let started = await provider.metrics()
+        try expect(started.maximumLiveSessions == 1, "Expected floor handling to preserve single session ownership")
+        await readGate.release()
+        try await expectMetrics(provider, starts: 2, reads: 2, stops: 2)
+        await coordinator.stop()
+        await coordinator.waitForTermination()
+    } catch {
+        await exitGate.release()
+        await readGate.release()
+        await coordinator.stop()
+        await coordinator.waitForTermination()
+        throw error
+    }
+}
+
+private func factoryPolicyFloorRevalidationTest() -> TestCase {
+    TestCase(name: "pending factory result rechecks changed policy before process start") {
+        for policy in RetirementPolicyChange.allCases {
+            try await verifyFactoryPolicyFloor(policy: policy, manualUpgrade: false)
+        }
+    }
+}
+
+private func factoryManualFloorExemptionTest() -> TestCase {
+    TestCase(name: "pending factory result preserves explicit manual exemption after policy change") {
+        for policy in RetirementPolicyChange.allCases {
+            try await verifyFactoryPolicyFloor(policy: policy, manualUpgrade: true)
+        }
+    }
+}
+
+private func verifyFactoryPolicyFloor(
+    policy: RetirementPolicyChange,
+    manualUpgrade: Bool
+) async throws {
+    let factoryGate = TestReadGate()
+    let readGate = TestReadGate()
+    let clock = TestRefreshClock()
+    let origin = await clock.now()
+    let provider = TestRefreshSessionProvider(
+        plans: [
+            [.success(coordinatorResult(codexUsed: 10))],
+            [.success(coordinatorResult(codexUsed: 10))],
+            [.gated(readGate, coordinatorResult(codexUsed: 10))]
+        ],
+        factoryGates: [2: factoryGate]
+    )
+    let coordinator = makeCoordinator(clock: clock, provider: provider)
+    do {
+        await coordinator.start()
+        try await expectMetrics(provider, starts: 1, reads: 1, stops: 1)
+        await clock.advance(by: .seconds(20))
+        await coordinator.refreshAfterQuotaReset()
+        try await eventually { await provider.metrics().created == 2 }
+        let held = await provider.metrics()
+        try expect(held.starts == 1 && held.reads == 1, "Expected second factory held before process start")
+        await clock.advance(by: .seconds(1))
+        switch policy {
+        case .lowPower: await coordinator.setLowPowerMode(true)
+        case .ecoProfile: await coordinator.updateProfile(.eco)
+        }
+        if manualUpgrade { await coordinator.refreshManually() }
+        await clock.advance(by: .seconds(1))
+        await factoryGate.release()
+        if manualUpgrade {
+            try await expectMetrics(provider, starts: 2, reads: 2, stops: 2)
+            let instant = await clock.now()
+            try expect(instant == origin.advanced(by: .seconds(22)), "Expected explicit manual upgrade admitted at t=22")
+        } else {
+            try await eventually { await provider.metrics().stops == 2 }
+            let retired = await provider.metrics()
+            try expect(
+                retired.starts == 1 && retired.reads == 1,
+                "Expected a stale factory admission to retire without process start or read before t=60"
+            )
+            let deferred = await coordinator.state
+            try expect(deferred.scheduledRefresh?.deadline == origin.advanced(by: .seconds(60)), "Expected current floor after asynchronous factory return")
+            try await eventually { await clock.pendingSleeperCount() == 1 }
+            await clock.advance(by: .seconds(38))
+            try await expectMetrics(provider, starts: 2, reads: 2, stops: 2)
+            await readGate.release()
+            try await expectMetrics(provider, starts: 2, reads: 2, stops: 3)
+        }
+        let finished = await provider.metrics()
+        try expect(finished.maximumLiveSessions == 1, "Expected factory revalidation to preserve lease ownership")
+        await coordinator.stop()
+        await coordinator.waitForTermination()
+    } catch {
+        await factoryGate.release()
+        await readGate.release()
+        await coordinator.stop()
+        await coordinator.waitForTermination()
+        throw error
+    }
+}
+
+private func delayedStopCoalescesPendingRequestTest() -> TestCase {
+    TestCase(name: "one pending request waits until the previous session confirms stop") {
+        let stopGate = TestReadGate()
+        let readGate = TestReadGate()
+        let clock = TestRefreshClock()
+        let provider = TestRefreshSessionProvider(plans: [
+            [.success(coordinatorResult(codexUsed: 10))],
+            [.gated(readGate, coordinatorResult(codexUsed: 10))]
+        ], stopGates: [1: stopGate])
+        let recorder = await MainActor.run { RefreshPublicationRecorder() }
+        let coordinator = makeCoordinator(clock: clock, provider: provider, recorder: recorder)
+        await coordinator.start()
+        try await eventually { await provider.metrics().stopAttempts == 1 }
+        let triggers = Task {
+            await withTaskGroup(of: Void.self) { group in
+                for _ in 0..<100 { group.addTask { await coordinator.refreshManually() } }
+            }
+        }
+        try await eventually { await coordinator.state.inFlightRequest != nil }
+        await drainExecutor()
+        let waiting = await provider.metrics()
+        try expect(waiting.created == 1 && waiting.starts == 1, "Expected no factory or process while stop is pending")
+        await stopGate.release()
+        await triggers.value
+        try await expectMetrics(provider, starts: 2, reads: 2, stops: 1)
+        await readGate.release()
+        try await expectMetrics(provider, starts: 2, reads: 2, stops: 2)
+        let finished = await provider.metrics()
+        try expect(finished.maximumLiveSessions == 1, "Expected process lifetime overlap prevented")
+        let refreshingSequence = await MainActor.run { recorder.values.map(\.isRefreshing) }
+        try expect(
+            refreshingSequence == [true, false, true, false],
+            "Expected delayed cleanup not to republish a newer request's state"
+        )
+        await coordinator.stop()
+    }
+}
+
+private func unconfirmedStopWaitsForLateExitTest() -> TestCase {
+    TestCase(name: "unconfirmed stop retains ownership across restart until a late actual exit") {
+        let exitGate = TestReadGate()
+        let readGate = TestReadGate()
+        let clock = TestRefreshClock()
+        let provider = TestRefreshSessionProvider(plans: [
+            [.success(coordinatorResult(codexUsed: 10))],
+            [.gated(readGate, coordinatorResult(codexUsed: 10))]
+        ], exitGates: [1: exitGate])
+        let coordinator = makeCoordinator(clock: clock, provider: provider)
+        await coordinator.start()
+        try await eventually { await provider.metrics().stopAttempts == 1 }
+        await coordinator.refreshManually()
+        await coordinator.stop()
+        await coordinator.start()
+        for _ in 0..<100 { await coordinator.refreshManually() }
+        let waiting = await provider.metrics()
+        try expect(waiting.created == 1 && waiting.stopAttempts == 1, "Expected one retained owner and one stop attempt")
+        await exitGate.release()
+        try await expectMetrics(provider, starts: 2, reads: 2, stops: 1)
+        await readGate.release()
+        try await expectMetrics(provider, starts: 2, reads: 2, stops: 2)
+        let finished = await provider.metrics()
+        try expect(finished.maximumLiveSessions == 1, "Expected no overlap after late termination")
+        await coordinator.stop()
+    }
+}
+
+private func hardBurstCapClosesInflightSessionTest() -> TestCase {
+    TestCase(name: "burst cap cancels a held read and closes its retained session at 300 seconds") {
+        let gate = TestReadGate()
+        let clock = TestRefreshClock()
+        let provider = TestRefreshSessionProvider(plans: [
+            [.success(coordinatorResult(codexUsed: 10))],
+            [.success(coordinatorResult(codexUsed: 11)), .gated(gate, coordinatorResult(codexUsed: 99))]
+        ])
+        let coordinator = makeCoordinator(clock: clock, provider: provider)
+        await coordinator.start()
+        try await expectMetrics(provider, starts: 1, reads: 1, stops: 1)
+        await coordinator.refreshManually()
+        try await eventually { await coordinator.state.burstDeadline != nil }
+        await clock.advance(by: .seconds(20))
+        try await expectMetrics(provider, starts: 2, reads: 3, stops: 1)
+        try await eventually { await clock.pendingSleeperCount() == 1 }
+        await clock.advance(by: .seconds(280))
+        try await expectMetrics(provider, starts: 2, reads: 3, stops: 2)
+        let expired = await coordinator.state
+        try expect(expired.inFlightRequest == nil && expired.burstDeadline == nil, "Expected cap to cancel request and burst")
+        try expect(expired.scheduledRefresh?.reason == .normal, "Expected cooldown normal timer")
+        await gate.release()
+        await drainExecutor()
+        let publication = await coordinator.publication
+        try expect(coordinatorUsedPercent(publication, product: .codex) == 11, "Expected late cancelled quota ignored")
+        await coordinator.stop()
+    }
+}
+
+private func cancelledFactoryCannotStartNewSessionTest() -> TestCase {
+    TestCase(name: "cancelled factory result is retired before a newer generation acquires a session") {
+        let factoryGate = TestReadGate()
+        let readGate = TestReadGate()
+        let clock = TestRefreshClock()
+        let provider = TestRefreshSessionProvider(plans: [
+            [.success(coordinatorResult(codexUsed: 99))],
+            [.gated(readGate, coordinatorResult(codexUsed: 10))]
+        ], factoryGate: factoryGate)
+        let coordinator = makeCoordinator(clock: clock, provider: provider)
+        await coordinator.start()
+        try await eventually { await provider.metrics().created == 1 }
+        await coordinator.stop()
+        await coordinator.start()
+        await drainExecutor()
+        let waiting = await provider.metrics()
+        try expect(waiting.created == 1 && waiting.starts == 0, "Expected old acquisition to keep the slot")
+        await factoryGate.release()
+        try await expectMetrics(provider, starts: 1, reads: 1, stops: 1)
+        let acquired = await provider.metrics()
+        try expect(acquired.created == 2, "Expected newer acquisition only after retirement")
+        await readGate.release()
+        try await expectMetrics(provider, starts: 1, reads: 1, stops: 2)
+        await coordinator.stop()
+    }
+}
+
+private func terminationBarrierWaitsForRetirementTest() -> TestCase {
+    TestCase(name: "coordinator replacement barrier waits for late exit and cancelled factory retirement") {
+        for delayedFactory in [false, true] {
+            let gate = TestReadGate()
+            let clock = TestRefreshClock()
+            let provider = TestRefreshSessionProvider(
+                plans: [[.success(coordinatorResult(codexUsed: 10))]],
+                exitGates: delayedFactory ? [:] : [1: gate],
+                factoryGate: delayedFactory ? gate : nil
+            )
+            let coordinator = makeCoordinator(clock: clock, provider: provider)
+            await coordinator.start()
+            if delayedFactory {
+                try await eventually { await provider.metrics().created == 1 }
+            } else {
+                try await eventually { await provider.metrics().stopAttempts == 1 }
+            }
+            await coordinator.stop()
+            let completion = TestBarrierCompletion()
+            let barrier = Task {
+                await coordinator.waitForTermination()
+                await completion.finish()
+            }
+            await drainExecutor()
+            let prematurelyFinished = await completion.isFinished
+            try expect(!prematurelyFinished, "Expected replacement barrier to remain pending")
+            await gate.release()
+            await barrier.value
+            let finished = await provider.metrics()
+            try expect(finished.stops == 1, "Expected cancelled acquisition or late exit retired before replacement")
+            try expect(finished.starts == (delayedFactory ? 0 : 1), "Expected cancelled factory never to launch")
+            await coordinator.waitForTermination()
+        }
+    }
+}
+
+private actor TestBarrierCompletion {
+    private(set) var isFinished = false
+    func finish() { isFinished = true }
 }
 
 private func selectedQuotaSampleMappingTest() -> TestCase {
@@ -86,6 +467,11 @@ private func normalPollingSessionLifecycleTest() -> TestCase {
         try expect(publication.isRefreshing == false, "Expected completed publication")
         try expect(coordinatorUsedPercent(publication, product: .codex) == 10, "Expected quota value")
         try expect(recordedPublication == publication, "Expected ordered MainActor publication")
+        let refreshingSequence = await MainActor.run { recorder.values.map(\.isRefreshing) }
+        try expect(
+            refreshingSequence == [true, false, true, false],
+            "Expected each request start and completion delivered once, before its process stops"
+        )
         await coordinator.stop()
         let stoppedState = await coordinator.state
         try expect(stoppedState.scheduledRefresh == nil, "Expected timer state cleanup")
@@ -96,7 +482,7 @@ private func normalPollingSessionLifecycleTest() -> TestCase {
 }
 
 private func burstSessionReuseAndExtensionTest() -> TestCase {
-    TestCase(name: "burst reuses one session and an increase extends its deadline") {
+    TestCase(name: "burst reuses one session and increases preserve the hard deadline") {
         let clock = TestRefreshClock()
         let provider = TestRefreshSessionProvider(plans: [
             [.success(coordinatorResult(codexUsed: 10))],
@@ -120,14 +506,9 @@ private func burstSessionReuseAndExtensionTest() -> TestCase {
 
         await clock.advance(by: .seconds(20))
         try await expectMetrics(provider, starts: 2, reads: 3, stops: 1)
-        try await eventually {
-            guard let deadline = await coordinator.state.burstDeadline else {
-                return false
-            }
-            return deadline > firstDeadline
-        }
+        try await eventually { await coordinator.state.inFlightRequest == nil }
         let extendedDeadline = try await requireBurstDeadline(coordinator)
-        try expect(extendedDeadline > firstDeadline, "Expected a five-minute extension")
+        try expect(extendedDeadline == firstDeadline, "Expected fixed five-minute cap")
 
         await clock.advance(by: .seconds(20))
         try await expectMetrics(provider, starts: 2, reads: 4, stops: 1)
@@ -402,7 +783,7 @@ private func manualAndSuspendCleanupTest() -> TestCase {
 }
 
 private func systemResumeDelayTest() -> TestCase {
-    TestCase(name: "system resume coalesces and performs one wake baseline after five seconds") {
+    TestCase(name: "system resume coalesces after five-second delay and automatic completion floor") {
         let gate = TestReadGate()
         let clock = TestRefreshClock()
         let provider = TestRefreshSessionProvider(plans: [
@@ -428,6 +809,9 @@ private func systemResumeDelayTest() -> TestCase {
         try await expectMetrics(provider, starts: 1, reads: 1, stops: 1)
 
         await clock.advance(by: .seconds(1))
+        await drainExecutor()
+        try await expectMetrics(provider, starts: 1, reads: 1, stops: 1)
+        await clock.advance(by: .seconds(15))
         try await expectMetrics(provider, starts: 2, reads: 2, stops: 1)
         let didClearSystemResume = await coordinator.isAwaitingSystemResume() == false
         try expect(
@@ -467,9 +851,12 @@ private func resetDuringSystemResumeCoalescingTest() -> TestCase {
         try await expectMetrics(provider, starts: 1, reads: 1, stops: 1)
 
         await clock.advance(by: .seconds(1))
+        await drainExecutor()
+        try await expectMetrics(provider, starts: 1, reads: 1, stops: 1)
+        await clock.advance(by: .seconds(15))
         try await expectMetrics(provider, starts: 2, reads: 2, stops: 1)
         let request = await coordinator.state.inFlightRequest
-        try expect(request?.reason == .quotaReset, "Expected reset to win at original deadline")
+        try expect(request?.reason == .quotaReset, "Expected reset to win after resume delay and completion floor")
 
         await gate.release()
         try await expectMetrics(provider, starts: 2, reads: 2, stops: 2)
@@ -541,6 +928,8 @@ private func quotaResetTriggerTest() -> TestCase {
         try await expectMetrics(provider, starts: 1, reads: 1, stops: 1)
         await coordinator.refreshAfterQuotaReset()
         await coordinator.refreshAfterQuotaReset()
+        try await expectMetrics(provider, starts: 1, reads: 1, stops: 1)
+        await clock.advance(by: .seconds(20))
         try await expectMetrics(provider, starts: 2, reads: 2, stops: 1)
         let request = await coordinator.state.inFlightRequest
         try expect(request?.reason == .quotaReset, "Expected quota-reset baseline reason")
@@ -1039,6 +1428,8 @@ private struct TestSessionMetrics: Sendable {
     let starts: Int
     let reads: Int
     let stops: Int
+    let stopAttempts: Int
+    let maximumLiveSessions: Int
 }
 
 private actor TestRefreshSessionProvider: RefreshSessionProviding {
@@ -1048,22 +1439,51 @@ private actor TestRefreshSessionProvider: RefreshSessionProviding {
     private var reads = 0
     private var stops = 0
     private var stoppedIdentifiers = Set<Int>()
+    private var liveIdentifiers = Set<Int>()
+    private var stopAttempts = 0
+    private var maximumLiveSessions = 0
+    private let stopGates: [Int: TestReadGate]
+    private let exitGates: [Int: TestReadGate]
+    private let factoryGate: TestReadGate?
+    private let factoryGates: [Int: TestReadGate]
 
-    init(plans: [[TestReadOutcome]]) {
+    init(plans: [[TestReadOutcome]], stopGates: [Int: TestReadGate] = [:], exitGates: [Int: TestReadGate] = [:], factoryGate: TestReadGate? = nil, factoryGates: [Int: TestReadGate] = [:]) {
         self.plans = plans
+        self.stopGates = stopGates
+        self.exitGates = exitGates
+        self.factoryGate = factoryGate
+        self.factoryGates = factoryGates
     }
 
-    func makeSession() throws -> any RefreshUsageSession {
+    func makeSession() async throws -> any RefreshUsageSession {
         guard plans.isEmpty == false else {
             throw UsageSessionError.launchFailed
         }
         created += 1
+        let identifier = created
         let plan = plans.removeFirst()
-        return TestRefreshUsageSession(identifier: created, outcomes: plan, provider: self)
+        if identifier == 1 { await factoryGate?.wait() }
+        await factoryGates[identifier]?.wait()
+        return TestRefreshUsageSession(identifier: identifier, outcomes: plan, provider: self)
     }
 
-    func recordStart() {
+    func recordStart(identifier: Int) {
         starts += 1
+        liveIdentifiers.insert(identifier)
+        maximumLiveSessions = max(maximumLiveSessions, liveIdentifiers.count)
+    }
+
+    func stopSession(identifier: Int) async -> UsageSessionStopResult {
+        stopAttempts += 1
+        await stopGates[identifier]?.wait()
+        if exitGates[identifier] != nil { return .unconfirmed }
+        recordStop(identifier: identifier)
+        return .exited
+    }
+
+    func waitForTermination(identifier: Int) async {
+        await exitGates[identifier]?.wait()
+        recordStop(identifier: identifier)
     }
 
     func recordRead() {
@@ -1075,10 +1495,11 @@ private actor TestRefreshSessionProvider: RefreshSessionProviding {
             return
         }
         stops += 1
+        liveIdentifiers.remove(identifier)
     }
 
     func metrics() -> TestSessionMetrics {
-        TestSessionMetrics(created: created, starts: starts, reads: reads, stops: stops)
+        TestSessionMetrics(created: created, starts: starts, reads: reads, stops: stops, stopAttempts: stopAttempts, maximumLiveSessions: maximumLiveSessions)
     }
 }
 
@@ -1098,7 +1519,7 @@ private actor TestRefreshUsageSession: RefreshUsageSession {
     }
 
     func start() async throws {
-        await provider.recordStart()
+        await provider.recordStart(identifier: identifier)
     }
 
     func readRateLimits(capturedAt: Date) async throws -> RateLimitReadResult {
@@ -1111,8 +1532,12 @@ private actor TestRefreshUsageSession: RefreshUsageSession {
         return try await resolve(outcome)
     }
 
-    func stop() async {
-        await provider.recordStop(identifier: identifier)
+    func stop() async -> UsageSessionStopResult {
+        await provider.stopSession(identifier: identifier)
+    }
+
+    func waitForTermination() async {
+        await provider.waitForTermination(identifier: identifier)
     }
 
     private func resolve(_ outcome: TestReadOutcome) async throws -> RateLimitReadResult {

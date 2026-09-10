@@ -145,6 +145,11 @@ public struct RenderedStatusFrame {
     public let accessibilityLabel: String
     public let measuredWidth: CGFloat
 
+    func hasSamePresentation(as other: RenderedStatusFrame) -> Bool {
+        image === other.image && accessibilityLabel == other.accessibilityLabel
+            && semanticTitle == other.semanticTitle && measuredWidth == other.measuredWidth
+    }
+
     public init(
         image: NSImage,
         semanticTitle: String,
@@ -160,8 +165,20 @@ public struct RenderedStatusFrame {
     }
 }
 
+public enum StatusAppearanceVariant: Equatable, Sendable {
+    case light
+    case dark
+    case independentOfSystem
+
+    @MainActor
+    static func resolve(_ appearance: NSAppearance?) -> Self {
+        appearance?.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? .dark : .light
+    }
+}
+
 @MainActor
 public protocol StatusFrameRendering: AnyObject {
+    func appearanceVariant(for appearance: NSAppearance?) -> StatusAppearanceVariant
     func render(
         _ frame: DisplayFrame,
         durationMode: StatusDurationMode,
@@ -170,6 +187,9 @@ public protocol StatusFrameRendering: AnyObject {
 }
 
 public extension StatusFrameRendering {
+    func appearanceVariant(for appearance: NSAppearance?) -> StatusAppearanceVariant {
+        .resolve(appearance)
+    }
     func render(
         _ frame: DisplayFrame,
         appearance: NSAppearance?
@@ -185,6 +205,13 @@ public final class StatusFrameRenderer: StatusFrameRendering {
     private let accessibilityFormatter: StatusAccessibilityFormatter
     private let statusGaugeAppearance: StatusGaugeAppearance
     private let cache: StatusGaugeImageCache
+
+    public func appearanceVariant(for appearance: NSAppearance?) -> StatusAppearanceVariant {
+        guard statusGaugeAppearance == .preset(.neutral) else {
+            return .independentOfSystem
+        }
+        return .resolve(appearance)
+    }
 
     public init(
         titleFormatter: DisplayFrameFormatter = DisplayFrameFormatter(),
@@ -227,18 +254,21 @@ public final class StatusFrameRenderer: StatusFrameRendering {
         return makeRenderedFrame(
             frame,
             semanticTitle: semanticTitle,
-            visualLabel: visualLabel
+            visualLabel: visualLabel,
+            appearance: appearance
         )
     }
 
     private func makeRenderedFrame(
         _ frame: DisplayFrame,
         semanticTitle: String,
-        visualLabel: String
+        visualLabel: String,
+        appearance: NSAppearance?
     ) -> RenderedStatusFrame {
         let image = cache.image(
             label: visualLabel,
-            appearance: statusGaugeAppearance
+            appearance: statusGaugeAppearance,
+            systemAppearance: appearance
         )
         return RenderedStatusFrame(
             image: image,

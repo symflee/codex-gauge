@@ -1,4 +1,3 @@
-import Darwin
 import Foundation
 
 public protocol CodexUsageProviding: Sendable {
@@ -114,18 +113,20 @@ public actor UsageSession {
 
     private let executableURL: URL
     private let configuration: UsageSessionConfiguration
+    private let terminationSignal: ProcessLifecycle.Signal
     private let clock = ContinuousClock()
     private let interpreter = AppServerResponseInterpreter()
     private let messageDecoder = JSONRPCMessageDecoder()
 
     private var process: Process?
+    private var processLifecycle: ProcessLifecycle?
     private var inputWriter: FileHandle?
     private var outputReader: FileHandle?
     private var framer = JSONLFramer()
     private var nextRequestIdentifier: Int64 = 1
     private var pendingResponse: PendingResponse?
     private var transportEndTask: Task<Void, Never>?
-    private var failureCleanupTask: Task<Void, Never>?
+    private var cleanupTask: Task<UsageSessionStopResult, Never>?
     private var recordedExitStatus: Int32?
     private var readingRateLimits = false
     private var accountValidated = false
@@ -137,6 +138,17 @@ public actor UsageSession {
     ) {
         self.executableURL = executableURL
         self.configuration = configuration
+        terminationSignal = ProcessLifecycle.sendSignal
+    }
+
+    package init(
+        executableURL: URL,
+        configuration: UsageSessionConfiguration,
+        terminationSignal: @escaping ProcessLifecycle.Signal
+    ) {
+        self.executableURL = executableURL
+        self.configuration = configuration
+        self.terminationSignal = terminationSignal
     }
 
     public func start() async throws {
@@ -147,6 +159,9 @@ public actor UsageSession {
         do {
             try launchProcess()
             try await performHandshake()
+            guard state == .starting else {
+                throw errorForStartState()
+            }
             state = .ready
         } catch {
             let sessionError = mapUnknownError(error)
@@ -172,9 +187,10 @@ public actor UsageSession {
         }
     }
 
-    public func stop() async {
+    @discardableResult
+    public func stop() async -> UsageSessionStopResult {
         guard state != .stopped else {
-            return
+            return .exited
         }
         state = .stopping
         completePendingResponse(throwing: .stopped)
@@ -182,9 +198,23 @@ public actor UsageSession {
         transportEndTask = nil
         closeInput()
         stopReadingOutput()
-        await terminateProcessIfNeeded()
-        closeTransportHandles()
-        state = .stopped
+        let result = await beginCleanup().value
+        if state == .stopped {
+            return .exited
+        }
+        return result
+    }
+
+    /// Waits for an actual termination event, even if the caller is cancelled.
+    /// After an unconfirmed stop this also completes transport cleanup.
+    public func waitForTermination() async {
+        guard let processLifecycle else {
+            return
+        }
+        await processLifecycle.waitForTermination()
+        if ignoresTransportEvents {
+            finishConfirmedCleanup()
+        }
     }
 
     private func errorForStartState() -> UsageSessionError {
@@ -208,6 +238,7 @@ public actor UsageSession {
             try child.run()
         } catch {
             removeCallbacks(child: child, output: output.fileHandleForReading)
+            processLifecycle = nil
             closePipeHandles(input: input, output: output)
             throw UsageSessionError.launchFailed
         }
@@ -247,11 +278,8 @@ public actor UsageSession {
     }
 
     private func installTerminationHandler(on child: Process) {
-        child.terminationHandler = { [weak self] terminatedChild in
-            let status = terminatedChild.terminationStatus
-            Task { [weak self, status] in
-                await self?.receiveProcessTermination(status: status)
-            }
+        processLifecycle = ProcessLifecycle.observe(child, signal: terminationSignal) { status in
+            await self.receiveProcessTermination(status: status)
         }
     }
 
@@ -557,6 +585,9 @@ public actor UsageSession {
             return
         }
         recordedExitStatus = status
+        if ignoresTransportEvents {
+            finishConfirmedCleanup()
+        }
     }
 
     private func scheduleTransportEndClassification(after delay: Duration) {
@@ -679,27 +710,33 @@ public actor UsageSession {
         transportEndTask = nil
         closeInput()
         stopReadingOutput()
-        terminateImmediately()
-        scheduleFailureCleanup()
+        _ = beginCleanup()
     }
 
-    private func scheduleFailureCleanup() {
-        guard failureCleanupTask == nil else {
-            return
+    private func beginCleanup() -> Task<UsageSessionStopResult, Never> {
+        if let cleanupTask {
+            return cleanupTask
         }
-        failureCleanupTask = Task {
-            await completeFailureCleanup()
+        let lifecycle = processLifecycle
+        let gracePeriod = configuration.stopGracePeriod
+        let task = Task {
+            let result = await lifecycle?.stop(gracePeriod: gracePeriod) ?? .exited
+            if result == .exited {
+                finishConfirmedCleanup()
+            }
+            return result
         }
+        cleanupTask = task
+        return task
     }
 
-    private func completeFailureCleanup() async {
-        await terminateProcessIfNeeded()
-        guard case .failed = state else {
-            failureCleanupTask = nil
-            return
-        }
+    private func finishConfirmedCleanup() {
         closeTransportHandles()
-        failureCleanupTask = nil
+        processLifecycle = nil
+        cleanupTask = nil
+        if state == .stopping {
+            state = .stopped
+        }
     }
 
     private func mapInterpretationError(
@@ -768,48 +805,12 @@ public actor UsageSession {
         outputReader?.readabilityHandler = nil
     }
 
-    private func terminateImmediately() {
-        guard let process, process.isRunning else {
-            return
-        }
-        process.terminate()
-    }
-
-    private func terminateProcessIfNeeded() async {
-        guard let process, process.isRunning else {
-            return
-        }
-        process.terminate()
-        await waitForProcessExit(for: configuration.stopGracePeriod)
-        guard process.isRunning else {
-            return
-        }
-        Darwin.kill(process.processIdentifier, SIGKILL)
-        await waitForProcessExit(for: configuration.stopGracePeriod)
-    }
-
-    private func waitForProcessExit(for duration: Duration) async {
-        let deadline = clock.now.advanced(by: duration)
-        while process?.isRunning == true, clock.now < deadline {
-            await cancellationIndependentPause()
-        }
-    }
-
-    private func cancellationIndependentPause() async {
-        let pause = Task.detached {
-            try? await ContinuousClock().sleep(for: .milliseconds(5))
-        }
-        await pause.value
-    }
-
     private func closeTransportHandles() {
-        if let process, let outputReader {
-            removeCallbacks(child: process, output: outputReader)
-        }
+        closeInput()
+        stopReadingOutput()
         try? outputReader?.close()
         process = nil
         outputReader = nil
-        recordedExitStatus = nil
     }
 }
 

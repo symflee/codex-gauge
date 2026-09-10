@@ -67,6 +67,15 @@ public final class StatusItemRuntimeAdapter: ApplicationStatusRuntime {
 @MainActor
 public protocol ApplicationMenuRuntime: AnyObject {
     func update(_ model: QuotaDetailsMenuModel)
+    func updateDeferred(_ modelProvider: @escaping @MainActor () -> QuotaDetailsMenuModel?)
+}
+
+public extension ApplicationMenuRuntime {
+    // Eager compatibility for runtimes without a native menu lifecycle. Production
+    // adapters must forward the provider without evaluating it while the menu is closed.
+    func updateDeferred(_ modelProvider: @escaping @MainActor () -> QuotaDetailsMenuModel?) {
+        if let model = modelProvider() { update(model) }
+    }
 }
 
 @MainActor
@@ -79,6 +88,10 @@ public final class StatusMenuRuntimeAdapter: ApplicationMenuRuntime {
 
     public func update(_ model: QuotaDetailsMenuModel) {
         controller.update(model)
+    }
+
+    public func updateDeferred(_ modelProvider: @escaping @MainActor () -> QuotaDetailsMenuModel?) {
+        controller.updateDeferred(modelProvider)
     }
 }
 
@@ -237,6 +250,12 @@ public protocol ApplicationRefreshCoordinating: Sendable {
     func resumeAfterSystemWake() async
     func isAwaitingSystemResume() async -> Bool
     func stop() async
+    func waitForTermination() async
+}
+
+public extension ApplicationRefreshCoordinating {
+    /// Only lightweight runtimes/fakes that own no child process may use this default.
+    func waitForTermination() async {}
 }
 
 public struct RefreshCoordinatorRuntimeAdapter: ApplicationRefreshCoordinating {
@@ -284,6 +303,10 @@ public struct RefreshCoordinatorRuntimeAdapter: ApplicationRefreshCoordinating {
 
     public func stop() async {
         await coordinator.stop()
+    }
+
+    public func waitForTermination() async {
+        await coordinator.waitForTermination()
     }
 }
 

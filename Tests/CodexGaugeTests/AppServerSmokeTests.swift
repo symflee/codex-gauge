@@ -10,6 +10,8 @@ func appServerSmokeTests() -> [TestCase] {
         appServerSmokeStopsAfterSessionFailureTest(),
         appServerSmokeStopsCancelledOperationTest(),
         appServerSmokeAwaitsSharedCancellationCleanupTest(),
+        appServerSmokeReportsUnconfirmedCleanupTest(),
+        appServerSmokeReportsUnconfirmedCancellationCleanupTest(),
         appServerSmokeMapsLocationFailuresTest(),
         appServerSmokeMapsTypedSessionFailuresTest(),
         appServerSmokeOutputNeverIncludesUnderlyingErrorTest()
@@ -207,6 +209,36 @@ private func appServerSmokeMapsLocationFailuresTest() -> TestCase {
     }
 }
 
+private func appServerSmokeReportsUnconfirmedCleanupTest() -> TestCase {
+    TestCase(name: "App Server smoke cannot report success without confirmed cleanup") {
+        let session = SmokeSessionFake(
+            result: smokeReadResult(codex: .available, spark: .available),
+            stopResult: .unconfirmed
+        )
+        let result = await makeSmokeRunner(session: session).run()
+        try expect(result == .failure(.cleanupUnconfirmed), "Expected explicit cleanup failure")
+        try expect(result.exitCode == 5, "Expected process failure exit code")
+        try expect(
+            AppServerSmokeOutputFormatter().line(for: result)
+                == "codex-gauge-smoke: failed reason=cleanup_unconfirmed",
+            "Expected sanitized output that does not claim cleanup succeeded"
+        )
+        try await expectSmokeSessionStoppedOnce(session)
+    }
+}
+
+private func appServerSmokeReportsUnconfirmedCancellationCleanupTest() -> TestCase {
+    TestCase(name: "App Server smoke cancellation cannot hide unconfirmed cleanup") {
+        let session = SmokeSessionFake(waitForStop: true, stopResult: .unconfirmed)
+        let operation = Task { await makeSmokeRunner(session: session).run() }
+        await session.waitUntilReadStarts()
+        operation.cancel()
+        let result = await operation.value
+        try expect(result == .failure(.cleanupUnconfirmed), "Cleanup failure takes precedence")
+        try await expectSmokeSessionStoppedOnce(session)
+    }
+}
+
 private func appServerSmokeOutputNeverIncludesUnderlyingErrorTest() -> TestCase {
     TestCase(name: "App Server smoke does not render underlying error content") {
         let secret = "synthetic-token-and-path-marker"
@@ -300,6 +332,7 @@ private actor SmokeSessionFake: AppServerSmokeSession {
     private let error: (any Error & Sendable)?
     private let waitsForStop: Bool
     private let delaysStopCompletion: Bool
+    private let stopResult: UsageSessionStopResult
     private var readStarted = false
     private var readWaiters: [CheckedContinuation<Void, Never>] = []
     private var stopWaiter: CheckedContinuation<RateLimitReadResult, any Error>?
@@ -308,14 +341,16 @@ private actor SmokeSessionFake: AppServerSmokeSession {
     private var stopCompletionWaiter: CheckedContinuation<Void, Never>?
     private(set) var stopCount = 0
 
-    init(result: RateLimitReadResult) {
+    init(result: RateLimitReadResult, stopResult: UsageSessionStopResult = .exited) {
         self.result = result
+        self.stopResult = stopResult
         error = nil
         waitsForStop = false
         delaysStopCompletion = false
     }
 
     init(error: any Error & Sendable) {
+        stopResult = .exited
         result = nil
         self.error = error
         waitsForStop = false
@@ -324,8 +359,10 @@ private actor SmokeSessionFake: AppServerSmokeSession {
 
     init(
         waitForStop: Bool,
-        delayStopCompletion: Bool = false
+        delayStopCompletion: Bool = false,
+        stopResult: UsageSessionStopResult = .exited
     ) {
+        self.stopResult = stopResult
         result = nil
         error = nil
         waitsForStop = waitForStop
@@ -350,7 +387,7 @@ private actor SmokeSessionFake: AppServerSmokeSession {
         return result
     }
 
-    func stop() async {
+    func stop() async -> UsageSessionStopResult {
         stopCount += 1
         stopStarted = true
         stopStartWaiters.forEach { $0.resume() }
@@ -358,9 +395,10 @@ private actor SmokeSessionFake: AppServerSmokeSession {
         stopWaiter?.resume(throwing: UsageSessionError.stopped)
         stopWaiter = nil
         guard delaysStopCompletion else {
-            return
+            return stopResult
         }
         await withCheckedContinuation { stopCompletionWaiter = $0 }
+        return stopResult
     }
 
     func waitUntilReadStarts() async {
