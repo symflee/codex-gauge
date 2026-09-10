@@ -24,6 +24,10 @@ let package = Package(
         .executable(
             name: "codex-gauge-smoke",
             targets: ["CodexGaugeSmokeExecutable"]
+        ),
+        .executable(
+            name: "codex-gauge-performance",
+            targets: ["CodexGaugePerformanceExecutable"]
         )
     ],
     dependencies: [
@@ -96,6 +100,17 @@ let package = Package(
         .executableTarget(
             name: "CodexGaugeSmokeExecutable",
             dependencies: ["CodexGaugeProtocol"]
+        ),
+        .executableTarget(
+            name: "CodexGaugePerformanceExecutable",
+            dependencies: [
+                "CodexGaugeCore",
+                "CodexGaugeProtocol",
+                "CodexGaugeRefresh",
+                "CodexGaugeSettings",
+                "CodexGaugeAppKit"
+            ],
+            exclude: ["README.md"]
         )
     ],
     swiftLanguageModes: [.v6]
