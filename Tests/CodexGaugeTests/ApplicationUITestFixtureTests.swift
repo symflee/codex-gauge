@@ -137,8 +137,7 @@ private func applicationUITestFixtureForcesCodexDisplayInMemoryScenario() async 
     )
     let stored = AppPreferences(
         displayPreference: DisplayPreference(
-            productMode: .spark,
-            quotaSelection: .automatic
+            quotaSelection: .manual(QuotaSelectionID(product: .codex, rawDurationMinutes: 10_080))
         ),
         refreshProfile: .eco,
         launchAtLoginIntent: true,

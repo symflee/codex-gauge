@@ -207,10 +207,13 @@ public final class StatusGaugeImageCache {
         palette: StatusGaugePalette
     ) {
         drawFill(in: bounds, color: palette.fillColor)
+        NSGraphicsContext.saveGraphicsState()
+        NSBezierPath(roundedRect: bounds, xRadius: 5, yRadius: 5).addClip()
+        drawLabel(label, in: bounds, metrics: metrics)
+        NSGraphicsContext.restoreGraphicsState()
         if let borderColor = palette.borderColor {
             drawBorder(in: bounds, color: borderColor)
         }
-        drawLabel(label, in: bounds, metrics: metrics)
     }
 
     private static func drawFill(in bounds: NSRect, color: StatusGaugeColor) {
@@ -220,13 +223,13 @@ public final class StatusGaugeImageCache {
     }
 
     private static func drawBorder(in bounds: NSRect, color: StatusGaugeColor) {
-        let borderBounds = bounds.insetBy(dx: 0.25, dy: 0.25)
+        let borderBounds = bounds.insetBy(dx: 0.75, dy: 0.75)
         let path = NSBezierPath(
             roundedRect: borderBounds,
-            xRadius: 4.75,
-            yRadius: 4.75
+            xRadius: 4.25,
+            yRadius: 4.25
         )
-        path.lineWidth = 0.5
+        path.lineWidth = 1.5
         color.appKitColor.setStroke()
         path.stroke()
     }
@@ -246,16 +249,20 @@ public final class StatusGaugeImageCache {
 
 @MainActor
 private struct StatusGaugeImageMetrics {
-    static let height: CGFloat = 18
-    static let horizontalPadding: CGFloat = 7
+    static let height: CGFloat = 20
+    static let horizontalPadding: CGFloat = 4
+
+    private static let fixedWidth: CGFloat = {
+        let width = ("00%" as NSString).size(withAttributes: [.font: StatusGaugeFont.font]).width
+        return ceil(width) + horizontalPadding * 2
+    }()
 
     let labelSize: NSSize
     let textAttributes: [NSAttributedString.Key: Any]
 
     init(label: String, textColor: StatusGaugeColor) {
-        let font = NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .medium)
         textAttributes = [
-            .font: font,
+            .font: StatusGaugeFont.font,
             .foregroundColor: textColor.appKitColor
         ]
         labelSize = (label as NSString).size(withAttributes: textAttributes)
@@ -263,7 +270,7 @@ private struct StatusGaugeImageMetrics {
 
     var imageSize: NSSize {
         NSSize(
-            width: ceil(labelSize.width) + Self.horizontalPadding * 2,
+            width: Self.fixedWidth,
             height: Self.height
         )
     }
@@ -295,7 +302,9 @@ private struct StatusGaugePalette: Hashable {
         }
         let isDark = systemAppearance?.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
         self.init(
-            borderColor: nil,
+            borderColor: isDark
+                ? StatusGaugeColor(red: 0x77, green: 0x81, blue: 0x91)
+                : StatusGaugePreset.neutral.borderColor,
             fillColor: isDark
                 ? StatusGaugeColor(red: 0x42, green: 0x4B, blue: 0x5B)
                 : StatusGaugePreset.neutral.fillColor,

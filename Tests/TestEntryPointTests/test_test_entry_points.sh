@@ -136,10 +136,24 @@ expect_failure "$fast_script" --suite unsupported
 expect_failure "$fast_script" --filter ''
 
 : > "$command_log"
-run_with_recorder "$fast_script" >/dev/null
-assert_contains "$command_log" $'COMMAND\tScripts/run-exhaustive-tests.sh'
-assert_not_contains "$command_log" $'\t--suite\t'
+expect_failure run_with_recorder "$fast_script"
+expect_failure run_with_recorder "$fast_script" --verbose
+expect_failure run_with_recorder "$fast_script" --dry-run
+expect_failure run_with_recorder "$fast_script" \
+    --developer-dir "$developer_directory"
+test ! -s "$command_log" \
+    || fail "missing fast test selection executed a command"
+
+: > "$command_log"
+run_with_recorder "$fast_script" --suite full >/dev/null
+assert_contains "$command_log" $'COMMAND\tScripts/run-exhaustive-tests.sh\t--suite\tfull'
 assert_not_contains "$command_log" $'\t--verbose'
+assert_count "$command_log" 2 'COMMAND'
+
+: > "$command_log"
+run_with_recorder "$fast_script" --filter Decoder >/dev/null
+assert_contains "$command_log" $'COMMAND\tScripts/run-exhaustive-tests.sh\t--filter\tDecoder'
+assert_not_contains "$command_log" $'\t--suite\t'
 assert_count "$command_log" 2 'COMMAND'
 
 : > "$command_log"
@@ -240,6 +254,7 @@ release_result="$(
     || fail "release preflight success output was not concise"
 assert_contains "$command_log" 'test-release-contracts.sh'
 assert_contains "$command_log" 'CodexGaugeUITests'
+assert_contains "$command_log" $'UI_TEST_EFFECTS\t1'
 assert_contains "$command_log" 'build-release-dmg.sh'
 assert_contains "$command_log" '--allow-local-release-effects'
 assert_count "$command_log" 1 'build-release-dmg.sh'

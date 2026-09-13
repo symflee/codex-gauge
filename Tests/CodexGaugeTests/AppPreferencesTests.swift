@@ -5,6 +5,7 @@ import Foundation
 
 func appPreferencesTests() -> [TestCase] {
     [
+        singleQuotaLegacyMigrationTest(),
         preferredAppLanguageResolverTest(),
         statusGaugeAppearanceDomainTest(),
         slimCapsulePreferencesMigrationTest(),
@@ -29,6 +30,31 @@ func appPreferencesTests() -> [TestCase] {
     ]
 }
 
+private func singleQuotaLegacyMigrationTest() -> TestCase {
+    TestCase(name: "single quota legacy Spark settings migrate to automatic Codex without losing preferences") {
+        let store = try PreferencesTestStore()
+        defer { store.cleanUp() }
+        let repository = try store.repository()
+        let payload: [String: Any] = [
+            "version": 4,
+            "display": ["productMode": "spark", "selection": ["mode": "manual", "items": [
+                ["product": "spark", "rawDurationMinutes": 300]
+            ]]],
+            "language": "ko", "refreshProfile": "manual", "launchAtLoginIntent": true,
+            "hasCompletedFirstLaunch": true,
+            "statusGaugeAppearance": ["mode": "preset", "preset": "blue"]
+        ]
+        store.userDefaults.set(try preferencesJSON(payload), forKey: AppPreferencesRepository.storageKey)
+        let loaded = await repository.load()
+        try expect(loaded.displayPreference == .default, "Expected retired Spark selection to become automatic Codex")
+        try expect(loaded.language == .korean && loaded.refreshProfile == .manual, "Expected language and refresh preserved")
+        try expect(loaded.launchAtLoginIntent && loaded.hasCompletedFirstLaunch, "Expected launch preferences preserved")
+        try expect(loaded.statusGaugeAppearance == .preset(.blue), "Expected explicit v4 color preserved")
+        let encoded = try preferencesJSONObject(from: storedPreferencesData(in: store.userDefaults))
+        try expect(encoded["version"] as? Int == 5, "Expected v5 migration persisted")
+    }
+}
+
 private func slimCapsulePreferencesMigrationTest() -> TestCase {
     TestCase(name: "slim capsule gauge migration adopts neutral once and preserves custom colors") {
         let store = try PreferencesTestStore()
@@ -48,7 +74,7 @@ private func slimCapsulePreferencesMigrationTest() -> TestCase {
             let loaded = await repository.load()
             let encoded = try preferencesJSONObject(from: storedPreferencesData(in: store.userDefaults))
             let appearance = encoded["statusGaugeAppearance"] as? [String: String]
-            try expect(encoded["version"] as? Int == 4, "Expected one-time v4 migration")
+            try expect(encoded["version"] as? Int == 5, "Expected one-time v5 migration")
             try expect(loaded.language == .korean && loaded.hasCompletedFirstLaunch, "Expected other settings preserved")
             if expected == "custom" {
                 try expect(appearance == savedAppearance, "Expected exact custom colors preserved")
@@ -66,7 +92,7 @@ private func slimCapsulePreferencesMigrationTest() -> TestCase {
 private func statusGaugeAppearanceDomainTest() -> TestCase {
     TestCase(name: "status gauge presets expose stable colors and custom identity") {
         let expected: [(StatusGaugePreset, String, String)] = [
-            (.neutral, "#D8DEE6", "#D8DEE6"),
+            (.neutral, "#A5ACB6", "#D8DEE6"),
             (.blue, "#004C99", "#0A84FF"),
             (.graphite, "#343A40", "#7B8490"),
             (.green, "#147A3D", "#30D158"),
@@ -138,7 +164,7 @@ private func appPreferencesDefaultsTest() -> TestCase {
         try expect(preferences.displayPreference == .default, "Expected default display")
         try expect(preferences.statusGaugeAppearance == .default, "Expected neutral gauge")
         try expect(
-            preferences.statusGaugeAppearance.borderColor.hexString == "#D8DEE6",
+            preferences.statusGaugeAppearance.borderColor.hexString == "#A5ACB6",
             "Expected neutral default border"
         )
         try expect(
@@ -153,7 +179,7 @@ private func appPreferencesDefaultsTest() -> TestCase {
         let persisted = try preferencesJSONObject(
             from: storedPreferencesData(in: store.userDefaults)
         )
-        try expect(persisted["version"] as? Int == 4, "Expected initial v4 persistence")
+        try expect(persisted["version"] as? Int == 5, "Expected initial v5 persistence")
         try expect(persisted["language"] as? String == "ko", "Expected concrete language")
         try expect(
             persisted["statusGaugeAppearance"] as? [String: String]
@@ -228,53 +254,28 @@ private func appPreferencesMutedCustomPreservationTest() -> TestCase {
 }
 
 private func appPreferencesRoundTripTest() -> TestCase {
-    TestCase(name: "preferences round trip every product and selection mode") {
+    TestCase(name: "preferences round trip automatic and every single quota selection") {
         let store = try PreferencesTestStore()
         defer { store.cleanUp() }
         let repository = try store.repository()
-        let identifiers = Set([
-            QuotaSelectionID(product: .codex, rawDurationMinutes: nil),
-            QuotaSelectionID(product: .codex, rawDurationMinutes: 300),
-            QuotaSelectionID(product: .spark, rawDurationMinutes: 10_080)
-        ])
-
-        for productMode in DisplayProductMode.allCases {
+        let selections: [DisplayQuotaSelection] = [.automatic] + [nil, 300, 10_080].map {
+            .manual(QuotaSelectionID(product: .codex, rawDurationMinutes: $0))
+        }
+        for selection in selections {
             for refreshProfile in RefreshProfile.allCases {
                 for language in AppLanguage.allCases {
-                    let automatic = AppPreferences(
-                        displayPreference: DisplayPreference(
-                            productMode: productMode,
-                            quotaSelection: .automatic
-                        ),
-                        refreshProfile: refreshProfile,
-                        launchAtLoginIntent: false,
-                        selectedExecutableURL: nil,
-                        hasCompletedFirstLaunch: true,
-                        language: language,
-                        statusGaugeAppearance: .preset(.green)
-                    )
-                    try await repository.save(automatic)
-                    let loadedAutomatic = await repository.load()
-                    try expect(loadedAutomatic == automatic, "Expected automatic round trip")
-
-                    let manual = AppPreferences(
-                        displayPreference: DisplayPreference(
-                            productMode: productMode,
-                            quotaSelection: .manual(identifiers)
-                        ),
+                    let preferences = AppPreferences(
+                        displayPreference: DisplayPreference(quotaSelection: selection),
                         refreshProfile: refreshProfile,
                         launchAtLoginIntent: true,
                         selectedExecutableURL: syntheticExecutableURL,
                         hasCompletedFirstLaunch: true,
                         language: language,
-                        statusGaugeAppearance: .custom(
-                            borderColor: StatusGaugePreset.blue.borderColor,
-                            fillColor: StatusGaugePreset.blue.fillColor
-                        )
+                        statusGaugeAppearance: .preset(.green)
                     )
-                    try await repository.save(manual)
-                    let loadedManual = await repository.load()
-                    try expect(loadedManual == manual, "Expected manual round trip")
+                    try await repository.save(preferences)
+                    let loaded = await repository.load()
+                    try expect(loaded == preferences, "Expected exact settings round trip")
                 }
             }
         }
@@ -305,7 +306,7 @@ private func appPreferencesVersionTwoMigrationTest() -> TestCase {
         try expect(preferences.language == .english, "Expected stored v2 language")
         try expect(preferences.statusGaugeAppearance == .default, "Expected blue migration")
         try expect(
-            preferences.statusGaugeAppearance.borderColor.hexString == "#D8DEE6",
+            preferences.statusGaugeAppearance.borderColor.hexString == "#A5ACB6",
             "Expected vivid migrated border"
         )
         try expect(
@@ -315,61 +316,34 @@ private func appPreferencesVersionTwoMigrationTest() -> TestCase {
         let migrated = try preferencesJSONObject(
             from: storedPreferencesData(in: store.userDefaults)
         )
-        try expect(migrated["version"] as? Int == 4, "Expected automatic v4 migration")
+        try expect(migrated["version"] as? Int == 5, "Expected automatic v5 migration")
     }
 }
 
 private func appPreferencesDeterministicEncodingTest() -> TestCase {
-    TestCase(name: "manual preference encoding is deterministic") {
+    TestCase(name: "manual preference encoding is deterministic and singular") {
         let store = try PreferencesTestStore()
         defer { store.cleanUp() }
-        let repository = try store.repository(defaultLanguage: .korean)
-        let firstIdentifier = QuotaSelectionID(
-            product: .spark,
-            rawDurationMinutes: nil
-        )
-        let secondIdentifier = QuotaSelectionID(
-            product: .codex,
-            rawDurationMinutes: 10_080
-        )
-        let thirdIdentifier = QuotaSelectionID(
-            product: .codex,
-            rawDurationMinutes: 300
-        )
-        let first = manualPreferences(
-            Set([firstIdentifier, secondIdentifier, thirdIdentifier])
-        )
-        let second = manualPreferences(
-            Set([thirdIdentifier, firstIdentifier, secondIdentifier])
-        )
-
-        try await repository.save(first)
+        let repository = try store.repository()
+        let identifier = QuotaSelectionID(product: .codex, rawDurationMinutes: nil)
+        let preferences = manualPreferences(identifier)
+        try await repository.save(preferences)
         let firstData = try storedPreferencesData(in: store.userDefaults)
-        try await repository.save(second)
+        let loaded = await repository.load()
+        try await repository.save(loaded)
         let secondData = try storedPreferencesData(in: store.userDefaults)
-
-        try expect(firstData == secondData, "Expected stable bytes for an unordered set")
+        try expect(firstData == secondData, "Expected stable bytes across round trip")
         let object = try preferencesJSONObject(from: firstData)
         guard let display = object["display"] as? [String: Any],
               let selection = display["selection"] as? [String: Any],
-              let items = selection["items"] as? [[String: Any]],
-              items.count == 3 else {
-            throw TestFailure(description: "Expected canonical manual items")
+              let item = selection["item"] as? [String: Any] else {
+            throw TestFailure(description: "Expected singular persisted selection")
         }
-        try expect(items[0]["product"] as? String == "codex", "Expected Codex first")
-        try expect(items[0]["rawDurationMinutes"] as? Int == 300, "Expected shortest first")
-        try expect(items[1]["product"] as? String == "codex", "Expected grouped product")
-        try expect(items[1]["rawDurationMinutes"] as? Int == 10_080, "Expected duration order")
-        try expect(items[2]["product"] as? String == "spark", "Expected Spark last")
-        try expect(items[2]["rawDurationMinutes"] is NSNull, "Expected unknown duration last")
-        try expect(
-            object["statusGaugeAppearance"] as? [String: String] == [
-                "mode": "custom",
-                "borderColor": "#010203",
-                "fillColor": "#AABBCC"
-            ],
-            "Expected canonical uppercase custom colors"
-        )
+        try expect(display["productMode"] == nil && selection["items"] == nil, "Expected retired multi-product fields omitted")
+        try expect(item["product"] as? String == "codex" && item["rawDurationMinutes"] is NSNull, "Expected explicit unknown-duration selection")
+        try expect(object["statusGaugeAppearance"] as? [String: String] == [
+            "mode": "custom", "borderColor": "#010203", "fillColor": "#AABBCC"
+        ], "Expected canonical custom colors")
     }
 }
 
@@ -472,13 +446,10 @@ private func appPreferencesFieldRecoveryTest() -> TestCase {
         )
 
         let preferences = await repository.load()
-        let expectedIdentifiers = Set([
-            QuotaSelectionID(product: .codex, rawDurationMinutes: 300)
-        ])
+        let expectedIdentifier = QuotaSelectionID(product: .codex, rawDurationMinutes: 300)
 
-        try expect(preferences.displayPreference.productMode == .codex, "Expected product fallback")
         try expect(
-            preferences.displayPreference.quotaSelection == .manual(expectedIdentifiers),
+            preferences.displayPreference.quotaSelection == .manual(expectedIdentifier),
             "Expected valid manual item preservation"
         )
         try expect(preferences.refreshProfile == .balanced, "Expected refresh fallback")
@@ -519,10 +490,6 @@ private func appPreferencesFieldRecoveryTest() -> TestCase {
         try expect(
             unknownSelection.displayPreference.quotaSelection == .automatic,
             "Expected unknown selection fallback"
-        )
-        try expect(
-            unknownSelection.displayPreference.productMode == .spark,
-            "Expected valid sibling field preservation"
         )
         try expect(
             unknownSelection.refreshProfile == .manual,
@@ -580,7 +547,6 @@ private func appPreferencesVersionOneMigrationTest() -> TestCase {
         let preferences = await repository.load()
 
         try expect(preferences.language == .korean, "Expected injected migration language")
-        try expect(preferences.displayPreference.productMode == .spark, "Expected display sibling")
         try expect(preferences.refreshProfile == .fast, "Expected refresh sibling")
         try expect(preferences.launchAtLoginIntent, "Expected login sibling")
         try expect(preferences.hasCompletedFirstLaunch, "Expected first-launch sibling")
@@ -589,7 +555,7 @@ private func appPreferencesVersionOneMigrationTest() -> TestCase {
             from: storedPreferencesData(in: store.userDefaults)
         )
         try expect(
-            automaticallyMigrated["version"] as? Int == 4,
+            automaticallyMigrated["version"] as? Int == 5,
             "Expected version one migrated during load"
         )
         try expect(
@@ -601,7 +567,7 @@ private func appPreferencesVersionOneMigrationTest() -> TestCase {
         let migrated = try preferencesJSONObject(
             from: storedPreferencesData(in: store.userDefaults)
         )
-        try expect(migrated["version"] as? Int == 4, "Expected version four save")
+        try expect(migrated["version"] as? Int == 5, "Expected version five save")
         try expect(migrated["language"] as? String == "ko", "Expected language persisted")
         try expect(preferences.statusGaugeAppearance == .default, "Expected blue migration")
         try expect(
@@ -635,14 +601,10 @@ private func appPreferencesVersionZeroMigrationTest() -> TestCase {
         )
 
         let preferences = await repository.load()
-        let expectedIdentifiers = Set([
-            QuotaSelectionID(product: .spark, rawDurationMinutes: 10_080),
-            QuotaSelectionID(product: .codex, rawDurationMinutes: nil)
-        ])
+        let expectedIdentifier = QuotaSelectionID(product: .codex, rawDurationMinutes: nil)
 
-        try expect(preferences.displayPreference.productMode == .both, "Expected migrated products")
         try expect(
-            preferences.displayPreference.quotaSelection == .manual(expectedIdentifiers),
+            preferences.displayPreference.quotaSelection == .manual(expectedIdentifier),
             "Expected migrated manual selection"
         )
         try expect(preferences.refreshProfile == .eco, "Expected migrated refresh profile")
@@ -655,7 +617,7 @@ private func appPreferencesVersionZeroMigrationTest() -> TestCase {
             from: storedPreferencesData(in: store.userDefaults)
         )
         try expect(
-            automaticallyMigrated["version"] as? Int == 4,
+            automaticallyMigrated["version"] as? Int == 5,
             "Expected version zero migrated during load"
         )
         try expect(
@@ -666,7 +628,7 @@ private func appPreferencesVersionZeroMigrationTest() -> TestCase {
         try await repository.save(preferences)
         let migratedData = try storedPreferencesData(in: store.userDefaults)
         let migratedObject = try preferencesJSONObject(from: migratedData)
-        try expect(migratedObject["version"] as? Int == 4, "Expected current schema on save")
+        try expect(migratedObject["version"] as? Int == 5, "Expected current schema on save")
         try expect(migratedObject["language"] as? String == "ko", "Expected language on save")
         try expect(preferences.statusGaugeAppearance == .default, "Expected blue migration")
         try expect(
@@ -693,7 +655,6 @@ private func appPreferencesVersionZeroMigrationTest() -> TestCase {
             forKey: AppPreferencesRepository.storageKey
         )
         let recovered = await repository.load()
-        try expect(recovered.displayPreference.productMode == .codex, "Expected v0 mode fallback")
         try expect(
             recovered.displayPreference.quotaSelection == .automatic,
             "Expected off-product v0 sibling to recover automatically"
@@ -708,17 +669,6 @@ private func appPreferencesVersionZeroMigrationTest() -> TestCase {
 
 private func appPreferencesEmptyManualSelectionTest() -> TestCase {
     TestCase(name: "empty manual selections normalize to automatic") {
-        let direct = AppPreferences(
-            displayPreference: DisplayPreference(
-                productMode: .spark,
-                quotaSelection: .manual([])
-            )
-        )
-        try expect(
-            direct.displayPreference.quotaSelection == .automatic,
-            "Expected direct normalization"
-        )
-
         let store = try PreferencesTestStore()
         defer { store.cleanUp() }
         let repository = try store.repository()
@@ -763,98 +713,63 @@ private func appPreferencesEmptyManualSelectionTest() -> TestCase {
 }
 
 private func appPreferencesManualProductNormalizationTest() -> TestCase {
-    TestCase(name: "manual preferences keep identifiers for displayed products only") {
-        let codex = QuotaSelectionID(product: .codex, rawDurationMinutes: 300)
-        let spark = QuotaSelectionID(product: .spark, rawDurationMinutes: 10_080)
-        let matching = AppPreferences(
-            displayPreference: DisplayPreference(
-                productMode: .codex,
-                quotaSelection: .manual([codex, spark])
-            )
-        )
-        let disjoint = AppPreferences(
-            displayPreference: DisplayPreference(
-                productMode: .spark,
-                quotaSelection: .manual([codex])
-            )
-        )
-
-        try expect(
-            matching.displayPreference.quotaSelection == .manual([codex]),
-            "Expected off-product manual identifier removal"
-        )
-        try expect(
-            disjoint.displayPreference.quotaSelection == .automatic,
-            "Expected disjoint manual selection to recover automatically"
-        )
-
+    TestCase(name: "single quota migrations preserve one Codex choice and recover ambiguous choices") {
         let store = try PreferencesTestStore()
         defer { store.cleanUp() }
         let repository = try store.repository()
-        try await repository.save(matching)
-        let loaded = await repository.load()
-
-        try expect(loaded == matching, "Expected normalized save and load")
-        let data = try storedPreferencesData(in: store.userDefaults)
-        let object = try preferencesJSONObject(from: data)
-        guard let display = object["display"] as? [String: Any],
-              let selection = display["selection"] as? [String: Any],
-              let items = selection["items"] as? [[String: Any]] else {
-            throw TestFailure(description: "Expected persisted manual selection")
+        let codex: [String: Any] = ["product": "codex", "rawDurationMinutes": 300]
+        let weekly: [String: Any] = ["product": "codex", "rawDurationMinutes": 10_080]
+        let spark: [String: Any] = ["product": "spark", "rawDurationMinutes": 300]
+        let identifier = QuotaSelectionID(product: .codex, rawDurationMinutes: 300)
+        let cases: [([[String: Any]], DisplayQuotaSelection)] = [
+            ([], .automatic), ([spark], .automatic), ([codex], .manual(identifier)),
+            ([spark, codex], .manual(identifier)), ([codex, weekly], .automatic),
+            ([spark, codex, weekly], .automatic), ([codex, codex], .manual(identifier))
+        ]
+        for version in 0...4 {
+            for (items, expected) in cases {
+                var payload: [String: Any] = ["version": version]
+                if version == 0 {
+                    payload["displayProductMode"] = "both"
+                    payload["displayQuotaSelection"] = "manual"
+                    payload["manualQuotaSelections"] = items
+                } else {
+                    payload["display"] = ["productMode": "both", "selection": ["mode": "manual", "items": items]]
+                }
+                store.userDefaults.set(try preferencesJSON(payload), forKey: AppPreferencesRepository.storageKey)
+                let loaded = await repository.load()
+                try expect(loaded.displayPreference.quotaSelection == expected, "Expected legacy selection normalization")
+                let data = try storedPreferencesData(in: store.userDefaults)
+                let object = try preferencesJSONObject(from: data)
+                try expect(object["version"] as? Int == 5, "Expected current schema persisted")
+                let reloaded = await repository.load()
+                try expect(reloaded == loaded, "Expected migration to be stable on next load")
+            }
         }
-        try expect(items.count == 1, "Expected normalized persisted identifiers")
-        try expect(items[0]["product"] as? String == "codex", "Expected Codex item only")
     }
 }
 
 private func appPreferencesInconsistentPayloadNormalizationTest() -> TestCase {
-    TestCase(name: "versioned payloads normalize selections against product mode") {
+    TestCase(name: "single quota v5 rejects malformed manual items without losing siblings") {
         let store = try PreferencesTestStore()
         defer { store.cleanUp() }
         let repository = try store.repository()
-        let versionOnePayload: [String: Any] = [
-            "version": 1,
-            "display": [
-                "productMode": "spark",
-                "selection": [
-                    "mode": "manual",
-                    "items": [
-                        ["product": "codex", "rawDurationMinutes": 300],
-                        ["product": "spark", "rawDurationMinutes": 10_080]
-                    ]
-                ]
-            ]
+        let items: [[String: Any]] = [
+            ["product": "spark", "rawDurationMinutes": 300],
+            ["product": "codex"], ["product": "codex", "rawDurationMinutes": "300"],
+            ["product": "codex", "rawDurationMinutes": 0]
         ]
-        store.userDefaults.set(
-            try preferencesJSON(versionOnePayload),
-            forKey: AppPreferencesRepository.storageKey
-        )
-
-        let versionOne = await repository.load()
-        let spark = QuotaSelectionID(product: .spark, rawDurationMinutes: 10_080)
-        try expect(
-            versionOne.displayPreference.quotaSelection == .manual([spark]),
-            "Expected version one selection filtering"
-        )
-
-        let versionZeroPayload: [String: Any] = [
-            "version": 0,
-            "displayProductMode": "codex",
-            "displayQuotaSelection": "manual",
-            "manualQuotaSelections": [
-                ["product": "spark", "rawDurationMinutes": 300]
+        for item in items {
+            let payload: [String: Any] = [
+                "version": 5, "display": ["selection": ["mode": "manual", "item": item,
+                    "items": [["product": "codex", "rawDurationMinutes": 300]]]],
+                "language": "ko", "refreshProfile": "fast"
             ]
-        ]
-        store.userDefaults.set(
-            try preferencesJSON(versionZeroPayload),
-            forKey: AppPreferencesRepository.storageKey
-        )
-
-        let versionZero = await repository.load()
-        try expect(
-            versionZero.displayPreference.quotaSelection == .automatic,
-            "Expected disjoint version zero selection recovery"
-        )
+            store.userDefaults.set(try preferencesJSON(payload), forKey: AppPreferencesRepository.storageKey)
+            let loaded = await repository.load()
+            try expect(loaded.displayPreference == .default, "Expected invalid manual item fallback")
+            try expect(loaded.language == .korean && loaded.refreshProfile == .fast, "Expected valid siblings preserved")
+        }
     }
 }
 
@@ -876,9 +791,9 @@ private func appPreferencesExecutableSelectionMergeTest() -> TestCase {
         let store = try PreferencesTestStore()
         defer { store.cleanUp() }
         let repository = try store.repository()
-        let initial = manualPreferences([
+        let initial = manualPreferences(
             QuotaSelectionID(product: .codex, rawDurationMinutes: 300)
-        ])
+        )
         let selected = URL(fileURLWithPath: "/Synthetic/New/codex")
         try await repository.save(initial)
 
@@ -907,11 +822,10 @@ private func appPreferencesFirstLaunchAtomicMergeTest() -> TestCase {
         defer { store.cleanUp() }
         let repository = try store.repository()
         try await repository.save(.default)
-        let identifier = QuotaSelectionID(product: .spark, rawDurationMinutes: 300)
+        let identifier = QuotaSelectionID(product: .codex, rawDurationMinutes: 300)
         let formValues = SettingsFormValues(
             displayPreference: DisplayPreference(
-                productMode: .both,
-                quotaSelection: .manual([identifier])
+                quotaSelection: .manual(identifier)
             ),
             refreshProfile: .eco,
             launchAtLoginIntent: true,
@@ -991,10 +905,7 @@ private func appPreferencesSafePayloadTest() -> TestCase {
         defer { store.cleanUp() }
         let repository = try store.repository()
         let preferences = manualPreferences(
-            Set([
-                QuotaSelectionID(product: .codex, rawDurationMinutes: 300),
-                QuotaSelectionID(product: .spark, rawDurationMinutes: nil)
-            ])
+            QuotaSelectionID(product: .codex, rawDurationMinutes: 300)
         )
 
         try await repository.save(preferences)
@@ -1069,12 +980,11 @@ private let syntheticExecutableURL = URL(
 )
 
 private func manualPreferences(
-    _ identifiers: Set<QuotaSelectionID>
+    _ identifier: QuotaSelectionID
 ) -> AppPreferences {
     AppPreferences(
         displayPreference: DisplayPreference(
-            productMode: .both,
-            quotaSelection: .manual(identifiers)
+            quotaSelection: .manual(identifier)
         ),
         refreshProfile: .fast,
         launchAtLoginIntent: true,

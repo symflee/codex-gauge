@@ -411,36 +411,38 @@ private actor TestBarrierCompletion {
 }
 
 private func selectedQuotaSampleMappingTest() -> TestCase {
-    TestCase(name: "refresh sample mapping follows the injected display preference") {
-        let result = coordinatorResult(
-            codexWindows: [
-                coordinatorWindow(.primary, used: 10.9, duration: 300, reset: 1_000),
-                coordinatorWindow(.secondary, used: 20.4, duration: 10_080, reset: 2_000)
-            ],
-            sparkWindows: [coordinatorWindow(.primary, used: 30.8, duration: 300, reset: 3_000)]
-        )
-        let preference = DisplayPreference(
-            productMode: .both,
-            quotaSelection: .manual([
-                QuotaSelectionID(product: .codex, rawDurationMinutes: 10_080),
-                QuotaSelectionID(product: .spark, rawDurationMinutes: 300)
-            ])
-        )
-
-        let samples = DisplayPreferenceQuotaSampleSelector().samples(
-            from: result,
-            preference: preference
-        )
-
-        try expect(samples.values.count == 2, "Expected two manually selected samples")
-        try expect(
-            samples.values[coordinatorKey(.codex, duration: 10_080, reset: 2_000)] == 20,
-            "Expected floored Codex weekly sample"
-        )
-        try expect(
-            samples.values[coordinatorKey(.spark, duration: 300, reset: 3_000)] == 30,
-            "Expected floored Spark five-hour sample"
-        )
+    TestCase(name: "refresh samples follow the single displayed quota and omit missing selections") {
+        let result = coordinatorResult(codexWindows: [
+            coordinatorWindow(.primary, used: 10.9, duration: 300, reset: 1_900_100_000),
+            coordinatorWindow(.secondary, used: 20.4, duration: 10_080, reset: 1_900_200_000)
+        ])
+        let cases: [(DisplayQuotaSelection, Int, TimeInterval, Int)] = [
+            (.automatic, 300, 1_900_100_000, 10),
+            (.manual(QuotaSelectionID(product: .codex, rawDurationMinutes: 10_080)), 10_080, 1_900_200_000, 20)
+        ]
+        for (selection, duration, reset, used) in cases {
+            let preference = DisplayPreference(quotaSelection: selection)
+            let samples = DisplayPreferenceQuotaSampleSelector().samples(from: result, preference: preference)
+            try expect(samples.values == [coordinatorKey(.codex, duration: duration, reset: reset): used], "Expected exactly the selected sample")
+            let frames = DisplayFrameBuilder().makeFrames(
+                preference: preference,
+                productStates: [.codex: .value(
+                    ProductQuotaValue(capturedAt: result.capturedAt, quotaWindows: result.rateLimits(for: .codex).windows),
+                    freshness: .fresh
+                )],
+                now: result.capturedAt
+            )
+            try expect(frames.count == 1, "Expected one displayed quota")
+            guard case .single(let quota) = frames.first else {
+                throw TestFailure(description: "Expected a single Codex frame")
+            }
+            try expect(quota.identifier.rawDurationMinutes == duration, "Expected display and refresh selection agreement")
+        }
+        let missing = DisplayPreference(quotaSelection: .manual(
+            QuotaSelectionID(product: .codex, rawDurationMinutes: 60)
+        ))
+        let samples = DisplayPreferenceQuotaSampleSelector().samples(from: result, preference: missing)
+        try expect(samples.values.isEmpty, "Expected missing manual quota not to fall back to automatic")
     }
 }
 
@@ -977,101 +979,56 @@ private func quotaResetUpgradesInFlightRequestTest() -> TestCase {
 }
 
 private func refreshPublicationPartialProductTest() -> TestCase {
-    TestCase(name: "refresh publication updates products independently and keeps stale values") {
+    TestCase(name: "refresh publication preserves Codex partial stale and unavailable states") {
         let clock = TestRefreshClock()
         let completeDate = Date(timeIntervalSince1970: 1_900_000_000)
         let partialDate = Date(timeIntervalSince1970: 1_900_000_100)
-        let emptyDate = Date(timeIntervalSince1970: 1_900_000_200)
-        let complete = coordinatorResult(
-            codexUsed: 10,
-            sparkUsed: 20,
-            capturedAt: completeDate
-        )
+        let malformedDate = Date(timeIntervalSince1970: 1_900_000_200)
+        let emptyDate = Date(timeIntervalSince1970: 1_900_000_300)
+        let complete = coordinatorResult(codexUsed: 10, capturedAt: completeDate)
         let partial = coordinatorResult(
-            codexWindows: [coordinatorWindow(.primary, used: 11, duration: 300, reset: 1_000)],
+            codexWindows: [coordinatorWindow(.primary, used: 10, duration: 300, reset: 1_000)],
             codexState: .partial,
-            sparkState: .malformed,
-            sparkWindows: [],
             capturedAt: partialDate
         )
-        let empty = coordinatorResult(
-            codexWindows: [],
-            codexState: .unavailable,
-            sparkState: .malformed,
-            sparkWindows: [],
-            capturedAt: emptyDate
-        )
+        let malformed = coordinatorResult(codexWindows: [], codexState: .malformed, capturedAt: malformedDate)
+        let empty = coordinatorResult(codexWindows: [], codexState: .unavailable, capturedAt: emptyDate)
         let provider = TestRefreshSessionProvider(plans: [
-            [.success(complete)],
-            [.success(partial), .success(empty)]
+            [.success(complete)], [.success(partial)], [.success(malformed)], [.success(empty)]
         ])
-        let preference = DisplayPreference(productMode: .both, quotaSelection: .automatic)
-        let coordinator = makeCoordinator(
-            clock: clock,
-            provider: provider,
-            preference: preference
-        )
+        let coordinator = makeCoordinator(clock: clock, provider: provider)
 
         await coordinator.start()
         try await expectMetrics(provider, starts: 1, reads: 1, stops: 1)
         await coordinator.refreshManually()
-        try await expectMetrics(provider, starts: 2, reads: 2, stops: 1)
-        try await eventually {
-            let publication = await coordinator.publication
-            return coordinatorFreshness(publication, product: .spark) == .stale
-        }
-
+        try await expectMetrics(provider, starts: 2, reads: 2, stops: 2)
+        try await eventually { await coordinator.state.inFlightRequest == nil }
         let publication = await coordinator.publication
-        try expect(coordinatorFreshness(publication, product: .codex) == .fresh, "Expected fresh Codex")
-        try expect(coordinatorFreshness(publication, product: .spark) == .stale, "Expected stale Spark")
-        try expect(publication.products[.codex]?.issue == .partial, "Expected Codex partial issue")
-        try expect(publication.products[.spark]?.issue == .malformed, "Expected Spark issue")
-        try expect(
-            publication.products[.codex]?.lastSuccessfulRefresh == partialDate,
-            "Expected Codex product success time to advance"
-        )
-        try expect(
-            publication.products[.spark]?.lastSuccessfulRefresh == completeDate,
-            "Expected Spark product success time to remain independent"
-        )
+        try expect(coordinatorFreshness(publication, product: .codex) == .fresh, "Expected fresh partial Codex")
+        try expect(publication.products[.codex]?.issue == .partial, "Expected explicit partial issue")
+        try expect(publication.products[.codex]?.lastSuccessfulRefresh == partialDate, "Expected valid partial response to advance success time")
         try expect(publication.lastSuccessfulRefresh == partialDate, "Expected global partial success")
 
         await coordinator.refreshManually()
-        try await expectMetrics(provider, starts: 2, reads: 3, stops: 2)
+        try await expectMetrics(provider, starts: 3, reads: 3, stops: 3)
+        try await eventually { await coordinator.state.inFlightRequest == nil }
+        let stalePublication = await coordinator.publication
+        try expect(coordinatorFreshness(stalePublication, product: .codex) == .stale, "Expected malformed response to retain a stale value")
+        try expect(coordinatorUsedPercent(stalePublication, product: .codex) == 10, "Expected last valid Codex value")
+        try expect(stalePublication.products[.codex]?.issue == .malformed, "Expected malformed issue beside stale value")
+        try expect(stalePublication.products[.codex]?.lastSuccessfulRefresh == partialDate, "Expected malformed response to preserve success time")
+        try expect(stalePublication.lastSuccessfulRefresh == partialDate, "Expected malformed response not to advance global success")
+        try expect(stalePublication.lastAcceptedRateLimitResponse == malformedDate, "Expected accepted malformed envelope time")
+
+        await coordinator.refreshManually()
+        try await expectMetrics(provider, starts: 4, reads: 4, stops: 4)
         try await eventually { await coordinator.state.inFlightRequest == nil }
         let emptyPublication = await coordinator.publication
-        try expect(
-            emptyPublication.lastSuccessfulRefresh == partialDate,
-            "Expected empty response not to advance global success"
-        )
-        try expect(
-            emptyPublication.lastAcceptedRateLimitResponse == emptyDate,
-            "Expected empty response to record a successful protocol exchange"
-        )
-        try expect(
-            emptyPublication.products[.codex]?.lastSuccessfulRefresh == partialDate,
-            "Expected empty Codex response to retain its success time"
-        )
-        try expect(
-            emptyPublication.products[.spark]?.lastSuccessfulRefresh == completeDate,
-            "Expected empty Spark response to retain its success time"
-        )
-        try expect(
-            emptyPublication.products[.codex]?.usageState == .unavailable,
-            "Expected accepted unavailable Codex to clear its displayed value"
-        )
-        try expect(
-            emptyPublication.products[.codex]?.issue == .unavailable,
-            "Expected accepted unavailable issue"
-        )
-        try expect(
-            coordinatorFreshness(emptyPublication, product: .spark) == .stale,
-            "Expected malformed Spark to preserve its prior stale value"
-        )
-        try expect(
-            emptyPublication.products[.spark]?.issue == .malformed,
-            "Expected malformed issue beside the stale Spark value"
-        )
+        try expect(emptyPublication.lastSuccessfulRefresh == partialDate, "Expected empty response not to advance global success")
+        try expect(emptyPublication.lastAcceptedRateLimitResponse == emptyDate, "Expected empty response to record its protocol exchange")
+        try expect(emptyPublication.products[.codex]?.lastSuccessfulRefresh == partialDate, "Expected unavailable response to retain success time")
+        try expect(emptyPublication.products[.codex]?.usageState == .unavailable, "Expected accepted unavailable Codex to clear its displayed value")
+        try expect(emptyPublication.products[.codex]?.issue == .unavailable, "Expected accepted unavailable issue")
         await coordinator.stop()
     }
 }
@@ -1083,8 +1040,6 @@ private func refreshPublicationMalformedWithoutPriorTest() -> TestCase {
         let result = coordinatorResult(
             codexWindows: [],
             codexState: .malformed,
-            sparkState: .unavailable,
-            sparkWindows: [],
             capturedAt: capturedAt
         )
         let provider = TestRefreshSessionProvider(plans: [[.success(result)]])
@@ -1120,8 +1075,6 @@ private func incompatibleRateLimitResponseStopsPollingTest() -> TestCase {
         let clock = TestRefreshClock()
         let result = coordinatorResult(
             codexWindows: [],
-            sparkState: .malformed,
-            sparkWindows: [],
             responseStatus: .incompatible
         )
         let provider = TestRefreshSessionProvider(plans: [[.success(result)]])
@@ -1216,16 +1169,10 @@ private func coordinatorFreshness(
 
 private func coordinatorResult(
     codexUsed: Double,
-    sparkUsed: Double? = nil,
     capturedAt: Date = Date(timeIntervalSince1970: 1_900_000_000)
 ) -> RateLimitReadResult {
-    let codex = [coordinatorWindow(.primary, used: codexUsed, duration: 300, reset: 1_000)]
-    let spark = sparkUsed.map {
-        [coordinatorWindow(.primary, used: $0, duration: 300, reset: 2_000)]
-    } ?? []
-    return coordinatorResult(
-        codexWindows: codex,
-        sparkWindows: spark,
+    coordinatorResult(
+        codexWindows: [coordinatorWindow(.primary, used: codexUsed, duration: 300, reset: 1_000)],
         capturedAt: capturedAt
     )
 }
@@ -1233,25 +1180,15 @@ private func coordinatorResult(
 private func coordinatorResult(
     codexWindows: [QuotaWindow],
     codexState: ProductRateLimitState? = nil,
-    sparkState: ProductRateLimitState? = nil,
-    sparkWindows: [QuotaWindow],
     capturedAt: Date = Date(timeIntervalSince1970: 1_900_000_000),
     responseStatus: RateLimitResponseStatus = .accepted
 ) -> RateLimitReadResult {
     let inferredCodexState: ProductRateLimitState = codexWindows.isEmpty ? .unavailable : .available
-    let inferredSparkState: ProductRateLimitState = sparkWindows.isEmpty ? .unavailable : .available
     return RateLimitReadResult(
         capturedAt: capturedAt,
         responseStatus: responseStatus,
         rateLimitsByProduct: [
-            .codex: ProductRateLimits(
-                state: codexState ?? inferredCodexState,
-                windows: codexWindows
-            ),
-            .spark: ProductRateLimits(
-                state: sparkState ?? inferredSparkState,
-                windows: sparkWindows
-            )
+            .codex: ProductRateLimits(state: codexState ?? inferredCodexState, windows: codexWindows)
         ]
     )
 }

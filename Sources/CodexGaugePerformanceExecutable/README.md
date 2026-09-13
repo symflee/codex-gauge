@@ -16,7 +16,6 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift build -c release 
 .build/release/codex-gauge-performance --mode empty --duration 600 > /tmp/gauge-empty.jsonl
 .build/release/codex-gauge-performance --mode idle --duration 600 > /tmp/gauge-idle.jsonl
 .build/release/codex-gauge-performance --mode burst --duration 340 > /tmp/gauge-burst.jsonl
-.build/release/codex-gauge-performance --mode rotation --duration 600 > /tmp/gauge-rotation.jsonl
 .build/release/codex-gauge-performance --mode settings --duration 60 > /tmp/gauge-settings.jsonl
 .build/release/codex-gauge-performance --mode menu --duration 10 > /tmp/gauge-menu.jsonl
 .build/release/codex-gauge-performance --mode real --duration 600 > /tmp/gauge-real.jsonl
@@ -30,8 +29,8 @@ Use the equivalent `.build/debug/` binary for a matching development-build compa
 
 `--mode` defaults to `idle`. Duration is integer seconds, defaults to 600 except
 `burst` (340), `settings` (60), and `menu` (10), and must be 1...86400. Burst requires at least 340
-seconds; settings requires at least 30 and menu at least 5. A rotation run must exceed one 5-second tick
-to complete its scenario. Short idle/empty/real runs are useful for lifecycle smoke
+seconds; settings requires at least 30 and menu at least 5.
+Short idle/empty/real runs are useful for lifecycle smoke
 checks but do not establish the ten-minute resource acceptance criteria.
 
 For RSS attribution only, run these additional modes in separate processes:
@@ -58,14 +57,13 @@ gate. Their default duration is 600 seconds, so pass 30 explicitly for short pro
 | --- | --- |
 | `empty` | No status item, settings suite, provider, or refresh coordinator. Same linked binary dependencies. |
 | `native` | Diagnostic only: a native `NSStatusItem` with fixed 48pt width and untouched empty button. No product presenter/controller/renderer, menu, date formatter, provider or settings. |
-| `badge` | Diagnostic only: an actual system status item, production `SystemStatusItemPresenter` and `StatusItemController`, rendering one fixed synthetic frame through the production renderer and width prototypes. No menu/model/date formatter, provider/coordinator, settings or deadline scheduler. No rotation timer. |
+| `badge` | Diagnostic only: an actual system status item, production `SystemStatusItemPresenter` and `StatusItemController`, rendering one fixed synthetic frame through the production renderer and fixed capsule width. No menu/model/date formatter, provider/coordinator, settings or deadline scheduler. No rotation timer. |
 | `menuShell` | Diagnostic only: identical badge setup plus one retained empty `NSMenu`, not assigned to the status item. No model, provider or menu controller. |
 | `menuAttached` | Diagnostic only: identical `menuShell` setup, with that empty menu assigned to `statusItem.menu`. No model, provider or menu controller; the menu is not opened. |
 | `engine` | Diagnostic only: the normal balanced synthetic provider and real refresh coordinator, retaining publications and counters. No status item, renderer, native menu, presentation-adapter work, model/date formatting, settings or deadline scheduler. Shutdown uses the same stop/termination barriers. |
 | `model` | Diagnostic only: identical badge setup plus a cached synthetic publication matching idle, including two quota windows and `lastSuccessfulRefresh`. The real presentation adapter and `QuotaDetailsMenuModelCache` build the localized menu model once, exercising date formatting. No `NSMenu`, `StatusMenuController`, provider/coordinator, settings or deadline scheduler. |
 | `idle` | Synthetic unchanged data, actual balanced startup and 180-second scheduling. No OS child processes. |
 | `burst` | Synthetic integer growth. One manual read after startup, then real 20-second scheduling, 300-second cap and 180-second cooldown. An aggregate checkpoint 310 seconds after the second accepted response checks expiry, cooldown and zero live leases. |
-| `rotation` | Two synthetic quota windows selected through the real presentation adapter and real 5-second rotation timer. Normal 180-second refreshes continue. |
 | `settings` | Actual `SettingsWindowCoordinator` plus `SettingsWindowRuntimeAdapter`, ten visible open/close cycles, then idle. Weak references verify controller, window, view controller and view release. Diagnostics return metadata only; no CLI version probe, executable selection, login item changes or clipboard writes. |
 | `menu` | Synthetic idle data, followed by two actual `NSMenu.popUp` tracking sessions. Each is canceled by one app-scoped timer. Checks zero rows/model requests before first open, one model request at first open, and unchanged native items with no additional model request at second open. Captures RSS before first open and after each close. |
 | `real` | `CodexUsageProvider` and verified automatic `CodexExecutableLocator` discovery. Uses the existing account through the public App Server protocol. No authentication/configuration/private database files are inspected by the harness. No quota values, raw responses or executable paths are logged. |

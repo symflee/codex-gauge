@@ -271,6 +271,8 @@ if [ "$dry_run" -eq 0 ] && [ "$allows_local_release_effects" -ne 1 ]; then
 fi
 if [ "$allows_local_release_effects" -eq 1 ]; then
     export CODEX_GAUGE_LOCAL_RELEASE_EFFECTS_ALLOWED=1
+    # xcodebuild forwards TEST_RUNNER_ variables to the XCTest runner.
+    export TEST_RUNNER_CODEX_GAUGE_LOCAL_RELEASE_EFFECTS_ALLOWED=1
 fi
 prepare_output_directory
 resolve_developer_directory

@@ -2,6 +2,7 @@ import AppKit
 import CodexGaugeAppKit
 import CodexGaugeCore
 import CodexGaugeSettings
+import CoreText
 
 func statusItemRenderingTests() -> [TestCase] {
     [
@@ -10,52 +11,54 @@ func statusItemRenderingTests() -> [TestCase] {
         unchangedStatusAppearanceTest(),
         transientNativeAppearanceTest(),
         fixedPaletteIgnoresAppearanceTest(),
-        statusValueChangePreservesRotationTest(),
-        visualLabelFormattingTest(),
-        compactVisualLabelFormattingTest(),
-        compactUnknownDurationBadgeFormattingTest(),
-        statusDurationPresentationPolicyTest(),
-        statusDurationModeTransitionTest(),
-        widthPrototypePreservesActualDurationModeTest(),
+        renderedPercentageBoundaryTest(),
+        systemPresenterUsesImageOnlyTest(),
+        statusRendererReplacementTest(),
         gaugeImageCacheTest(),
         gaugeTextContrastTest(),
         vividPresetTextContrastTest(),
         capsuleBitmapRenderingTest(),
+        capsuleFontAndClippingTest(),
         slimCapsuleAppearanceTest(),
-        slimCapsuleAppearanceRefreshTest(),
         slimCapsuleNativeAppearanceObservationTest(),
-        slimCapsuleAllocationTest(),
-        systemPresenterUsesImageOnlyTest(),
-        localizedAccessibilityTest(),
-        statusRendererReplacementTest(),
-        capsuleFrameRenderingTest(),
-        renderedPercentageBoundaryTest(),
-        renderedStateSemanticsTest(),
-        fixedWidthPolicyTest(),
-        derivedWidthPrototypeStabilityTest(),
-        singleFrameHasNoScheduleTest(),
-        rotationOrderingTest(),
-        rotationPauseResumeTest(),
-        rotationTickUsesCachedFramesTest(),
-        accessibilityUpdateTest()
+        singleStatusStatesTest(),
+        fixedCapsuleAllocationTest(),
+        localizedSingleAccessibilityTest(),
+        singleFrameReplacementTest(),
+        singleAppearanceRefreshTest(),
     ]
+}
+
+private func explicitAppLocalizationTest() -> TestCase {
+    TestCase(name: "app localization resolves explicit Korean and English bundles") {
+        let korean = AppLocalization(language: .korean)
+        let english = AppLocalization(language: .english)
+
+        try expect(
+            korean.string("menu.action.refresh") == "새로 고침",
+            "Expected explicit Korean bundle"
+        )
+        try expect(
+            english.string("menu.action.refresh") == "Refresh",
+            "Expected explicit English bundle"
+        )
+        try expect(korean.locale.identifier == "ko", "Expected Korean locale")
+        try expect(english.locale.identifier == "en", "Expected English locale")
+    }
 }
 
 private func unchangedStatusInputTest() -> TestCase {
     TestCase(name: "status unchanged input performs no rendering presentation or scheduling") {
         try await MainActor.run {
             let fixture = makeControllerFixture()
-            let frames = rotationFrames()
+            let frames = singleFrames()
             fixture.controller.setFrames(frames)
-            fixture.scheduler.fire()
             let renders = fixture.renderer.renderCount
             let presentations = fixture.presenter.presentedSemanticTitles.count
-            let schedules = fixture.scheduler.requests.count
             let lengths = fixture.presenter.lengths.count
             for _ in 0..<100 { fixture.controller.setFrames(frames) }
             try expect(fixture.renderer.renderCount == renders, "Unchanged input must not render")
             try expect(fixture.presenter.presentedSemanticTitles.count == presentations, "Unchanged input must not present")
-            try expect(fixture.scheduler.requests.count == schedules, "Unchanged input must not restart rotation")
             try expect(fixture.presenter.lengths.count == lengths, "Unchanged input must not set width")
         }
     }
@@ -65,7 +68,7 @@ private func unchangedStatusAppearanceTest() -> TestCase {
     TestCase(name: "status unchanged appearance performs no rendering") {
         try await MainActor.run {
             let fixture = makeControllerFixture()
-            fixture.controller.setFrames(rotationFrames())
+            fixture.controller.setFrames(singleFrames())
             let renders = fixture.renderer.renderCount
             for _ in 0..<100 { fixture.presenter.appearanceChangeHandler?() }
             try expect(fixture.renderer.renderCount == renders, "Equivalent appearance notifications must settle")
@@ -79,30 +82,6 @@ private func transientNativeAppearanceTest() -> TestCase {
     }
 }
 
-@MainActor
-private func transientNativeAppearanceScenario() async throws {
-    let button = NSStatusBarButton(frame: .zero)
-    button.appearance = try appearance(named: .aqua)
-    let presenter = SystemStatusItemPresenter(statusItem: NSStatusItem(), button: button)
-    let renderer = RecordingStatusFrameRenderer()
-    let controller = StatusItemController(presenter: presenter, renderer: renderer)
-    controller.setFrames(rotationFrames())
-    let renders = renderer.renderCount
-    for _ in 0..<100 {
-        button.appearance = try appearance(named: .darkAqua)
-        button.appearance = try appearance(named: .aqua)
-    }
-    for _ in 0..<100 { await Task.yield() }
-    try expect(renderer.renderCount == renders, "Transient snapshot overrides must not rerender")
-    button.appearance = try appearance(named: .darkAqua)
-    for _ in 0..<100 {
-        if renderer.renderCount > renders { break }
-        await Task.yield()
-    }
-    try expect(renderer.renderCount == renders + rotationFrames().count, "A real appearance change must rerender once")
-    withExtendedLifetime(controller) {}
-}
-
 private func fixedPaletteIgnoresAppearanceTest() -> TestCase {
     TestCase(name: "status fixed palette ignores system appearance changes") {
         try await MainActor.run {
@@ -111,33 +90,11 @@ private func fixedPaletteIgnoresAppearanceTest() -> TestCase {
                 presenter: presenter,
                 renderer: StatusFrameRenderer(statusGaugeAppearance: .preset(.blue))
             )
-            controller.setFrames(rotationFrames())
+            controller.setFrames(singleFrames())
             let count = presenter.images.count
             presenter.effectiveAppearance = try appearance(named: .darkAqua)
             presenter.appearanceChangeHandler?()
             try expect(presenter.images.count == count, "A fixed palette must not present on system color changes")
-        }
-    }
-}
-
-private func statusValueChangePreservesRotationTest() -> TestCase {
-    TestCase(name: "status value change preserves rotation position and schedule") {
-        try await MainActor.run {
-            let fixture = makeControllerFixture()
-            let frames = rotationFrames()
-            fixture.controller.setFrames(frames)
-            fixture.scheduler.fire()
-            let schedules = fixture.scheduler.requests.count
-            let changed = frames.map { frame -> DisplayFrame in
-                if case .single(let quota) = frame {
-                    return .single(DisplayQuota(identifier: quota.identifier, value: .fresh(42)))
-                }
-                return frame
-            }
-            fixture.controller.setFrames(changed)
-            try expect(fixture.scheduler.requests.count == schedules, "Value updates must preserve the rotation timer")
-            let expected = DisplayFrameFormatter().format(changed[1]).title
-            try expect(fixture.presenter.presentedSemanticTitles.last == expected, "Value updates must preserve the selected frame")
         }
     }
 }
@@ -155,7 +112,7 @@ private func renderedPercentageBoundaryTest() -> TestCase {
                 )
                 let rendered = renderer.render(frame, appearance: aqua)
                 try expect(
-                    rendered.visualLabel == "5h \(percent)%",
+                    rendered.visualLabel == "\(percent)%",
                     "Unexpected percentage boundary label"
                 )
                 try expect(
@@ -178,13 +135,13 @@ private func systemPresenterUsesImageOnlyTest() -> TestCase {
                 button: button
             )
             let image = StatusGaugeImageCache().image(
-                label: "5h 83%",
+                label: "83%",
                 appearance: .default
             )
             let frame = RenderedStatusFrame(
                 image: image,
                 semanticTitle: "[5h] 83%",
-                visualLabel: "5h 83%",
+                visualLabel: "83%",
                 accessibilityLabel: "synthetic accessibility label",
                 measuredWidth: image.size.width
             )
@@ -199,264 +156,13 @@ private func systemPresenterUsesImageOnlyTest() -> TestCase {
     }
 }
 
-private func visualLabelFormattingTest() -> TestCase {
-    TestCase(name: "status visual labels use the capsule layout") {
-        let formatter = StatusGaugeVisualLabelFormatter()
-        let codex = menubarFrame(
-            product: .codex,
-            duration: 300,
-            value: .fresh(83)
-        )
-        let spark = menubarFrame(
-            product: .spark,
-            duration: 300,
-            value: .fresh(91)
-        )
-        let sharedDuration = DisplayFrame.comparison(
-            codex: menubarQuota(product: .codex, duration: 10_080, value: .fresh(75)),
-            spark: menubarQuota(product: .spark, duration: 10_080, value: .fresh(82))
-        )
-
-        try expect(formatter.format(codex) == "5h 83%", "Unexpected Codex label")
-        try expect(formatter.format(spark) == "S 5h 91%", "Unexpected Spark label")
-        try expect(
-            formatter.format(sharedDuration) == "w C75% · S82%",
-            "Unexpected shared-duration label"
-        )
-        try expect(
-            formatter.format(mixedComparisonFrame()) == "C 5h 75% · S w 82%",
-            "Unexpected mixed-duration label"
-        )
-    }
-}
-
-private func compactVisualLabelFormattingTest() -> TestCase {
-    TestCase(name: "compact status labels omit only known durations") {
-        let formatter = StatusGaugeVisualLabelFormatter()
-        let mode = StatusDurationMode.compactSingleCriterion
-        let codex = menubarFrame(
-            product: .codex,
-            duration: 300,
-            value: .fresh(83)
-        )
-        let spark = menubarFrame(
-            product: .spark,
-            duration: 300,
-            value: .fresh(91)
-        )
-        let unknown = menubarFrame(
-            product: .codex,
-            duration: nil,
-            value: .stale(83)
-        )
-        let unknownSpark = menubarFrame(
-            product: .spark,
-            duration: nil,
-            value: .fresh(91)
-        )
-        let sharedDuration = DisplayFrame.comparison(
-            codex: menubarQuota(product: .codex, duration: 10_080, value: .fresh(75)),
-            spark: menubarQuota(product: .spark, duration: 10_080, value: .fresh(82))
-        )
-        let unknownSharedDuration = DisplayFrame.comparison(
-            codex: menubarQuota(product: .codex, duration: nil, value: .loading),
-            spark: menubarQuota(product: .spark, duration: nil, value: .unavailable)
-        )
-
-        try expect(formatter.format(codex, durationMode: mode) == "83%", "Unexpected Codex label")
-        try expect(formatter.format(spark, durationMode: mode) == "S 91%", "Unexpected Spark label")
-        try expect(
-            formatter.format(unknown, durationMode: mode) == "? ~83%",
-            "Expected unknown duration"
-        )
-        try expect(
-            formatter.format(unknownSpark, durationMode: mode) == "S ? 91%",
-            "Expected the Spark unknown duration marker"
-        )
-        let stateExpectations: [(DisplayValueState, String)] = [
-            (.fresh(83), "83%"),
-            (.stale(83), "~83%"),
-            (.loading, "…"),
-            (.unavailable, "—")
-        ]
-        for expectation in stateExpectations {
-            let frame = menubarFrame(product: .codex, duration: 300, value: expectation.0)
-            try expect(
-                formatter.format(frame, durationMode: mode) == expectation.1,
-                "Unexpected compact value state"
-            )
-        }
-        try expect(
-            formatter.format(sharedDuration, durationMode: mode) == "C75% · S82%",
-            "Unexpected same-duration comparison label"
-        )
-        try expect(
-            formatter.format(unknownSharedDuration, durationMode: mode) == "? C… · S—",
-            "Expected a shared unknown duration marker"
-        )
-    }
-}
-
-private func compactUnknownDurationBadgeFormattingTest() -> TestCase {
-    TestCase(name: "compact status labels preserve unrepresentable duration markers") {
-        let formatter = StatusGaugeVisualLabelFormatter()
-        let mode = StatusDurationMode.compactSingleCriterion
-        let single = menubarFrame(
-            product: .codex,
-            duration: 90,
-            value: .fresh(83)
-        )
-        let comparison = DisplayFrame.comparison(
-            codex: menubarQuota(product: .codex, duration: 90, value: .fresh(75)),
-            spark: menubarQuota(product: .spark, duration: 90, value: .fresh(82))
-        )
-
-        try expect(
-            formatter.format(single, durationMode: mode) == "? 83%",
-            "Expected an unrepresentable single duration marker"
-        )
-        try expect(
-            formatter.format(comparison, durationMode: mode) == "? C75% · S82%",
-            "Expected an unrepresentable shared duration marker"
-        )
-    }
-}
-
-private func statusDurationModeTransitionTest() -> TestCase {
-    TestCase(name: "status duration mode follows one multiple one transitions") {
-        try await MainActor.run {
-            let fixture = makeControllerFixture()
-            let single = menubarFrame(product: .codex, duration: 300, value: .fresh(83))
-            let second = menubarFrame(product: .codex, duration: 10_080, value: .fresh(82))
-
-            fixture.controller.setFrames([single])
-            fixture.controller.setFrames([single, second])
-            fixture.controller.setFrames([single])
-
-            try expect(
-                fixture.renderer.durationModes == [
-                    .compactSingleCriterion, .compactSingleCriterion,
-                    .full, .full, .full, .full,
-                    .compactSingleCriterion, .compactSingleCriterion
-                ],
-                "Expected mode to be recomputed from each actual frame set"
-            )
-        }
-    }
-}
-
-private func widthPrototypePreservesActualDurationModeTest() -> TestCase {
-    TestCase(name: "caller width prototype cannot expand compact duration mode") {
-        try await MainActor.run {
-            let single = menubarFrame(product: .codex, duration: 300, value: .fresh(83))
-            let modes = renderedDurationModes(
-                frames: [single],
-                widthPrototypes: [mixedComparisonFrame()]
-            )
-
-            try expect(
-                modes == [
-                    .compactSingleCriterion,
-                    .compactSingleCriterion,
-                    .compactSingleCriterion
-                ],
-                "Expected actual derived and caller prototypes to share compact mode"
-            )
-        }
-    }
-}
-
-private func statusDurationPresentationPolicyTest() -> TestCase {
-    TestCase(name: "status duration mode counts only actual display criteria") {
-        try await MainActor.run {
-            let single = menubarFrame(product: .codex, duration: 300, value: .fresh(83))
-            let second = menubarFrame(product: .codex, duration: 10_080, value: .fresh(82))
-            let sameDuration = DisplayFrame.comparison(
-                codex: menubarQuota(product: .codex, duration: 300, value: .fresh(75)),
-                spark: menubarQuota(product: .spark, duration: 300, value: .fresh(82))
-            )
-
-            try expect(
-                renderedDurationModes(frames: [single])
-                    == [.compactSingleCriterion, .compactSingleCriterion],
-                "Expected one single criterion to stay compact"
-            )
-            try expect(
-                renderedDurationModes(frames: [sameDuration])
-                    == [.compactSingleCriterion, .compactSingleCriterion],
-                "Expected one shared-duration criterion to stay compact"
-            )
-            try expect(
-                renderedDurationModes(frames: [mixedComparisonFrame()]) == [.full, .full],
-                "Expected a mixed comparison to count as two criteria"
-            )
-            try expect(
-                renderedDurationModes(frames: [single, second])
-                    == [.full, .full, .full, .full],
-                "Expected multiple actual criteria to retain durations"
-            )
-        }
-    }
-}
-
-private func explicitAppLocalizationTest() -> TestCase {
-    TestCase(name: "app localization resolves explicit Korean and English bundles") {
-        let korean = AppLocalization(language: .korean)
-        let english = AppLocalization(language: .english)
-
-        try expect(
-            korean.string("menu.action.refresh") == "새로 고침",
-            "Expected explicit Korean bundle"
-        )
-        try expect(
-            english.string("menu.action.refresh") == "Refresh",
-            "Expected explicit English bundle"
-        )
-        try expect(korean.locale.identifier == "ko", "Expected Korean locale")
-        try expect(english.locale.identifier == "en", "Expected English locale")
-    }
-}
-
-private func localizedAccessibilityTest() -> TestCase {
-    TestCase(name: "status accessibility supports Korean and English localization") {
-        let korean = StatusAccessibilityFormatter(language: .korean)
-        let english = StatusAccessibilityFormatter(language: .english)
-        let comparison = DisplayFrame.comparison(
-            codex: menubarQuota(product: .codex, duration: 300, value: .stale(75)),
-            spark: menubarQuota(product: .spark, duration: nil, value: .unavailable)
-        )
-
-        try expect(
-            korean.format(comparison)
-                == "Codex 5시간 한도 남은 사용량 마지막 확인값 75퍼센트, "
-                + "Spark 기간 미상 한도 사용량 확인 불가",
-            "Unexpected Korean status accessibility"
-        )
-        try expect(
-            english.format(comparison)
-                == "Codex 5 hours quota, last confirmed value 75 percent remaining, "
-                + "Spark unknown duration quota, usage unavailable",
-            "Unexpected English status accessibility"
-        )
-        let unknownDuration = try statusLocalizationValue(
-            language: "en",
-            key: "status.accessibility.duration.unknown"
-        )
-        try expect(
-            unknownDuration == "unknown duration",
-            "Expected sentence-case English duration resource"
-        )
-    }
-}
-
 private func statusRendererReplacementTest() -> TestCase {
     TestCase(name: "status controller replaces its renderer for immediate localization") {
         try await MainActor.run {
             let presenter = RecordingStatusItemPresenter()
             let controller = StatusItemController(
                 presenter: presenter,
-                renderer: StatusFrameRenderer(language: .korean),
-                scheduler: ManualStatusRotationScheduler()
+                renderer: StatusFrameRenderer(language: .korean)
             )
             let frame = menubarFrame(
                 product: .codex,
@@ -485,11 +191,11 @@ private func gaugeImageCacheTest() -> TestCase {
             let cache = StatusGaugeImageCache(capacity: 2)
             let blue = StatusGaugeAppearance.preset(.blue)
             let green = StatusGaugeAppearance.preset(.green)
-            let first = cache.image(label: "5h 83%", appearance: blue)
-            let second = cache.image(label: "w 82%", appearance: blue)
-            let reused = cache.image(label: "5h 83%", appearance: blue)
-            let recolored = cache.image(label: "5h 83%", appearance: green)
-            let secondAfterEviction = cache.image(label: "w 82%", appearance: blue)
+            let first = cache.image(label: "83%", appearance: blue)
+            let second = cache.image(label: "82%", appearance: blue)
+            let reused = cache.image(label: "83%", appearance: blue)
+            let recolored = cache.image(label: "83%", appearance: green)
+            let secondAfterEviction = cache.image(label: "82%", appearance: blue)
 
             try expect(first === reused, "Expected identical cached image")
             try expect(first !== recolored, "Expected colors in the cache key")
@@ -537,20 +243,17 @@ private func capsuleBitmapRenderingTest() -> TestCase {
         try await MainActor.run {
             let cache = StatusGaugeImageCache(capacity: 2)
             let appearance = StatusGaugeAppearance.default
-            let label = "5h 83%"
+            let label = "83%"
             let image = cache.image(label: label, appearance: appearance)
-            let expectedFont = NSFont.monospacedDigitSystemFont(
-                ofSize: 13,
-                weight: .medium
-            )
-            let textWidth = (label as NSString).size(
+            let expectedFont = try expectedCapsuleFont()
+            let textWidth = ("00%" as NSString).size(
                 withAttributes: [.font: expectedFont]
             ).width
 
-            try expect(image.size.height == 18, "Expected an eighteen-point image")
+            try expect(image.size.height == 20, "Expected a twenty-point image")
             try expect(
-                image.size.width == ceil(textWidth) + 14,
-                "Expected seven-point horizontal padding"
+                image.size.width == ceil(textWidth) + 8,
+                "Expected the measured two-digit width plus four points per side"
             )
             try expect(!image.isTemplate, "Expected explicit capsule colors")
             let representations = image.representations.compactMap {
@@ -565,7 +268,7 @@ private func capsuleBitmapRenderingTest() -> TestCase {
                 "Expected no lazy drawing representation"
             )
             try expect(
-                pixelSizes == ["\(width)x18", "\(width * 2)x36"],
+                pixelSizes == ["\(width)x20", "\(width * 2)x40"],
                 "Expected eager one-times and two-times bitmaps"
             )
 
@@ -588,8 +291,8 @@ private func capsuleBitmapRenderingTest() -> TestCase {
                 "Expected an opaque configured fill"
             )
             try expect(
-                border == fill,
-                "Expected the neutral capsule to have no contrasting border"
+                border == BitmapPixel(color: StatusGaugeColor(red: 0xA5, green: 0xAC, blue: 0xB6)),
+                "Expected the contrasting light neutral border"
             )
             let roundedEdge = try bitmapPixel(
                 bitmap, image: image, point: NSPoint(x: 5, y: 0)
@@ -612,18 +315,24 @@ private func slimCapsuleAppearanceTest() -> TestCase {
             try expect(light.image === repeated.image, "Expected a cache hit after switching back")
             try expect(light.measuredWidth == dark.measuredWidth, "Expected appearance-stable width")
             let matchingCustom = cache.image(
-                label: "5h 83%",
+                label: "83%",
                 borderColor: StatusGaugePreset.neutral.borderColor,
                 fillColor: StatusGaugePreset.neutral.fillColor
             )
             try expect(matchingCustom !== light.image, "Expected custom text and border styles in the cache key")
-            for (rendered, color) in [
-                (light, StatusGaugeColor(red: 0xD8, green: 0xDE, blue: 0xE6)),
-                (dark, StatusGaugeColor(red: 0x42, green: 0x4B, blue: 0x5B))
+            for (rendered, color, borderColor) in [
+                (light, StatusGaugeColor(red: 0xD8, green: 0xDE, blue: 0xE6),
+                 StatusGaugeColor(red: 0xA5, green: 0xAC, blue: 0xB6)),
+                (dark, StatusGaugeColor(red: 0x42, green: 0x4B, blue: 0x5B),
+                 StatusGaugeColor(red: 0x77, green: 0x81, blue: 0x91))
             ] {
-                let bitmap = try bitmapRepresentation(of: rendered.image)
-                let fill = try bitmapPixel(bitmap, image: rendered.image, point: NSPoint(x: 3, y: 9))
-                try expect(fill == BitmapPixel(color: color), "Expected B's neutral appearance color")
+                for bitmap in rendered.image.representations.compactMap({ $0 as? NSBitmapImageRep }) {
+                    let fill = try bitmapPixel(bitmap, image: rendered.image, point: NSPoint(x: 3, y: 9))
+                    try expect(fill == BitmapPixel(color: color), "Expected the resolved neutral fill")
+                    let edge = try bitmapPixel(bitmap, image: rendered.image,
+                                               point: NSPoint(x: rendered.image.size.width / 2, y: 0))
+                    try expect(edge == BitmapPixel(color: borderColor), "Expected the resolved neutral border at both scales")
+                }
             }
             let custom = StatusGaugeAppearance.custom(
                 borderColor: .init(red: 0, green: 0, blue: 0),
@@ -637,10 +346,123 @@ private func slimCapsuleAppearanceTest() -> TestCase {
     }
 }
 
+@MainActor
+private func expectedCapsuleFont() throws -> NSFont {
+    guard let face = NSFont(name: "Pretendard-SemiBold", size: 16) else {
+        throw TestFailure(description: "Expected the bundled Pretendard SemiBold to be registered")
+    }
+    let descriptor = face.fontDescriptor.addingAttributes([
+        .featureSettings: [[
+            NSFontDescriptor.FeatureKey.typeIdentifier: kNumberSpacingType,
+            NSFontDescriptor.FeatureKey.selectorIdentifier: kMonospacedNumbersSelector
+        ]]
+    ])
+    guard let font = NSFont(descriptor: descriptor, size: 16) else {
+        throw TestFailure(description: "Expected Pretendard with tabular figures")
+    }
+    try expect(font.fontName == "Pretendard-SemiBold" && font.pointSize == 16,
+               "Expected the real SemiBold face at sixteen points")
+    return font
+}
+
+private func capsuleFontAndClippingTest() -> TestCase {
+    TestCase(name: "status Pretendard digits keep their size while long labels clip inside the border") {
+        try await MainActor.run {
+            let cache = StatusGaugeImageCache()
+            let style = StatusGaugeAppearance.custom(
+                borderColor: .init(red: 255, green: 0, blue: 0),
+                fillColor: .init(red: 255, green: 255, blue: 255)
+            )
+            let reference = cache.image(label: "00%", appearance: style)
+            let font = try expectedCapsuleFont()
+            let advances = (0...9).map { (String($0) as NSString).size(withAttributes: [.font: font]).width }
+            try expect(advances.max()! - advances.min()! < 0.01, "Expected equal-width digits")
+            let longWidth = ("~100%" as NSString).size(withAttributes: [.font: font]).width
+            try expect(longWidth > reference.size.width, "Expected the long label to exercise clipping")
+
+            for referenceBitmap in reference.representations.compactMap({ $0 as? NSBitmapImageRep }) {
+                let scale = referenceBitmap.pixelsHigh / 20
+                let referenceRows = try blackInkRows(referenceBitmap)
+                try expect(referenceRows.count >= 9 * scale, "Expected readable sixteen-point glyphs")
+                for label in ["00%", "82%", "100%", "~100%"] {
+                    let image = cache.image(label: label, appearance: style)
+                    guard let bitmap = image.representations.compactMap({ $0 as? NSBitmapImageRep })
+                        .first(where: { $0.pixelsHigh == referenceBitmap.pixelsHigh }) else {
+                        throw TestFailure(description: "Expected both bitmap scales")
+                    }
+                    try expect(image.size == reference.size, "Expected no expansion for longer text")
+                    let rows = try blackInkRows(bitmap)
+                    let line = CTLineCreateWithAttributedString(NSAttributedString(
+                        string: label, attributes: [.font: font]
+                    ))
+                    let expectedInkHeight = Int(ceil(CTLineGetImageBounds(line, nil).height * CGFloat(scale)))
+                    try expect(abs(rows.count - expectedInkHeight) <= 1,
+                               "Expected each label's unscaled glyph height within one raster edge pixel")
+                    try expect(rows.first! > 0 && rows.last! < bitmap.pixelsHigh - 1,
+                               "Expected numeric glyphs to fit vertically")
+                    let corner = try bitmapPixel(bitmap, image: image, point: .zero)
+                    try expect(corner.alpha < 26, "Expected text clipped to the rounded capsule")
+                }
+                if scale == 2 {
+                    for row in 0..<3 {
+                        let edge = try bitmapPixel(referenceBitmap, image: reference,
+                            point: NSPoint(x: reference.size.width / 2, y: CGFloat(row) / 2))
+                        try expect(edge == BitmapPixel(red: 255, green: 0, blue: 0, alpha: 255),
+                                   "Expected a 1.5pt border to occupy three Retina pixels")
+                    }
+                    let inside = try bitmapPixel(referenceBitmap, image: reference,
+                        point: NSPoint(x: reference.size.width / 2, y: 1.5))
+                    try expect(inside == BitmapPixel(red: 255, green: 255, blue: 255, alpha: 255),
+                               "Expected the border to end after 1.5pt")
+                }
+            }
+            for value in 0...100 { _ = cache.image(label: "\(value)%", appearance: style) }
+            try expect(cache.count == 32, "Expected the unchanged default cache bound")
+        }
+    }
+}
+
+private func blackInkRows(_ bitmap: NSBitmapImageRep) throws -> [Int] {
+    guard bitmap.bitsPerPixel == 32, let data = bitmap.bitmapData else {
+        throw TestFailure(description: "Expected an RGBA bitmap")
+    }
+    return (0..<bitmap.pixelsHigh).filter { row in
+        (0..<bitmap.pixelsWide).contains { column in
+            let offset = row * bitmap.bytesPerRow + column * 4
+            return data[offset] < 96 && data[offset + 1] < 96
+                && data[offset + 2] < 96 && data[offset + 3] > 200
+        }
+    }
+}
+
 private func slimCapsuleNativeAppearanceObservationTest() -> TestCase {
     TestCase(name: "status slim capsule observes the native button appearance") {
         try await slimCapsuleNativeAppearanceObservationScenario()
     }
+}
+
+@MainActor
+private func transientNativeAppearanceScenario() async throws {
+    let button = NSStatusBarButton(frame: .zero)
+    button.appearance = try appearance(named: .aqua)
+    let presenter = SystemStatusItemPresenter(statusItem: NSStatusItem(), button: button)
+    let renderer = RecordingStatusFrameRenderer()
+    let controller = StatusItemController(presenter: presenter, renderer: renderer)
+    controller.setFrames(singleFrames())
+    let renders = renderer.renderCount
+    for _ in 0..<100 {
+        button.appearance = try appearance(named: .darkAqua)
+        button.appearance = try appearance(named: .aqua)
+    }
+    for _ in 0..<100 { await Task.yield() }
+    try expect(renderer.renderCount == renders, "Transient snapshot overrides must not rerender")
+    button.appearance = try appearance(named: .darkAqua)
+    for _ in 0..<100 {
+        if renderer.renderCount > renders { break }
+        await Task.yield()
+    }
+    try expect(renderer.renderCount == renders + singleFrames().count, "A real appearance change must rerender once")
+    withExtendedLifetime(controller) {}
 }
 
 @MainActor
@@ -663,344 +485,6 @@ private func slimCapsuleNativeAppearanceObservationScenario() async throws {
     withExtendedLifetime(controller) {}
 }
 
-private func slimCapsuleAllocationTest() -> TestCase {
-    TestCase(name: "status slim capsule reduces occupied space without clipping changing values") {
-        try await MainActor.run {
-            let presenter = RecordingStatusItemPresenter()
-            let renderer = StatusFrameRenderer()
-            let controller = StatusItemController(presenter: presenter, renderer: renderer)
-            let values: [DisplayValueState] = [.fresh(0), .fresh(1), .fresh(83), .fresh(100), .stale(100), .loading, .unavailable]
-            for value in values {
-                controller.setFrames([menubarFrame(product: .codex, duration: 300, value: value)])
-            }
-            guard let width = presenter.lengths.first else {
-                throw TestFailure(description: "Expected an allocated status item")
-            }
-            try expect(Set(presenter.lengths).count == 1, "Expected stable width across all value states")
-            try expect(presenter.images.allSatisfy { $0.size.width + 8 <= width }, "Expected four-point outer insets without clipping")
-            let oldFont = NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .semibold)
-            let oldWidth = ceil(("~100%" as NSString).size(withAttributes: [.font: oldFont]).width) + 32
-            try expect(width <= oldWidth - 10, "Expected at least ten points less menu-bar space")
-            controller.setFrames([mixedComparisonFrame()])
-            guard let comparisonWidth = presenter.lengths.last, let comparisonImage = presenter.images.last else {
-                throw TestFailure(description: "Expected the complete comparison image")
-            }
-            try expect(comparisonImage.size.width + 8 <= comparisonWidth, "Expected the longer two-product label to fit")
-        }
-    }
-}
-
-private func slimCapsuleAppearanceRefreshTest() -> TestCase {
-    TestCase(name: "status slim capsule recolors the current rotation frame without rescheduling") {
-        try await MainActor.run {
-            let presenter = RecordingStatusItemPresenter()
-            let scheduler = ManualStatusRotationScheduler()
-            let controller = StatusItemController(
-                presenter: presenter, renderer: StatusFrameRenderer(), scheduler: scheduler
-            )
-            controller.setFrames(rotationFrames())
-            scheduler.fire()
-            let oldImage = presenter.images.last
-            let oldTitle = presenter.presentedSemanticTitles.last
-            let oldLength = presenter.lengths.last
-            presenter.effectiveAppearance = try appearance(named: .darkAqua)
-            presenter.appearanceChangeHandler?()
-            try expect(presenter.images.last !== oldImage, "Expected immediate appearance update")
-            try expect(presenter.presentedSemanticTitles.last == oldTitle, "Expected the current frame preserved")
-            try expect(presenter.lengths.last == oldLength, "Expected stable status allocation")
-            try expect(scheduler.requests.count == 1, "Expected no new rotation schedule")
-            try expect(scheduler.cancelCount == 0, "Expected no rotation cancellation")
-            scheduler.fire()
-            try expect(presenter.presentedSemanticTitles.last == "[d] 81%", "Expected the next cached frame")
-            controller.setPaused(true, for: .menuOpen)
-            presenter.effectiveAppearance = try appearance(named: .aqua)
-            presenter.appearanceChangeHandler?()
-            let pausedCount = presenter.images.count
-            scheduler.fire()
-            try expect(presenter.images.count == pausedCount, "Expected appearance updates to preserve pause")
-        }
-    }
-}
-
-private func capsuleFrameRenderingTest() -> TestCase {
-    TestCase(name: "status renderer preserves semantics in one capsule image") {
-        try await MainActor.run {
-            let renderer = StatusFrameRenderer()
-            let aqua = try appearance(named: .aqua)
-            let single = renderer.render(
-                menubarFrame(product: .codex, duration: 300, value: .fresh(83)),
-                appearance: aqua
-            )
-            let comparison = renderer.render(mixedComparisonFrame(), appearance: aqua)
-            let compact = renderer.render(
-                menubarFrame(product: .codex, duration: 300, value: .fresh(83)),
-                durationMode: .compactSingleCriterion,
-                appearance: aqua
-            )
-
-            try expect(single.semanticTitle == "[5h] 83%", "Unexpected single semantic title")
-            try expect(single.visualLabel == "5h 83%", "Unexpected single visual label")
-            try expect(single.image.size.height == 18, "Expected one slim capsule image")
-            try expect(single.measuredWidth == single.image.size.width, "Expected image width")
-            try expect(compact.visualLabel == "83%", "Expected compact visual label")
-            try expect(
-                compact.semanticTitle == single.semanticTitle,
-                "Expected semantic title preservation"
-            )
-            try expect(
-                compact.accessibilityLabel == single.accessibilityLabel,
-                "Expected VoiceOver sentence preservation"
-            )
-            try expect(
-                comparison.semanticTitle == "C[5h]75% · S[w]82%",
-                "Unexpected comparison semantics"
-            )
-            try expect(
-                comparison.visualLabel == "C 5h 75% · S w 82%",
-                "Unexpected comparison visual label"
-            )
-        }
-    }
-}
-
-private func renderedStateSemanticsTest() -> TestCase {
-    TestCase(name: "status renderer keeps fresh stale loading and unavailable states") {
-        try await MainActor.run {
-            let renderer = StatusFrameRenderer()
-            let aqua = try appearance(named: .aqua)
-            let expectations: [(DisplayValueState, String)] = [
-                (.fresh(83), "5h 83%"),
-                (.stale(83), "5h ~83%"),
-                (.loading, "5h …"),
-                (.unavailable, "5h —")
-            ]
-
-            for expectation in expectations {
-                let frame = menubarFrame(
-                    product: .codex,
-                    duration: 300,
-                    value: expectation.0
-                )
-                let rendered = renderer.render(frame, appearance: aqua)
-                try expect(rendered.visualLabel == expectation.1, "Unexpected rendered state")
-            }
-
-            let unknown = renderer.render(
-                menubarFrame(product: .codex, duration: nil, value: .stale(83)),
-                appearance: aqua
-            )
-            try expect(unknown.visualLabel == "? ~83%", "Expected unknown duration meaning")
-        }
-    }
-}
-
-private func fixedWidthPolicyTest() -> TestCase {
-    TestCase(name: "status width uses prototypes padding without clipping") {
-        try await MainActor.run {
-            let presenter = RecordingStatusItemPresenter()
-            let scheduler = ManualStatusRotationScheduler()
-            let renderer = RecordingStatusFrameRenderer(widths: [
-                "[5h] 9%": 20,
-                "[w] 82%": 50,
-                "[w] ~100%": 90,
-                "[30d] ~100%": 300
-            ])
-            let controller = StatusItemController(
-                presenter: presenter,
-                renderer: renderer,
-                scheduler: scheduler
-            )
-            let frames = [
-                menubarFrame(product: .codex, duration: 300, value: .fresh(9)),
-                menubarFrame(product: .codex, duration: 10_080, value: .fresh(82))
-            ]
-            let prototype = menubarFrame(
-                product: .codex,
-                duration: 10_080,
-                value: .stale(100)
-            )
-
-            controller.setFrames(frames, widthPrototypes: [prototype])
-            try expect(presenter.lengths == [98], "Expected maximum width plus four points per side")
-            scheduler.fire()
-            try expect(presenter.lengths == [98], "Expected width unchanged on tick")
-
-            let widePrototype = menubarFrame(
-                product: .codex,
-                duration: 43_200,
-                value: .stale(100)
-            )
-            controller.setFrames([frames[0]], widthPrototypes: [widePrototype])
-            try expect(presenter.lengths.last == 308, "Expected full unclipped width")
-        }
-    }
-}
-
-private func derivedWidthPrototypeStabilityTest() -> TestCase {
-    TestCase(name: "status width derives worst values without caller prototypes") {
-        try await MainActor.run {
-            let presenter = RecordingStatusItemPresenter()
-            let renderer = RecordingStatusFrameRenderer(widths: [
-                "[5h] 9%": 20,
-                "[5h] 100%": 80,
-                "[5h] ~100%": 90
-            ])
-            let controller = StatusItemController(
-                presenter: presenter,
-                renderer: renderer,
-                scheduler: ManualStatusRotationScheduler()
-            )
-
-            controller.setFrames([
-                menubarFrame(product: .codex, duration: 300, value: .fresh(9))
-            ])
-            controller.setFrames([
-                menubarFrame(product: .codex, duration: 300, value: .fresh(100))
-            ])
-
-            try expect(presenter.lengths == [98], "Expected stable width without repeating the setter")
-        }
-    }
-}
-
-private func singleFrameHasNoScheduleTest() -> TestCase {
-    TestCase(name: "one status frame creates no rotation schedule command") {
-        try await MainActor.run {
-            let fixture = makeControllerFixture()
-            let frame = menubarFrame(product: .codex, duration: 300, value: .loading)
-
-            fixture.controller.setFrames([frame])
-
-            try expect(fixture.scheduler.requests.isEmpty, "Expected no schedule")
-            try expect(fixture.scheduler.cancelCount == 0, "Expected no timer cancellation")
-            try expect(fixture.presenter.presentedSemanticTitles == ["[5h] …"], "Expected frame")
-        }
-    }
-}
-
-private func rotationOrderingTest() -> TestCase {
-    TestCase(name: "status frames rotate every five seconds in order") {
-        try await MainActor.run {
-            let fixture = makeControllerFixture()
-            let frames = rotationFrames()
-
-            fixture.controller.setFrames(frames)
-            try expect(fixture.scheduler.requests == [.init(interval: 5, tolerance: 1)], "Unexpected timer")
-
-            fixture.scheduler.fire()
-            fixture.scheduler.fire()
-            fixture.scheduler.fire()
-
-            try expect(
-                fixture.presenter.presentedSemanticTitles
-                    == ["[5h] 83%", "[w] 82%", "[d] 81%", "[5h] 83%"],
-                "Expected deterministic frame order"
-            )
-        }
-    }
-}
-
-private func rotationPauseResumeTest() -> TestCase {
-    TestCase(name: "all status pause reasons cancel and restart from frame zero") {
-        try await MainActor.run {
-            let fixture = makeControllerFixture()
-            fixture.controller.setFrames(rotationFrames())
-
-            for reason in StatusRotationPauseReason.allCases {
-                fixture.scheduler.fire()
-                fixture.controller.setPaused(true, for: reason)
-                let countWhilePaused = fixture.presenter.presentedSemanticTitles.count
-                fixture.scheduler.fire()
-                try expect(
-                    fixture.presenter.presentedSemanticTitles.count == countWhilePaused,
-                    "Expected no paused tick"
-                )
-                fixture.controller.setPaused(false, for: reason)
-                try expect(
-                    fixture.presenter.presentedSemanticTitles.last == "[5h] 83%",
-                    "Expected resume at frame zero"
-                )
-            }
-
-            try expect(fixture.scheduler.cancelCount == 5, "Expected one cancellation per reason")
-            try expect(fixture.scheduler.requests.count == 6, "Expected fresh schedule after resume")
-        }
-    }
-}
-
-private func rotationTickUsesCachedFramesTest() -> TestCase {
-    TestCase(name: "rotation tick only presents pre-rendered cached frames") {
-        try await MainActor.run {
-            let fixture = makeControllerFixture()
-            fixture.controller.setFrames(rotationFrames())
-            let renderCount = fixture.renderer.renderCount
-            let lengthCount = fixture.presenter.lengths.count
-
-            fixture.scheduler.fire()
-            fixture.scheduler.fire()
-
-            try expect(fixture.renderer.renderCount == renderCount, "Expected no tick rendering")
-            try expect(fixture.presenter.lengths.count == lengthCount, "Expected no tick resize")
-            try expect(fixture.presenter.inputOutputCount == 0, "Expected no tick I/O")
-        }
-    }
-}
-
-private func accessibilityUpdateTest() -> TestCase {
-    TestCase(name: "status accessibility follows frames without announcements") {
-        try await MainActor.run {
-            let fixture = makeControllerFixture()
-            fixture.controller.setFrames(rotationFrames())
-            fixture.scheduler.fire()
-
-            try expect(
-                fixture.presenter.accessibilityLabels == [
-                    "Codex 5시간 한도 남은 사용량 83퍼센트",
-                    "Codex 1주 한도 남은 사용량 82퍼센트"
-                ],
-                "Expected accessibility label updates"
-            )
-            try expect(fixture.presenter.announcementCount == 0, "Expected no announcements")
-        }
-    }
-}
-
-@MainActor
-private func makeControllerFixture() -> ControllerFixture {
-    let presenter = RecordingStatusItemPresenter()
-    let scheduler = ManualStatusRotationScheduler()
-    let renderer = RecordingStatusFrameRenderer()
-    let controller = StatusItemController(
-        presenter: presenter,
-        renderer: renderer,
-        scheduler: scheduler
-    )
-    return ControllerFixture(
-        controller: controller,
-        presenter: presenter,
-        scheduler: scheduler,
-        renderer: renderer
-    )
-}
-
-@MainActor
-private func renderedDurationModes(
-    frames: [DisplayFrame],
-    widthPrototypes: [DisplayFrame] = []
-) -> [StatusDurationMode] {
-    let fixture = makeControllerFixture()
-    fixture.controller.setFrames(frames, widthPrototypes: widthPrototypes)
-    return fixture.renderer.durationModes
-}
-
-private func rotationFrames() -> [DisplayFrame] {
-    [
-        menubarFrame(product: .codex, duration: 300, value: .fresh(83)),
-        menubarFrame(product: .codex, duration: 10_080, value: .fresh(82)),
-        menubarFrame(product: .codex, duration: 1_440, value: .fresh(81))
-    ]
-}
-
 private func menubarFrame(
     product: UsageProduct,
     duration: Int?,
@@ -1014,26 +498,6 @@ private func menubarFrame(
             ),
             value: value
         )
-    )
-}
-
-private func mixedComparisonFrame() -> DisplayFrame {
-    let codex = menubarQuota(product: .codex, duration: 300, value: .fresh(75))
-    let spark = menubarQuota(product: .spark, duration: 10_080, value: .fresh(82))
-    return .comparison(codex: codex, spark: spark)
-}
-
-private func menubarQuota(
-    product: UsageProduct,
-    duration: Int?,
-    value: DisplayValueState
-) -> DisplayQuota {
-    DisplayQuota(
-        identifier: QuotaSelectionID(
-            product: product,
-            rawDurationMinutes: duration
-        ),
-        value: value
     )
 }
 
@@ -1137,8 +601,7 @@ private func statusVocabulary(
             freshValueFormat: "남은 사용량 {percent}퍼센트",
             staleValueFormat: "남은 사용량 마지막 확인값 {percent}퍼센트",
             loadingValue: "사용량 확인 중",
-            unavailableValue: "사용량 확인 불가",
-            comparisonSeparator: ", "
+            unavailableValue: "사용량 확인 불가"
         )
     case .english:
         StatusAccessibilityVocabulary(
@@ -1146,8 +609,7 @@ private func statusVocabulary(
             freshValueFormat: "{percent} percent remaining",
             staleValueFormat: "last confirmed value {percent} percent remaining",
             loadingValue: "checking usage",
-            unavailableValue: "usage unavailable",
-            comparisonSeparator: ", "
+            unavailableValue: "usage unavailable"
         )
     }
 }
@@ -1177,40 +639,6 @@ private func durationVocabulary(
             weeks: "{count} weeks"
         )
     }
-}
-
-private func statusLocalizationValue(
-    language: String,
-    key: String
-) throws -> String {
-    let contents = try String(
-        contentsOf: statusLocalizationFile(language: language),
-        encoding: .utf8
-    )
-    let prefix = "\"\(key)\" = \""
-    guard let line = contents.split(separator: "\n").first(where: {
-        $0.hasPrefix(prefix)
-    }) else {
-        throw TestFailure(description: "Missing status localization key")
-    }
-    return String(line.dropFirst(prefix.count).dropLast(2))
-}
-
-private func statusLocalizationFile(language: String) -> URL {
-    URL(fileURLWithPath: #filePath)
-        .deletingLastPathComponent()
-        .deletingLastPathComponent()
-        .deletingLastPathComponent()
-        .appendingPathComponent("Sources/CodexGaugeAppKit/Resources")
-        .appendingPathComponent("\(language).lproj/Localizable.strings")
-}
-
-@MainActor
-private struct ControllerFixture {
-    let controller: StatusItemController
-    let presenter: RecordingStatusItemPresenter
-    let scheduler: ManualStatusRotationScheduler
-    let renderer: RecordingStatusFrameRenderer
 }
 
 @MainActor
@@ -1252,7 +680,6 @@ private final class RecordingStatusFrameRenderer: StatusFrameRendering {
         durationVocabulary: durationVocabulary(language: .korean)
     )
     private(set) var renderCount = 0
-    private(set) var durationModes: [StatusDurationMode] = []
 
     init(widths: [String: CGFloat] = [:]) {
         self.widths = widths
@@ -1260,12 +687,10 @@ private final class RecordingStatusFrameRenderer: StatusFrameRendering {
 
     func render(
         _ frame: DisplayFrame,
-        durationMode: StatusDurationMode,
         appearance: NSAppearance?
     ) -> RenderedStatusFrame {
         _ = appearance
         renderCount += 1
-        durationModes.append(durationMode)
         let formatted = formatter.format(frame)
         let measuredWidth = widths[formatted.title] ?? CGFloat(formatted.title.count * 8)
         return RenderedStatusFrame(
@@ -1278,32 +703,124 @@ private final class RecordingStatusFrameRenderer: StatusFrameRendering {
     }
 }
 
+private func singleStatusStatesTest() -> TestCase {
+    TestCase(name: "single status shows only percentages and preserves state markers") {
+        try await MainActor.run {
+            let renderer = StatusFrameRenderer()
+            let durations: [Int?] = [300, 10_080, 90, nil]
+            let states: [(DisplayValueState, String)] = [
+                (.fresh(83), "83%"), (.stale(83), "~83%"),
+                (.loading, "…"), (.unavailable, "—")
+            ]
+            for duration in durations {
+                for (value, label) in states {
+                    let rendered = renderer.render(
+                        menubarFrame(product: .codex, duration: duration, value: value),
+                        appearance: nil
+                    )
+                    try expect(rendered.visualLabel == label, "Expected a value-only capsule")
+                    try expect(rendered.measuredWidth == rendered.image.size.width, "Expected full capsule width")
+                }
+            }
+        }
+    }
+}
+
+private func fixedCapsuleAllocationTest() -> TestCase {
+    TestCase(name: "single capsule fills its fixed width with two-point outer insets at every scale") {
+        try await MainActor.run {
+            let presenter = RecordingStatusItemPresenter()
+            let controller = StatusItemController(presenter: presenter)
+            let reference = StatusGaugeImageCache().image(label: "00%", appearance: .default)
+            let font = try expectedCapsuleFont()
+            let values = (0...100).flatMap { [DisplayValueState.fresh($0), .stale($0)] }
+                + [.loading, .unavailable]
+            let expectedWidth = ceil(("00%" as NSString).size(withAttributes: [.font: font]).width) + 8
+            try expect(reference.size.width == expectedWidth, "Expected the native two-digit measurement")
+            for appearanceName in [NSAppearance.Name.aqua, .darkAqua] {
+                presenter.effectiveAppearance = try appearance(named: appearanceName)
+                for value in values {
+                    controller.setFrames([menubarFrame(product: .codex, duration: 300, value: value)])
+                    guard let image = presenter.images.last else {
+                        throw TestFailure(description: "Expected a capsule image")
+                    }
+                    try expect(image.size == NSSize(width: expectedWidth, height: 20), "Expected minimal fixed capsule geometry")
+                    for bitmap in image.representations.compactMap({ $0 as? NSBitmapImageRep }) {
+                        let left = try bitmapPixel(bitmap, image: image, point: NSPoint(x: 1, y: 10))
+                        let right = try bitmapPixel(bitmap, image: image, point: NSPoint(x: image.size.width - 2, y: 10))
+                        try expect(left.alpha == 255 && right.alpha == 255, "Expected capsule fill to span the allocated image")
+                    }
+                }
+            }
+            try expect(presenter.lengths == [expectedWidth + 4], "Expected exactly two outer points per side without resizing")
+        }
+    }
+}
+
+private func localizedSingleAccessibilityTest() -> TestCase {
+    TestCase(name: "single status retains localized duration and stale accessibility") {
+        let frame = menubarFrame(product: .codex, duration: 300, value: .stale(75))
+        try expect(StatusAccessibilityFormatter(language: .korean).format(frame)
+            == "Codex 5시간 한도 남은 사용량 마지막 확인값 75퍼센트", "Expected Korean duration and freshness")
+        try expect(StatusAccessibilityFormatter(language: .english).format(frame)
+            == "Codex 5 hours quota, last confirmed value 75 percent remaining", "Expected English duration and freshness")
+        let unknown = menubarFrame(product: .codex, duration: nil, value: .unavailable)
+        try expect(StatusAccessibilityFormatter(language: .english).format(unknown)
+            == "Codex unknown duration quota, usage unavailable", "Expected missing duration and value without fake zero")
+    }
+}
+
+private func singleFrameReplacementTest() -> TestCase {
+    TestCase(name: "status replaces one selected value without retaining rotation candidates") {
+        try await MainActor.run {
+            let fixture = makeControllerFixture()
+            let first = singleFrames()[0]
+            let second = menubarFrame(product: .codex, duration: 10_080, value: .fresh(42))
+            fixture.controller.setFrames([first, second])
+            try expect(fixture.renderer.renderCount == 1, "Expected only one selected frame to render")
+            fixture.controller.setFrames([second])
+            try expect(fixture.presenter.presentedSemanticTitles == ["[5h] 83%", "[w] 42%"], "Expected direct selected frame replacement")
+            try expect(fixture.presenter.accessibilityLabels.last == "Codex 1주 한도 남은 사용량 42퍼센트", "Expected updated accessible selection")
+            try expect(fixture.presenter.announcementCount == 0, "Expected no unsolicited announcements")
+        }
+    }
+}
+
+private func singleAppearanceRefreshTest() -> TestCase {
+    TestCase(name: "single status recolors once while preserving value and allocation") {
+        try await MainActor.run {
+            let presenter = RecordingStatusItemPresenter()
+            let controller = StatusItemController(presenter: presenter)
+            controller.setFrames(singleFrames())
+            let originalImage = presenter.images.last
+            presenter.effectiveAppearance = try appearance(named: .darkAqua)
+            for _ in 0..<100 { presenter.appearanceChangeHandler?() }
+            try expect(presenter.images.count == 2, "Expected one actual palette update")
+            try expect(presenter.images.last !== originalImage, "Expected recolored image")
+            try expect(presenter.presentedSemanticTitles == ["[5h] 83%", "[5h] 83%"], "Expected unchanged selection")
+            try expect(presenter.lengths.count == 1, "Expected no appearance resize")
+        }
+    }
+}
+
 @MainActor
-private final class ManualStatusRotationScheduler: StatusRotationScheduling {
-    struct Request: Equatable {
-        let interval: TimeInterval
-        let tolerance: TimeInterval
-    }
+private struct ControllerFixture {
+    let controller: StatusItemController
+    let presenter: RecordingStatusItemPresenter
+    let renderer: RecordingStatusFrameRenderer
+}
 
-    private(set) var requests: [Request] = []
-    private(set) var cancelCount = 0
-    private var action: (@MainActor () -> Void)?
+@MainActor
+private func makeControllerFixture() -> ControllerFixture {
+    let presenter = RecordingStatusItemPresenter()
+    let renderer = RecordingStatusFrameRenderer()
+    return ControllerFixture(
+        controller: StatusItemController(presenter: presenter, renderer: renderer),
+        presenter: presenter,
+        renderer: renderer
+    )
+}
 
-    func schedule(
-        interval: TimeInterval,
-        tolerance: TimeInterval,
-        action: @escaping @MainActor () -> Void
-    ) {
-        requests.append(Request(interval: interval, tolerance: tolerance))
-        self.action = action
-    }
-
-    func cancel() {
-        cancelCount += 1
-        action = nil
-    }
-
-    func fire() {
-        action?()
-    }
+private func singleFrames() -> [DisplayFrame] {
+    [menubarFrame(product: .codex, duration: 300, value: .fresh(83))]
 }

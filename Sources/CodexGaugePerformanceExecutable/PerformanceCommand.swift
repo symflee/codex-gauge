@@ -127,14 +127,7 @@ private final class PerformanceApplication: NSObject, NSApplicationDelegate {
         self.options = options
         self.application = application
         metadata = MeasurementMetadata(options: options)
-        if options.mode == .rotation {
-            preference = DisplayPreference(productMode: .codex, quotaSelection: .manual([
-                QuotaSelectionID(product: .codex, rawDurationMinutes: 300),
-                QuotaSelectionID(product: .codex, rawDurationMinutes: 10_080)
-            ]))
-        } else {
-            preference = .default
-        }
+        preference = .default
         super.init()
     }
 
@@ -223,11 +216,10 @@ private final class PerformanceApplication: NSObject, NSApplicationDelegate {
         let system = SystemStatusItemPresenter(statusItem: item)
         let controller = StatusItemController(
             presenter: MeasuredStatusPresenter(system: system, measurements: measurements),
-            renderer: MeasuredStatusRenderer(measurements: measurements),
-            scheduler: MeasuredRotationScheduler(measurements: measurements)
+            renderer: MeasuredStatusRenderer(measurements: measurements)
         )
         statusController = controller
-        // Exercise the production image cache, text, width prototypes and settled
+        // Exercise the production image cache, text, fixed capsule width and settled
         // appearance path once, without constructing a menu, provider or date formatter.
         controller.setFrames([.single(DisplayQuota(
             identifier: QuotaSelectionID(product: .codex, rawDurationMinutes: 300),
@@ -264,12 +256,6 @@ private final class PerformanceApplication: NSObject, NSApplicationDelegate {
                     rateLimits: ProductRateLimits(state: .available, windows: windows),
                     issue: nil,
                     lastSuccessfulRefresh: capturedAt
-                ),
-                .spark: RefreshProductResult(
-                    usageState: .unavailable,
-                    rateLimits: ProductRateLimits(state: .unavailable, windows: []),
-                    issue: .unavailable,
-                    lastSuccessfulRefresh: nil
                 )
             ],
             lastSuccessfulRefresh: capturedAt,
@@ -305,12 +291,11 @@ private final class PerformanceApplication: NSObject, NSApplicationDelegate {
         let system = SystemStatusItemPresenter(statusItem: item)
         let controller = StatusItemController(
             presenter: MeasuredStatusPresenter(system: system, measurements: measurements),
-            renderer: MeasuredStatusRenderer(measurements: measurements),
-            scheduler: MeasuredRotationScheduler(measurements: measurements)
+            renderer: MeasuredStatusRenderer(measurements: measurements)
         )
         statusController = controller
         menuController = StatusMenuController(
-            presenter: system, statusItemController: controller,
+            presenter: system,
             actions: StatusMenuActions(
                 refresh: {}, openCodex: {}, selectCodex: {}, checkForUpdates: {}, settings: {},
                 quit: { [weak self] in self?.requestShutdown(reason: "menu_quit") }
@@ -589,13 +574,12 @@ private final class PerformanceApplication: NSObject, NSApplicationDelegate {
                 && measurements.counters.acceptedResponses > 0
                 && measurements.counters.renderCalls == 0 && measurements.counters.presentCalls == 0
                 && measurements.counters.widthChanges == 0 && measurements.counters.menuModelRequests == 0
-                && measurements.counters.settingsOpened == 0 && measurements.counters.rotationTicks == 0
+                && measurements.counters.settingsOpened == 0
         }
         if metadata.diagnosticOnly {
             guard diagnosticConfigured, sessions.created == 0,
                   measurements.counters.publications == 0,
-                  measurements.counters.settingsOpened == 0,
-                  measurements.counters.rotationTicks == 0 else { return false }
+                  measurements.counters.settingsOpened == 0 else { return false }
             if options.mode == .native {
                 return measurements.counters.renderCalls == 0
                     && measurements.counters.presentCalls == 0
@@ -610,8 +594,6 @@ private final class PerformanceApplication: NSObject, NSApplicationDelegate {
             guard let checkpoint = burstCheckpoint else { return false }
             return !checkpoint.burstActive && checkpoint.cooldownActive
                 && checkpoint.sessions.activeLeases == 0 && checkpoint.sessions.successfulReads >= 3
-        case .rotation:
-            return measurements.counters.rotationTicks > 0
         case .settings:
             return measurements.counters.settingsOpened == 10
                 && measurements.counters.settingsClosed == 10

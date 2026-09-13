@@ -25,10 +25,6 @@ public final class SettingsFormViewController: NSViewController {
         languageControl.itemTitles
     }
 
-    public var renderedProductOptionTitles: [String] {
-        segmentTitles(productControl)
-    }
-
     public var renderedSelectionOptionTitles: [String] {
         segmentTitles(selectionControl)
     }
@@ -123,7 +119,6 @@ public final class SettingsFormViewController: NSViewController {
     private let onCopyDiagnostics: () -> Void
     private let onOpenLaunchAtLoginSystemSettings: () -> Void
     private let onLaunchAtLoginIntentRequested: (Bool) -> Void
-    private let productModes = DisplayProductMode.allCases
     private let selectionModes: [SettingsQuotaSelectionMode] = [.automatic, .manual]
     private let refreshProfiles = RefreshProfile.allCases
     private let languages = AppLanguage.allCases
@@ -139,7 +134,6 @@ public final class SettingsFormViewController: NSViewController {
     private lazy var refreshSectionLabel = makeSectionTitle(strings.refreshSection)
     private lazy var connectionSectionLabel = makeSectionTitle(strings.connectionSection)
     private lazy var languageControl = makeLanguageControl()
-    private lazy var productControl = makeProductControl()
     private lazy var selectionControl = makeSelectionControl()
     private lazy var gaugePresetControl = makeGaugePresetControl()
     private lazy var gaugeBorderLabel = makeGaugeColorLabel(strings.gaugeBorderColor)
@@ -332,7 +326,6 @@ public final class SettingsFormViewController: NSViewController {
             languageSectionLabel,
             languageControl,
             displaySectionLabel,
-            productControl,
             selectionControl,
             gaugeSectionLabel,
             gaugePresetControl,
@@ -354,7 +347,6 @@ public final class SettingsFormViewController: NSViewController {
         stack.spacing = 8
         stack.translatesAutoresizingMaskIntoConstraints = false
         languageControl.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
-        productControl.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         selectionControl.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         gaugePresetControl.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         gaugeColorStack.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
@@ -414,18 +406,6 @@ public final class SettingsFormViewController: NSViewController {
             CodexGaugeAccessibilityIdentifier.settingsLanguage
         )
         control.setAccessibilityLabel(strings.languageAccessibilityLabel)
-        return control
-    }
-
-    private func makeProductControl() -> NSSegmentedControl {
-        let labels = productModes.map(strings.productName)
-        let control = NSSegmentedControl(
-            labels: labels,
-            trackingMode: .selectOne,
-            target: self,
-            action: #selector(productModeChanged(_:))
-        )
-        control.setAccessibilityLabel(strings.productAccessibilityLabel)
         return control
     }
 
@@ -606,7 +586,6 @@ public final class SettingsFormViewController: NSViewController {
         languageControl.selectItem(
             at: languages.firstIndex(of: formState.language) ?? 0
         )
-        productControl.selectedSegment = productModes.firstIndex(of: formState.productMode) ?? 0
         selectionControl.selectedSegment = selectionModes.firstIndex(
             of: formState.quotaSelectionMode
         ) ?? 0
@@ -622,7 +601,6 @@ public final class SettingsFormViewController: NSViewController {
     private func renderLocalizedStrings() {
         renderSectionTitles()
         renderLanguageControl()
-        renderSegmentTitles(productControl, titles: productModes.map(strings.productName))
         renderSegmentTitles(selectionControl, titles: selectionModes.map(strings.selectionModeName))
         renderGaugeLocalizedStrings()
         renderRefreshControl()
@@ -700,7 +678,6 @@ public final class SettingsFormViewController: NSViewController {
 
     private func renderAccessibilityLabels() {
         languageControl.setAccessibilityLabel(strings.languageAccessibilityLabel)
-        productControl.setAccessibilityLabel(strings.productAccessibilityLabel)
         selectionControl.setAccessibilityLabel(strings.selectionAccessibilityLabel)
         gaugePresetControl.setAccessibilityLabel(strings.gaugePresetAccessibilityLabel)
         gaugeBorderColorWell.setAccessibilityLabel(strings.gaugeBorderColor)
@@ -864,7 +841,7 @@ public final class SettingsFormViewController: NSViewController {
         enabled: Bool
     ) -> NSButton {
         let button = NSButton(
-            checkboxWithTitle: strings.quotaTitle(option),
+            radioButtonWithTitle: strings.quotaTitle(option),
             target: self,
             action: #selector(quotaSelectionChanged(_:))
         )
@@ -879,13 +856,6 @@ public final class SettingsFormViewController: NSViewController {
         let label = NSTextField(wrappingLabelWithString: strings.noQuotas)
         label.textColor = .secondaryLabelColor
         return label
-    }
-
-    @objc private func productModeChanged(_ sender: NSSegmentedControl) {
-        guard productModes.indices.contains(sender.selectedSegment) else {
-            return
-        }
-        apply(.productModeChanged(productModes[sender.selectedSegment]))
     }
 
     @objc private func languageChanged(_ sender: NSPopUpButton) {
@@ -1016,9 +986,6 @@ struct SettingsStrings {
     var languageAccessibilityLabel: String {
         localized("settings.language.accessibility")
     }
-    var productAccessibilityLabel: String {
-        localized("settings.product.accessibility")
-    }
     var selectionAccessibilityLabel: String {
         localized("settings.selection.accessibility")
     }
@@ -1045,10 +1012,6 @@ struct SettingsStrings {
         case .english:
             localized("settings.language.english")
         }
-    }
-
-    func productName(_ mode: DisplayProductMode) -> String {
-        localized("settings.product.\(mode.rawValue)")
     }
 
     func gaugePresetName(_ preset: StatusGaugePreset) -> String {

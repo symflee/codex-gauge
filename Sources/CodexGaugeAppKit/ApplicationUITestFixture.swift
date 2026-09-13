@@ -166,14 +166,8 @@ public actor UITestFixtureRefreshCoordinator: ApplicationRefreshCoordinating {
             issue: nil,
             lastSuccessfulRefresh: capturedAt
         )
-        let spark = RefreshProductResult(
-            usageState: .unavailable,
-            rateLimits: ProductRateLimits(state: .unavailable, windows: []),
-            issue: .unavailable,
-            lastSuccessfulRefresh: nil
-        )
         return RefreshPublication(
-            products: [.codex: codex, .spark: spark],
+            products: [.codex: codex],
             lastSuccessfulRefresh: capturedAt,
             lastAcceptedRateLimitResponse: capturedAt,
             failure: nil,

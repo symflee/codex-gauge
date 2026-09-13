@@ -90,6 +90,7 @@ verify_release_test_tier() {
       exit 1 unless ui_smoke.include?("-disableAutomaticPackageResolution")
       ui_step = steps.find { |step| step.fetch("run", "").include?("CodexGaugeUITests") }
       exit 1 unless ui_step.fetch("env", {})["CODEX_GAUGE_LOCAL_RELEASE_EFFECTS_ALLOWED"] == "1"
+      exit 1 unless ui_step.fetch("env", {})["TEST_RUNNER_CODEX_GAUGE_LOCAL_RELEASE_EFFECTS_ALLOWED"] == "1"
       exit 1 if runs.any? { |run| run.start_with?("swift package describe") }
       exit 1 if runs.any? { |run| run.start_with?("swift build -c debug") }
       exit 1 if runs.any? { |run| run.start_with?("swift test") }

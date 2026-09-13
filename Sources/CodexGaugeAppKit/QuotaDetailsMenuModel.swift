@@ -339,8 +339,6 @@ public struct QuotaDetailsMenuModelBuilder {
         switch product {
         case .codex:
             text(.productCodex)
-        case .spark:
-            text(.productSpark)
         }
     }
 
@@ -525,7 +523,6 @@ fileprivate struct QuotaMenuWindowInput: Equatable {
 
 private enum QuotaMenuTextKey: String, CaseIterable {
     case productCodex = "menu.product.codex"
-    case productSpark = "menu.product.spark"
     case quotaWithReset = "menu.quota.with_reset"
     case quotaWithoutReset = "menu.quota.without_reset"
     case quotaExpiredWithReset = "menu.quota.expired_with_reset"

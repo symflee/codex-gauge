@@ -8,22 +8,19 @@ public struct StatusAccessibilityVocabulary: Equatable, Sendable {
     public let staleValueFormat: String
     public let loadingValue: String
     public let unavailableValue: String
-    public let comparisonSeparator: String
 
     public init(
         quotaFormat: String,
         freshValueFormat: String,
         staleValueFormat: String,
         loadingValue: String,
-        unavailableValue: String,
-        comparisonSeparator: String
+        unavailableValue: String
     ) {
         self.quotaFormat = quotaFormat
         self.freshValueFormat = freshValueFormat
         self.staleValueFormat = staleValueFormat
         self.loadingValue = loadingValue
         self.unavailableValue = unavailableValue
-        self.comparisonSeparator = comparisonSeparator
     }
 }
 
@@ -60,10 +57,6 @@ public struct StatusAccessibilityFormatter: Sendable {
         switch frame {
         case .single(let quota):
             quotaLabel(quota)
-        case .comparison(let codex, let spark):
-            quotaLabel(codex)
-                + vocabulary.comparisonSeparator
-                + quotaLabel(spark)
         }
     }
 
@@ -82,8 +75,6 @@ public struct StatusAccessibilityFormatter: Sendable {
         switch product {
         case .codex:
             "Codex"
-        case .spark:
-            "Spark"
         }
     }
 
@@ -116,8 +107,7 @@ public struct StatusAccessibilityFormatter: Sendable {
             freshValueFormat: localized("status.accessibility.value.fresh"),
             staleValueFormat: localized("status.accessibility.value.stale"),
             loadingValue: localized("status.accessibility.value.loading"),
-            unavailableValue: localized("status.accessibility.value.unavailable"),
-            comparisonSeparator: localized("status.accessibility.comparison.separator")
+            unavailableValue: localized("status.accessibility.value.unavailable")
         )
     }
 
@@ -139,9 +129,6 @@ public struct StatusAccessibilityFormatter: Sendable {
             ),
             unavailableValue: localization.string(
                 "status.accessibility.value.unavailable"
-            ),
-            comparisonSeparator: localization.string(
-                "status.accessibility.comparison.separator"
             )
         )
     }

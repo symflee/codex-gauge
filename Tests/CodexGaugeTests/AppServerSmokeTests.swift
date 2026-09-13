@@ -44,7 +44,7 @@ private func appServerSmokeUsesProductionProtocolStackTest() -> TestCase {
         let processIdentifier = try smokeProcessIdentifier(in: processIdentifierFile)
 
         try expect(
-            result == .success(codex: .available, spark: .available),
+            result == .success(codex: .available),
             "Expected the complete production protocol flow"
         )
         try expect(
@@ -102,23 +102,26 @@ private func appServerSmokeMapsTypedSessionFailuresTest() -> TestCase {
 }
 
 private func appServerSmokeReportsCategoricalProductStatesTest() -> TestCase {
-    TestCase(name: "App Server smoke reports categorical product states only") {
-        let session = SmokeSessionFake(
-            result: smokeReadResult(codex: .available, spark: .partial)
-        )
-        let result = await makeSmokeRunner(session: session).run()
+    TestCase(name: "App Server smoke reports categorical Codex state only") {
+        let cases: [(ProductRateLimitState, AppServerSmokeProductState, String)] = [
+            (.available, .available, "available"),
+            (.partial, .partial, "partial"),
+            (.unavailable, .unavailable, "unavailable"),
+            (.malformed, .malformed, "malformed")
+        ]
+        for (state, expected, label) in cases {
+            let session = SmokeSessionFake(result: smokeReadResult(codex: state))
+            let result = await makeSmokeRunner(session: session).run()
 
-        try expect(
-            result == .success(codex: .available, spark: .partial),
-            "Expected categorical product states"
-        )
-        try expect(
-            AppServerSmokeOutputFormatter().line(for: result)
-                == "codex-gauge-smoke: ok codex=available spark=partial",
-            "Expected a stable sanitized success line"
-        )
-        try expect(result.exitCode == 0, "Expected success exit code")
-        try await expectSmokeSessionStoppedOnce(session)
+            try expect(result == .success(codex: expected), "Expected categorical Codex state")
+            try expect(
+                AppServerSmokeOutputFormatter().line(for: result)
+                    == "codex-gauge-smoke: ok codex=\(label)",
+                "Expected a stable sanitized success line"
+            )
+            try expect(result.exitCode == 0, "Expected success exit code")
+            try await expectSmokeSessionStoppedOnce(session)
+        }
     }
 }
 
@@ -127,8 +130,7 @@ private func appServerSmokeRejectsIncompatibleEnvelopeTest() -> TestCase {
         let session = SmokeSessionFake(
             result: smokeReadResult(
                 responseStatus: .incompatible,
-                codex: .malformed,
-                spark: .malformed
+                codex: .malformed
             )
         )
         let result = await makeSmokeRunner(session: session).run()
@@ -212,7 +214,7 @@ private func appServerSmokeMapsLocationFailuresTest() -> TestCase {
 private func appServerSmokeReportsUnconfirmedCleanupTest() -> TestCase {
     TestCase(name: "App Server smoke cannot report success without confirmed cleanup") {
         let session = SmokeSessionFake(
-            result: smokeReadResult(codex: .available, spark: .available),
+            result: smokeReadResult(codex: .available),
             stopResult: .unconfirmed
         )
         let result = await makeSmokeRunner(session: session).run()
@@ -259,15 +261,13 @@ private func makeSmokeRunner(session: SmokeSessionFake) -> AppServerSmokeRunner 
 
 private func smokeReadResult(
     responseStatus: RateLimitResponseStatus = .accepted,
-    codex: ProductRateLimitState,
-    spark: ProductRateLimitState
+    codex: ProductRateLimitState
 ) -> RateLimitReadResult {
     RateLimitReadResult(
         capturedAt: Date(timeIntervalSince1970: 1_900_000_000),
         responseStatus: responseStatus,
         rateLimitsByProduct: [
-            .codex: ProductRateLimits(state: codex, windows: []),
-            .spark: ProductRateLimits(state: spark, windows: [])
+            .codex: ProductRateLimits(state: codex, windows: [])
         ]
     )
 }

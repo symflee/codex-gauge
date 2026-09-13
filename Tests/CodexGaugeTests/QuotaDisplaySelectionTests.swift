@@ -146,71 +146,21 @@ private func duplicatePrimaryTieTest() -> TestCase {
 
 private func displayFrameBuilderTests() -> [TestCase] {
     [
-        automaticBothProductsFrameTest(),
         manualMissingSelectionTest(),
-        manualGroupingAndOrderingTest(),
-        manualProductModeFilterTest(),
-        manualDisjointProductFallbackTest(),
         productStatePlaceholderTest(),
         freshnessDeadlineTest(),
         resetDeadlineTest(),
-        independentProductFreshnessTest()
+        singleQuotaSelectionTest()
     ]
-}
-
-private func manualProductModeFilterTest() -> TestCase {
-    TestCase(name: "manual frames respect selected product mode") {
-        let now = displayReferenceDate()
-        let identifiers: Set<QuotaSelectionID> = [
-            QuotaSelectionID(product: .codex, rawDurationMinutes: 300),
-            QuotaSelectionID(product: .spark, rawDurationMinutes: 300)
-        ]
-        let preference = DisplayPreference(
-            productMode: .codex,
-            quotaSelection: .manual(identifiers)
-        )
-        let states = displayStates(
-            codex: [try displayWindow(usedPercent: 17, durationMinutes: 300)],
-            spark: [try displayWindow(usedPercent: 9, durationMinutes: 300)],
-            capturedAt: now
-        )
-
-        let item = try singleDisplayItem(from: makeFrames(preference, states, now))
-
-        try expect(item.identifier.product == .codex, "Expected Spark selection to be filtered")
-    }
-}
-
-private func manualDisjointProductFallbackTest() -> TestCase {
-    TestCase(name: "manual frames recover when every identifier is off-product") {
-        let now = displayReferenceDate()
-        let preference = DisplayPreference(
-            productMode: .codex,
-            quotaSelection: .manual([
-                QuotaSelectionID(product: .spark, rawDurationMinutes: 300)
-            ])
-        )
-        let states = displayStates(
-            codex: [try displayWindow(usedPercent: 17, durationMinutes: 300)],
-            capturedAt: now
-        )
-
-        let item = try singleDisplayItem(from: makeFrames(preference, states, now))
-
-        try expect(item.identifier.product == .codex, "Expected displayed product fallback")
-        try expect(item.value == .fresh(83), "Expected automatic quota fallback")
-    }
 }
 
 private func productStatePlaceholderTest() -> TestCase {
     TestCase(name: "automatic frames preserve loading and unavailable states") {
         let now = displayReferenceDate()
         let loadingPreference = DisplayPreference(
-            productMode: .codex,
             quotaSelection: .automatic
         )
         let unavailablePreference = DisplayPreference(
-            productMode: .spark,
             quotaSelection: .automatic
         )
 
@@ -227,27 +177,6 @@ private func productStatePlaceholderTest() -> TestCase {
     }
 }
 
-private func automaticBothProductsFrameTest() -> TestCase {
-    TestCase(name: "automatic both mode creates one mixed-duration frame") {
-        let now = displayReferenceDate()
-        let codex = try displayWindow(usedPercent: 25, durationMinutes: 300)
-        let spark = try displayWindow(usedPercent: 18, durationMinutes: 10_080)
-        let states = displayStates(codex: [codex], spark: [spark], capturedAt: now)
-        let preference = DisplayPreference(productMode: .both, quotaSelection: .automatic)
-
-        let frames = DisplayFrameBuilder().makeFrames(
-            preference: preference,
-            productStates: states,
-            now: now
-        )
-        let pair = try displayPair(from: frames)
-
-        try expect(frames.count == 1, "Expected one automatic comparison frame")
-        try expect(pair.codex.identifier.rawDurationMinutes == 300, "Expected Codex duration")
-        try expect(pair.spark.identifier.rawDurationMinutes == 10_080, "Expected Spark duration")
-    }
-}
-
 private func manualMissingSelectionTest() -> TestCase {
     TestCase(name: "manual missing selection remains unavailable") {
         let now = displayReferenceDate()
@@ -255,8 +184,7 @@ private func manualMissingSelectionTest() -> TestCase {
         let missingID = QuotaSelectionID(product: .codex, rawDurationMinutes: 10_080)
         let normalizedID = QuotaSelectionID(product: .codex, rawDurationMinutes: 0)
         let preference = DisplayPreference(
-            productMode: .codex,
-            quotaSelection: .manual([missingID])
+            quotaSelection: .manual(missingID)
         )
         let states = displayStates(codex: [available], capturedAt: now)
 
@@ -273,53 +201,13 @@ private func manualMissingSelectionTest() -> TestCase {
     }
 }
 
-private func manualGroupingAndOrderingTest() -> TestCase {
-    TestCase(name: "manual frames group equal durations and order unknown last") {
-        let now = displayReferenceDate()
-        let identifiers: Set<QuotaSelectionID> = [
-            QuotaSelectionID(product: .codex, rawDurationMinutes: nil),
-            QuotaSelectionID(product: .spark, rawDurationMinutes: 10_080),
-            QuotaSelectionID(product: .spark, rawDurationMinutes: 300),
-            QuotaSelectionID(product: .codex, rawDurationMinutes: 300)
-        ]
-        let preference = DisplayPreference(
-            productMode: .both,
-            quotaSelection: .manual(identifiers)
-        )
-        let states = displayStates(
-            codex: [
-                try displayWindow(usedPercent: 20, durationMinutes: nil),
-                try displayWindow(usedPercent: 30, durationMinutes: 300)
-            ],
-            spark: [
-                try displayWindow(usedPercent: 40, durationMinutes: 10_080),
-                try displayWindow(usedPercent: 50, durationMinutes: 300)
-            ],
-            capturedAt: now
-        )
-
-        let frames = DisplayFrameBuilder().makeFrames(
-            preference: preference,
-            productStates: states,
-            now: now
-        )
-
-        try expect(frames.count == 3, "Expected grouped and unmatched frames")
-        try expect(frameDuration(frames[0]) == 300, "Expected five-hour frame first")
-        try expect(frameDuration(frames[1]) == 10_080, "Expected weekly frame second")
-        try expect(frameDuration(frames[2]) == nil, "Expected unknown frame last")
-        try expect(isComparison(frames[0]), "Expected equal durations to be grouped")
-    }
-}
-
 private func freshnessDeadlineTest() -> TestCase {
     TestCase(name: "quota value expires at twenty-four hours") {
         let now = displayReferenceDate()
         let quota = try displayWindow(usedPercent: 17, durationMinutes: 300)
         let identifier = QuotaSelectionID(product: .codex, rawDurationMinutes: 300)
         let preference = DisplayPreference(
-            productMode: .codex,
-            quotaSelection: .manual([identifier])
+            quotaSelection: .manual(identifier)
         )
         let beforeDeadline = productValueState(
             [quota],
@@ -361,29 +249,6 @@ private func resetDeadlineTest() -> TestCase {
     }
 }
 
-private func independentProductFreshnessTest() -> TestCase {
-    TestCase(name: "Codex and Spark freshness remain independent") {
-        let now = displayReferenceDate()
-        let expiredCodex = try displayWindow(
-            usedPercent: 25,
-            durationMinutes: 300,
-            resetUnixSeconds: now.timeIntervalSince1970
-        )
-        let freshSpark = try displayWindow(
-            usedPercent: 18,
-            durationMinutes: 300,
-            resetUnixSeconds: now.timeIntervalSince1970 + 3_600
-        )
-        let preference = DisplayPreference(productMode: .both, quotaSelection: .automatic)
-        let states = displayStates(codex: [expiredCodex], spark: [freshSpark], capturedAt: now)
-
-        let pair = try displayPair(from: makeFrames(preference, states, now))
-
-        try expect(pair.codex.value == .unavailable, "Expected only Codex to expire")
-        try expect(pair.spark.value == .fresh(82), "Expected Spark to stay fresh")
-    }
-}
-
 private func displayWindow(
     slot: QuotaSlot = .primary,
     usedPercent: Double,
@@ -418,12 +283,10 @@ private func productValueState(
 
 private func displayStates(
     codex: [QuotaWindow] = [],
-    spark: [QuotaWindow] = [],
     capturedAt: Date
 ) -> [UsageProduct: ProductUsageState] {
     [
-        .codex: productValueState(codex, capturedAt: capturedAt),
-        .spark: productValueState(spark, capturedAt: capturedAt)
+        .codex: productValueState(codex, capturedAt: capturedAt)
     ]
 }
 
@@ -440,7 +303,7 @@ private func makeFrames(
 }
 
 private func displayItem(for quota: QuotaWindow, now: Date) throws -> DisplayQuota {
-    let preference = DisplayPreference(productMode: .codex, quotaSelection: .automatic)
+    let preference = DisplayPreference(quotaSelection: .automatic)
     let state = productValueState([quota], capturedAt: now)
     let frames = makeFrames(preference, [.codex: state], now)
     return try singleDisplayItem(from: frames)
@@ -453,27 +316,21 @@ private func singleDisplayItem(from frames: [DisplayFrame]) throws -> DisplayQuo
     return item
 }
 
-private func displayPair(
-    from frames: [DisplayFrame]
-) throws -> (codex: DisplayQuota, spark: DisplayQuota) {
-    guard frames.count == 1, case .comparison(let codex, let spark) = frames[0] else {
-        throw TestFailure(description: "Expected one comparison frame")
+private func singleQuotaSelectionTest() -> TestCase {
+    TestCase(name: "single quota chooses automatic or exactly one manual duration") {
+        let now = displayReferenceDate()
+        let states = displayStates(codex: [
+            try displayWindow(usedPercent: 25, durationMinutes: 300),
+            try displayWindow(usedPercent: 18, durationMinutes: 10_080),
+            try displayWindow(usedPercent: 40, durationMinutes: nil)
+        ], capturedAt: now)
+        let automatic = try singleDisplayItem(from: makeFrames(.default, states, now))
+        try expect(automatic.identifier.rawDurationMinutes == 300 && automatic.value == .fresh(75), "Expected automatic five-hour remaining percent")
+        for (duration, percent) in [(10_080 as Int?, 82), (nil, 60)] {
+            let identifier = QuotaSelectionID(product: .codex, rawDurationMinutes: duration)
+            let preference = DisplayPreference(quotaSelection: .manual(identifier))
+            let manual = try singleDisplayItem(from: makeFrames(preference, states, now))
+            try expect(manual.identifier == identifier && manual.value == .fresh(percent), "Expected only the explicitly selected quota")
+        }
     }
-    return (codex, spark)
-}
-
-private func frameDuration(_ frame: DisplayFrame) -> Int? {
-    switch frame {
-    case .single(let item):
-        item.identifier.rawDurationMinutes
-    case .comparison(let codex, _):
-        codex.identifier.rawDurationMinutes
-    }
-}
-
-private func isComparison(_ frame: DisplayFrame) -> Bool {
-    guard case .comparison = frame else {
-        return false
-    }
-    return true
 }

@@ -31,7 +31,7 @@ private func responseInterpretationTests() -> [TestCase] {
         decodesMultiBucketRateLimitsTest(),
         prefersMultiBucketRateLimitsTest(),
         decodesLegacyCodexRateLimitsTest(),
-        preservesIndependentProductFailuresTest(),
+        ignoresAdditionalProductBucketsTest(),
         preservesIndependentWindowFailuresTest(),
         decodesSpendControlLimitTest(),
         clampsSpendControlLimitTest(),
@@ -155,16 +155,15 @@ private func classifiesUnavailableAccountsTest() -> TestCase {
 }
 
 private func decodesMultiBucketRateLimitsTest() -> TestCase {
-    TestCase(name: "rate-limit response maps Codex Spark and both slots") {
+    TestCase(name: "rate-limit response maps only Codex and both slots") {
         let result = try interpretRateLimits(multiBucketFixture())
         let codex = result.rateLimits(for: .codex)
-        let spark = result.rateLimits(for: .spark)
 
         try expect(codex.state == .available, "Expected available Codex quotas")
         try expect(codex.windows.map(\.slot) == [.primary, .secondary], "Expected both Codex slots")
         try expect(codex.windows.first?.usedPercent == 12.5, "Expected numeric Double decoding")
-        try expect(spark.windows.first?.windowDurationMinutes == 300, "Expected Spark key mapping")
-        try expect(result.snapshot.quotaWindows(for: .spark) == spark.windows, "Expected domain snapshot mapping")
+        try expect(result.rateLimitsByProduct.count == 1, "Expected unknown extra buckets to be ignored")
+        try expect(result.snapshot.quotaWindows(for: .codex) == codex.windows, "Expected domain snapshot mapping")
     }
 }
 
@@ -187,21 +186,27 @@ private func decodesLegacyCodexRateLimitsTest() -> TestCase {
         let result = try interpretRateLimits(json)
 
         try expect(result.rateLimits(for: .codex).state == .available, "Expected legacy Codex quota")
-        try expect(result.rateLimits(for: .spark).state == .unavailable, "Expected no legacy Spark guess")
+        try expect(result.rateLimitsByProduct.count == 1, "Expected only the Codex product")
     }
 }
 
-private func preservesIndependentProductFailuresTest() -> TestCase {
-    TestCase(name: "malformed product preserves the other product") {
-        let json = rateLimitResponse(result: """
+private func ignoresAdditionalProductBucketsTest() -> TestCase {
+    TestCase(name: "additional product buckets neither alter nor replace Codex") {
+        let expected = try interpretRateLimits(rateLimitResponse(result: """
+        {"rateLimitsByLimitId":{"codex":{"primary":{"usedPercent":19,"windowDurationMins":300}}}}
+        """))
+        for extra in ["null", "false", "\"malformed\"", "{}", "{\"primary\":{\"usedPercent\":99}}"] {
+            let result = try interpretRateLimits(rateLimitResponse(result: """
+            {"rateLimitsByLimitId":{"codex":{"primary":{"usedPercent":19,"windowDurationMins":300}},"codex_bengalfox":\(extra),"future_product":\(extra)}}
+            """))
+            try expect(result == expected, "Expected unknown buckets to have no effect on Codex")
+        }
+        let malformed = try interpretRateLimits(rateLimitResponse(result: """
         {"rateLimitsByLimitId":{"codex":"malformed","codex_bengalfox":{"primary":{"usedPercent":19,"windowDurationMins":300}}}}
-        """)
-        let result = try interpretRateLimits(json)
-
-        try expect(result.rateLimits(for: .codex).state == .malformed, "Expected isolated Codex failure")
-        try expect(result.rateLimits(for: .spark).state == .available, "Expected preserved Spark quota")
-        try expect(result.responseStatus == .accepted, "Expected an accepted outer envelope")
-        try expect(result.snapshot.quotaWindows(for: .spark).count == 1, "Expected Spark in snapshot")
+        """))
+        try expect(malformed.rateLimits(for: .codex).state == .malformed, "Expected explicit Codex failure")
+        try expect(malformed.responseStatus == .accepted, "Expected an accepted outer envelope")
+        try expect(malformed.snapshot.quotaWindows(for: .codex).isEmpty, "Expected no extra product fallback")
     }
 }
 
@@ -235,7 +240,7 @@ private func decodesSpendControlLimitTest() -> TestCase {
 private func isolatesMalformedSpendControlTest() -> TestCase {
     TestCase(name: "malformed spend control does not fail quota windows") {
         let json = rateLimitResponse(result: """
-        {"rateLimitsByLimitId":{"codex":{"primary":{"usedPercent":22},"secondary":{"usedPercent":"bad"},"individualLimit":{"remainingPercent":"bad"},"spendControlReached":false},"codex_bengalfox":{"primary":{"usedPercent":8}}}}
+        {"rateLimitsByLimitId":{"codex":{"primary":{"usedPercent":22},"secondary":{"usedPercent":"bad"},"individualLimit":{"remainingPercent":"bad"},"spendControlReached":false}}}
         """)
         let result = try interpretRateLimits(json)
         let codex = result.rateLimits(for: .codex)
@@ -243,23 +248,24 @@ private func isolatesMalformedSpendControlTest() -> TestCase {
         try expect(codex.state == .partial, "Expected only the malformed quota to affect state")
         try expect(codex.spendControlLimit?.remainingPercent == nil, "Expected unavailable spend percent")
         try expect(codex.spendControlLimit?.reached == false, "Expected explicit non-reached state")
-        try expect(result.rateLimits(for: .spark).spendControlLimit == nil, "Expected missing spend fields to stay nil")
     }
 }
 
 private func clampsSpendControlLimitTest() -> TestCase {
     TestCase(name: "spend control clamps remaining percent bounds") {
-        let json = rateLimitResponse(result: """
-        {"rateLimitsByLimitId":{"codex":{"individualLimit":{"remainingPercent":-4.2}},"codex_bengalfox":{"individualLimit":{"remainingPercent":140.9}}}}
-        """)
-        let result = try interpretRateLimits(json)
-        let codex = result.rateLimits(for: .codex).spendControlLimit
-        let spark = result.rateLimits(for: .spark).spendControlLimit
+        for (rawValue, expected) in [(-4.2, 0), (140.9, 100)] {
+            let json = rateLimitResponse(result: """
+            {"rateLimitsByLimitId":{"codex":{"individualLimit":{"remainingPercent":\(rawValue)}}}}
+            """)
+            let spendControl = try interpretRateLimits(json).rateLimits(for: .codex).spendControlLimit
 
-        try expect(codex?.remainingPercent == 0, "Expected lower spend bound")
-        try expect(spark?.remainingPercent == 100, "Expected upper spend bound")
-        try expect(codex?.reached == nil, "Expected a missing reached state to stay unknown")
-        try expect(spark?.reached == nil, "Expected a missing reached state to stay unknown")
+            try expect(spendControl?.remainingPercent == expected, "Expected bounded remaining spend percent")
+            try expect(spendControl?.reached == nil, "Expected a missing reached state to stay unknown")
+        }
+        let noSpend = try interpretRateLimits(rateLimitResponse(result: """
+        {"rateLimitsByLimitId":{"codex":{"primary":{"usedPercent":8}}}}
+        """))
+        try expect(noSpend.rateLimits(for: .codex).spendControlLimit == nil, "Expected absent spend fields to stay nil")
     }
 }
 
@@ -271,7 +277,7 @@ private func treatsMissingBucketsAsUnavailableTest() -> TestCase {
         let result = try interpretRateLimits(json)
 
         try expect(result.rateLimits(for: .codex).state == .unavailable, "Expected missing Codex bucket")
-        try expect(result.rateLimits(for: .spark).state == .unavailable, "Expected missing Spark bucket")
+        try expect(result.rateLimits(for: .codex).windows.isEmpty, "Expected no legacy quota fallback")
     }
 }
 

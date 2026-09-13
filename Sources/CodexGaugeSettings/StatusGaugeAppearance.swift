@@ -41,7 +41,7 @@ public enum StatusGaugePreset: String, CaseIterable, Equatable, Hashable, Sendab
     public var borderColor: StatusGaugeColor {
         switch self {
         case .neutral:
-            fillColor
+            StatusGaugeColor(red: 0xA5, green: 0xAC, blue: 0xB6)
         case .blue:
             StatusGaugeColor(red: 0x00, green: 0x4C, blue: 0x99)
         case .graphite:

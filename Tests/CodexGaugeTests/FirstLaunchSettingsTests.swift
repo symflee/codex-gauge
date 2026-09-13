@@ -357,11 +357,9 @@ private func firstLaunchSyntheticPreferences(
 private func firstLaunchFormValues() -> SettingsFormValues {
     SettingsFormValues(
         displayPreference: DisplayPreference(
-            productMode: .both,
-            quotaSelection: .manual([
-                QuotaSelectionID(product: .codex, rawDurationMinutes: 300),
-                QuotaSelectionID(product: .spark, rawDurationMinutes: 10_080)
-            ])
+            quotaSelection: .manual(
+                QuotaSelectionID(product: .codex, rawDurationMinutes: 300)
+            )
         ),
         refreshProfile: .eco,
         launchAtLoginIntent: true

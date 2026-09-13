@@ -13,7 +13,6 @@
 "status.accessibility.duration.one-week" = "1주";
 "status.accessibility.duration.weeks" = "{count}주";
 "menu.product.codex" = "Codex";
-"menu.product.spark" = "Spark";
 "menu.quota.with_reset" = "[{duration}] · {remaining}% 남음 · 재설정 {reset}";
 "menu.quota.without_reset" = "[{duration}] · {remaining}% 남음 · 재설정 시각 없음";
 "menu.quota.expired_with_reset" = "[{duration}] · — · 재설정 {reset} · 새로 고침 필요";
@@ -48,9 +47,6 @@
 "settings.language.english" = "English";
 "settings.section.display" = "표시 대상";
 "settings.product.codex" = "Codex";
-"settings.product.spark" = "Spark";
-"settings.product.both" = "Codex와 Spark";
-"settings.product.accessibility" = "표시할 제품";
 "settings.selection.automatic" = "자동 선택";
 "settings.selection.manual" = "직접 선택";
 "settings.selection.accessibility" = "한도 선택 방식";

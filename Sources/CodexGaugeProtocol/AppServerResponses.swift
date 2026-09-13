@@ -233,19 +233,13 @@ private struct RateLimitResultDecoder {
         guard let buckets = multiBucket.objectValue else {
             return malformedProducts()
         }
-        return [
-            .codex: decodeBucket(buckets["codex"]),
-            .spark: decodeBucket(buckets["codex_bengalfox"])
-        ]
+        return [.codex: decodeBucket(buckets["codex"])]
     }
 
     private func decodeLegacy(
         _ bucket: JSONValue?
     ) -> [UsageProduct: ProductRateLimits] {
-        [
-            .codex: decodeBucket(bucket),
-            .spark: unavailableProduct()
-        ]
+        [.codex: decodeBucket(bucket)]
     }
 
     private func malformedProducts() -> [UsageProduct: ProductRateLimits] {
@@ -254,7 +248,7 @@ private struct RateLimitResultDecoder {
             windows: [],
             spendControlLimit: nil
         )
-        return [.codex: malformed, .spark: malformed]
+        return [.codex: malformed]
     }
 
     private func decodeBucket(

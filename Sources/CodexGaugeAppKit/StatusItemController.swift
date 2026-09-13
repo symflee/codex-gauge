@@ -112,31 +112,22 @@ public final class SystemStatusItemPresenter: StatusItemPresenting, StatusMenuPr
 
 @MainActor
 public final class StatusItemController {
-    private static let horizontalPadding: CGFloat = 8
+    private static let horizontalPadding: CGFloat = 4
 
     private let presenter: StatusItemPresenting
     private var renderer: StatusFrameRendering
-    private let rotation: StatusFrameRotation
-    private let prototypeBuilder = StatusWidthPrototypeBuilder()
-    private let durationPresentationPolicy = StatusDurationPresentationPolicy()
-    private var sourceFrames: [DisplayFrame] = []
+    private var sourceFrame: DisplayFrame?
     private var lastAppearance: StatusAppearanceVariant?
-    private var callerPrototypes: [DisplayFrame] = []
-    private var cachedPrototypeInputs: [DisplayFrame] = []
-    private var cachedPrototypes: [RenderedStatusFrame] = []
+    private var lastRenderedFrame: RenderedStatusFrame?
     private var lastLength: CGFloat?
     private var rendererInvalidated = true
 
     public init(
         presenter: StatusItemPresenting,
-        renderer: StatusFrameRendering = StatusFrameRenderer(),
-        scheduler: StatusRotationScheduling = RunLoopStatusRotationScheduler()
+        renderer: StatusFrameRendering = StatusFrameRenderer()
     ) {
         self.presenter = presenter
         self.renderer = renderer
-        rotation = StatusFrameRotation(scheduler: scheduler) { frame in
-            presenter.present(frame)
-        }
         presenter.setAppearanceChangeHandler { [weak self] in
             self?.refreshAppearance()
         }
@@ -145,120 +136,36 @@ public final class StatusItemController {
     public func replaceRenderer(_ renderer: StatusFrameRendering) {
         self.renderer = renderer
         rendererInvalidated = true
-        cachedPrototypeInputs = []
-        cachedPrototypes = []
     }
 
-    public func setFrames(
-        _ frames: [DisplayFrame],
-        widthPrototypes: [DisplayFrame] = []
-    ) {
+    public func setFrames(_ frames: [DisplayFrame]) {
+        guard let frame = frames.first else { return }
         let appearance = renderer.appearanceVariant(for: presenter.effectiveAppearance)
-        guard rendererInvalidated || sourceFrames != frames
-            || callerPrototypes != widthPrototypes || lastAppearance != appearance else {
+        guard rendererInvalidated || sourceFrame != frame || lastAppearance != appearance else {
             return
         }
-        let sameSelection = sourceFrames.map(selectionIdentity) == frames.map(selectionIdentity)
-        let configurationChanged = rendererInvalidated
-        sourceFrames = frames
-        callerPrototypes = widthPrototypes
+        sourceFrame = frame
         lastAppearance = appearance
         rendererInvalidated = false
-        let durationMode = durationPresentationPolicy.mode(for: frames)
-        let renderedFrames = render(frames, durationMode: durationMode)
-        let prototypes = prototypeBuilder.prototypes(for: frames) + widthPrototypes
-        if configurationChanged || prototypes != cachedPrototypeInputs {
-            cachedPrototypeInputs = prototypes
-            cachedPrototypes = render(prototypes, durationMode: durationMode)
-        }
-        let widthCandidates = renderedFrames + cachedPrototypes
-        updateLength(using: widthCandidates)
-        if sameSelection {
-            rotation.replaceRenderedFrames(renderedFrames)
-        } else {
-            rotation.setFrames(renderedFrames)
-        }
+        renderAndPresent(frame)
     }
 
     private func refreshAppearance() {
         let appearance = renderer.appearanceVariant(for: presenter.effectiveAppearance)
-        guard !sourceFrames.isEmpty, lastAppearance != appearance else { return }
+        guard let sourceFrame, lastAppearance != appearance else { return }
         lastAppearance = appearance
-        let durationMode = durationPresentationPolicy.mode(for: sourceFrames)
-        rotation.replaceRenderedFrames(render(sourceFrames, durationMode: durationMode))
+        renderAndPresent(sourceFrame)
     }
 
-    private func selectionIdentity(_ frame: DisplayFrame) -> [QuotaSelectionID] {
-        switch frame {
-        case .single(let quota): [quota.identifier]
-        case .comparison(let codex, let spark): [codex.identifier, spark.identifier]
+    private func renderAndPresent(_ frame: DisplayFrame) {
+        let rendered = renderer.render(frame, appearance: presenter.effectiveAppearance)
+        let length = ceil(rendered.measuredWidth) + Self.horizontalPadding
+        if lastLength != length {
+            lastLength = length
+            presenter.setLength(length)
         }
-    }
-
-    public func setPaused(_ paused: Bool, for reason: StatusRotationPauseReason) {
-        rotation.setPaused(paused, for: reason)
-    }
-
-    private func render(
-        _ frames: [DisplayFrame],
-        durationMode: StatusDurationMode
-    ) -> [RenderedStatusFrame] {
-        frames.map { frame in
-            renderer.render(
-                frame,
-                durationMode: durationMode,
-                appearance: presenter.effectiveAppearance
-            )
-        }
-    }
-
-    private func updateLength(using frames: [RenderedStatusFrame]) {
-        guard let widestFrame = frames.max(by: widthAscending) else {
-            return
-        }
-        let paddedWidth = ceil(widestFrame.measuredWidth) + Self.horizontalPadding
-        guard lastLength != paddedWidth else { return }
-        lastLength = paddedWidth
-        presenter.setLength(paddedWidth)
-    }
-
-    private func widthAscending(
-        _ left: RenderedStatusFrame,
-        _ right: RenderedStatusFrame
-    ) -> Bool {
-        left.measuredWidth < right.measuredWidth
-    }
-}
-
-private struct StatusDurationPresentationPolicy: Sendable {
-    func mode(for frames: [DisplayFrame]) -> StatusDurationMode {
-        let totalCriterionCount = frames.reduce(0) { count, frame in
-            count + criterionCount(for: frame)
-        }
-        guard totalCriterionCount == 1 else {
-            return .full
-        }
-        return .compactSingleCriterion
-    }
-
-    private func criterionCount(for frame: DisplayFrame) -> Int {
-        switch frame {
-        case .single:
-            1
-        case .comparison(let codex, let spark):
-            comparisonCriterionCount(codex: codex, spark: spark)
-        }
-    }
-
-    private func comparisonCriterionCount(
-        codex: DisplayQuota,
-        spark: DisplayQuota
-    ) -> Int {
-        guard codex.identifier.rawDurationMinutes
-            == spark.identifier.rawDurationMinutes
-        else {
-            return 2
-        }
-        return 1
+        if let lastRenderedFrame, rendered.hasSamePresentation(as: lastRenderedFrame) { return }
+        lastRenderedFrame = rendered
+        presenter.present(rendered)
     }
 }

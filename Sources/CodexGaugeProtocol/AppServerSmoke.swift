@@ -55,10 +55,7 @@ public enum AppServerSmokeFailure: Equatable, Sendable {
 }
 
 public enum AppServerSmokeResult: Equatable, Sendable {
-    case success(
-        codex: AppServerSmokeProductState,
-        spark: AppServerSmokeProductState
-    )
+    case success(codex: AppServerSmokeProductState)
     case failure(AppServerSmokeFailure)
 
     public var exitCode: Int32 {
@@ -76,18 +73,11 @@ public struct AppServerSmokeOutputFormatter: Sendable {
 
     public func line(for result: AppServerSmokeResult) -> String {
         switch result {
-        case let .success(codex, spark):
-            successLine(codex: codex, spark: spark)
+        case let .success(codex):
+            "codex-gauge-smoke: ok codex=\(codex.label)"
         case let .failure(failure):
             "codex-gauge-smoke: failed reason=\(failure.label)"
         }
-    }
-
-    private func successLine(
-        codex: AppServerSmokeProductState,
-        spark: AppServerSmokeProductState
-    ) -> String {
-        "codex-gauge-smoke: ok codex=\(codex.label) spark=\(spark.label)"
     }
 }
 
@@ -153,10 +143,7 @@ public struct AppServerSmokeRunner: Sendable {
         guard result.responseStatus == .accepted else {
             return .failure(.incompatibleProtocol)
         }
-        return .success(
-            codex: map(result.rateLimits(for: .codex).state),
-            spark: map(result.rateLimits(for: .spark).state)
-        )
+        return .success(codex: map(result.rateLimits(for: .codex).state))
     }
 
     private func map(

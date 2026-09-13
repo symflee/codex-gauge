@@ -1,20 +1,3 @@
-public enum DisplayProductMode: String, CaseIterable, Sendable {
-    case codex
-    case spark
-    case both
-
-    public var products: [UsageProduct] {
-        switch self {
-        case .codex:
-            [.codex]
-        case .spark:
-            [.spark]
-        case .both:
-            [.codex, .spark]
-        }
-    }
-}
-
 public struct QuotaSelectionID: Hashable, Sendable {
     public let product: UsageProduct
     public let rawDurationMinutes: Int?
@@ -34,23 +17,14 @@ public struct QuotaSelectionID: Hashable, Sendable {
 
 public enum DisplayQuotaSelection: Equatable, Sendable {
     case automatic
-    case manual(Set<QuotaSelectionID>)
+    case manual(QuotaSelectionID)
 }
 
 public struct DisplayPreference: Equatable, Sendable {
-    public static let `default` = DisplayPreference(
-        productMode: .codex,
-        quotaSelection: .automatic
-    )
-
-    public let productMode: DisplayProductMode
+    public static let `default` = DisplayPreference()
     public let quotaSelection: DisplayQuotaSelection
 
-    public init(
-        productMode: DisplayProductMode,
-        quotaSelection: DisplayQuotaSelection
-    ) {
-        self.productMode = productMode
+    public init(quotaSelection: DisplayQuotaSelection = .automatic) {
         self.quotaSelection = quotaSelection
     }
 }

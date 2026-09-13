@@ -13,6 +13,12 @@ for argument in "$@"; do
 done
 printf '\n' >> "$log_path"
 
+if [ "${1:-}" = "/usr/bin/xcodebuild" ] && [ "${2:-}" = "test" ]; then
+    printf 'UI_TEST_EFFECTS\t%s\n' \
+        "${TEST_RUNNER_CODEX_GAUGE_LOCAL_RELEASE_EFFECTS_ALLOWED:-}" \
+        >> "$log_path"
+fi
+
 if [ -n "$fixture_output" ]; then
     printf '%s\n' "$fixture_output"
 fi

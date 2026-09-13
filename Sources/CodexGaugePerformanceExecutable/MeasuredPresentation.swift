@@ -9,9 +9,6 @@ struct PresentationCounters: Encodable, Sendable {
     var presentCalls = 0
     var widthChanges = 0
     var settledAppearanceCallbacks = 0
-    var rotationSchedules = 0
-    var rotationCancellations = 0
-    var rotationTicks = 0
     var settingsOpened = 0
     var settingsClosed = 0
     var settingsGraphsReleased = 0
@@ -67,32 +64,10 @@ final class MeasuredStatusRenderer: StatusFrameRendering {
 
     func render(
         _ frame: DisplayFrame,
-        durationMode: StatusDurationMode,
         appearance: NSAppearance?
     ) -> RenderedStatusFrame {
         measurements.counters.renderCalls += 1
-        return renderer.render(frame, durationMode: durationMode, appearance: appearance)
-    }
-}
-
-@MainActor
-final class MeasuredRotationScheduler: StatusRotationScheduling {
-    private let scheduler = RunLoopStatusRotationScheduler()
-    private let measurements: PresentationMeasurements
-
-    init(measurements: PresentationMeasurements) { self.measurements = measurements }
-
-    func schedule(interval: TimeInterval, tolerance: TimeInterval, action: @escaping @MainActor () -> Void) {
-        measurements.counters.rotationSchedules += 1
-        scheduler.schedule(interval: interval, tolerance: tolerance) { [measurements] in
-            measurements.counters.rotationTicks += 1
-            action()
-        }
-    }
-
-    func cancel() {
-        measurements.counters.rotationCancellations += 1
-        scheduler.cancel()
+        return renderer.render(frame, appearance: appearance)
     }
 }
 

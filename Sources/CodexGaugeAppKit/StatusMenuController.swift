@@ -51,7 +51,6 @@ public struct StatusMenuActions {
 @MainActor
 public final class StatusMenuController: NSObject, NSMenuDelegate {
     private let menu = NSMenu()
-    private let statusItemController: StatusItemController
     private let actions: StatusMenuActions
     private var currentModel: QuotaDetailsMenuModel?
     private var rowsByID: [String: NSMenuItem] = [:]
@@ -61,10 +60,8 @@ public final class StatusMenuController: NSObject, NSMenuDelegate {
 
     public init(
         presenter: StatusMenuPresenting,
-        statusItemController: StatusItemController,
         actions: StatusMenuActions
     ) {
-        self.statusItemController = statusItemController
         self.actions = actions
         super.init()
         menu.autoenablesItems = false
@@ -130,13 +127,11 @@ public final class StatusMenuController: NSObject, NSMenuDelegate {
     public func menuWillOpen(_ menu: NSMenu) {
         _ = menu
         isOpen = true
-        statusItemController.setPaused(true, for: .menuOpen)
     }
 
     public func menuDidClose(_ menu: NSMenu) {
         _ = menu
         isOpen = false
-        statusItemController.setPaused(false, for: .menuOpen)
     }
 
     public func perform(_ action: QuotaMenuAction) {

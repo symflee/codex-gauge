@@ -51,7 +51,6 @@ private func applicationRuntimeDefersNativeMenuScenario() async throws {
     let presenter = RuntimeNativeMenuPresenter()
     let controller = StatusMenuController(
         presenter: presenter,
-        statusItemController: StatusItemController(presenter: presenter),
         actions: StatusMenuActions(refresh: {}, openCodex: {}, selectCodex: {},
                                    checkForUpdates: {}, settings: {}, quit: {})
     )
@@ -347,7 +346,6 @@ private func applicationRuntimeShutdownSkipsUnconfirmedRetirementScenario() asyn
     try await waitForRuntimeCondition { harness.settings.shutdownCount == 1 }
     await shutdown.value
     try expect(harness.refreshBuilder.coordinators.count == 1, "Expected shutdown to cancel replacement admission")
-    try expect(harness.status.pauseValues[.sleeping] == true, "Expected no surviving rotation timer during exit wait")
     await gate.resume()
     await Task.yield()
     try expect(harness.refreshBuilder.coordinators.count == 1, "Expected late exit confirmation not to launch a replacement")
@@ -751,8 +749,7 @@ private func applicationRuntimeStartsStatusBeforePreferencesTest() -> TestCase {
 private func applicationRuntimeStartsStatusBeforePreferencesScenario() async throws {
     let preferences = AppPreferences(
         displayPreference: DisplayPreference(
-            productMode: .spark,
-            quotaSelection: .automatic
+            quotaSelection: .manual(QuotaSelectionID(product: .codex, rawDurationMinutes: 10_080))
         ),
         refreshProfile: .fast,
         launchAtLoginIntent: true,
@@ -781,7 +778,7 @@ private func applicationRuntimeStartsStatusBeforePreferencesScenario() async thr
           case .single(let displayedQuota) = displayedFrame else {
         throw TestFailure(description: "Expected one loaded-preference frame")
     }
-    try expect(displayedQuota.identifier.product == .spark, "Expected loaded product mode")
+    try expect(displayedQuota.identifier.rawDurationMinutes == 10_080, "Expected loaded manual period")
     let events = await harness.refreshBuilder.coordinators[0].events
     try expect(events == [.start], "Expected initial start")
     try expect(harness.launch.enabledValues == [true], "Expected login intent reconciliation")
@@ -813,7 +810,10 @@ private func applicationRuntimePublishesOnePresentationTransactionScenario() asy
 
     let identifier = QuotaSelectionID(product: .codex, rawDurationMinutes: 300)
     try expect(harness.status.presentedFrames.last?.count == 1, "Expected one rendered frame")
-    try expect(harness.menu.models.last?.productSections.count == 2, "Expected complete menu")
+    let sections = harness.menu.models.last?.productSections
+    try expect(sections?.map(\.product) == [.codex], "Expected only the Codex menu section")
+    try expect(sections?.first?.quotaRows.count == 1, "Expected the complete Codex quota details")
+    try expect(sections?.first?.quotaRows.first?.contains("83%") == true, "Expected the same remaining quota in the menu")
     try expect(
         harness.settings.discoveredQuotaIDs.last == [identifier],
         "Expected discovered quota"
@@ -834,8 +834,7 @@ private func applicationRuntimeRoutesMenuAndSettingsScenario() async throws {
     harness.coordinator.start()
     await harness.coordinator.waitForPendingOperations()
     let preference = DisplayPreference(
-        productMode: .both,
-        quotaSelection: .automatic
+        quotaSelection: .manual(QuotaSelectionID(product: .codex, rawDurationMinutes: 10_080))
     )
     let values = SettingsFormValues(
         displayPreference: preference,
@@ -1011,12 +1010,8 @@ private func applicationRuntimeOrdersOverlappingResumeScenario() async throws {
     let refresh = harness.refreshBuilder.coordinators[0]
 
     harness.systemMonitor.emit(.sleep)
-    try expect(harness.status.pauseValues[.sleeping] == true, "Expected sleep pause")
     harness.systemMonitor.emit(.sessionLocked)
-    try expect(harness.status.pauseValues[.screenLocked] == true, "Expected lock pause")
     harness.systemMonitor.emit(.wake)
-    try expect(harness.status.pauseValues[.sleeping] == false, "Expected wake unpause")
-    try expect(harness.status.pauseValues[.screenLocked] == true, "Expected lock pause retained")
     await harness.coordinator.waitForPendingOperations()
 
     let suspendedEvents = await refresh.events
@@ -1027,7 +1022,6 @@ private func applicationRuntimeOrdersOverlappingResumeScenario() async throws {
     try expect(!suspendedEvents.contains(.resume), "Expected lock to prevent resume")
     harness.deadlineScheduler.deadlineOnWake = .quotaReset
     harness.systemMonitor.emit(.sessionUnlocked)
-    try expect(harness.status.pauseValues[.screenLocked] == false, "Expected unlock unpause")
     await harness.coordinator.waitForPendingOperations()
 
     let events = await refresh.events
@@ -1057,10 +1051,6 @@ private func applicationRuntimeHandlesPresentationOnlyDeadlinesScenario() async 
     let workspaceReadCount = harness.workspace.applicationURLReadCount
 
     harness.deadlineScheduler.emit(.validityExpired)
-    harness.assistiveMonitor.emit(AssistiveDisplayState(
-        isVoiceOverEnabled: true,
-        shouldReduceMotion: true
-    ))
     await harness.coordinator.waitForPendingOperations()
 
     let finalEventCount = await refresh.events.count
@@ -1070,8 +1060,6 @@ private func applicationRuntimeHandlesPresentationOnlyDeadlinesScenario() async 
         "Expected no workspace lookup"
     )
     try expect(harness.status.presentedFrames.count == presentationCount, "Expected unchanged loading frame to remain cached")
-    try expect(harness.status.pauseValues[.voiceOver] == true, "Expected VoiceOver pause")
-    try expect(harness.status.pauseValues[.reduceMotion] == true, "Expected motion pause")
 }
 
 private func applicationRuntimeSharesShutdownDrainTest() -> TestCase {
@@ -1179,7 +1167,6 @@ private func applicationRuntimeSharesShutdownDrainScenario() async throws {
     await Task.yield()
 
     try expect(harness.settings.shutdownCount == 0, "Expected shutdown to await refresh stop")
-    try expect(harness.status.pauseValues[.sleeping] == true, "Expected rotation stopped before shutdown awaits process cleanup")
     await stopGate.resume()
     await first.value
     await second.value
@@ -1200,7 +1187,6 @@ private final class RuntimeHarness {
     let settings = RuntimeSettingsSpy()
     let update = RuntimeUpdateSpy()
     let systemMonitor = RuntimeSystemMonitorSpy(initialLowPowerMode: true)
-    let assistiveMonitor = RuntimeAssistiveMonitorSpy()
     let deadlineScheduler = RuntimeDeadlineSchedulerSpy()
     let launch = RuntimeLaunchSpy()
     let refreshBuilder: RuntimeRefreshBuilderSpy
@@ -1237,7 +1223,6 @@ private final class RuntimeHarness {
             settingsRuntime: settings,
             applicationUpdateRuntime: update,
             systemActivityMonitor: systemMonitor,
-            assistiveDisplayMonitor: assistiveMonitor,
             deadlineSchedulerBuilder: ApplicationUsageDeadlineSchedulerBuilder { emitter in
                 scheduler.handler = { reason in
                     emitter.emit(reason)
@@ -1309,7 +1294,6 @@ private final class RuntimeStatusSpy: ApplicationStatusRuntime {
     }
 
     private(set) var presentedFrames = [[DisplayFrame]]()
-    private(set) var pauseValues = [StatusRotationPauseReason: Bool]()
     private var renderingConfigurations = [RenderingConfiguration]()
 
     var languages: [AppLanguage] {
@@ -1322,10 +1306,6 @@ private final class RuntimeStatusSpy: ApplicationStatusRuntime {
 
     func present(frames: [DisplayFrame]) {
         presentedFrames.append(frames)
-    }
-
-    func setRotationPaused(_ paused: Bool, for reason: StatusRotationPauseReason) {
-        pauseValues[reason] = paused
     }
 
     func updateRenderingConfiguration(
@@ -1455,23 +1435,6 @@ private final class RuntimeSystemMonitorSpy: ApplicationSystemActivityMonitoring
 
     func emit(_ event: SystemActivityEvent) {
         handler?(event)
-    }
-}
-
-@MainActor
-private final class RuntimeAssistiveMonitorSpy: ApplicationAssistiveDisplayMonitoring {
-    private var handler: (@MainActor @Sendable (AssistiveDisplayEvent) -> Void)?
-
-    func start(handler: @escaping @MainActor @Sendable (AssistiveDisplayEvent) -> Void) {
-        self.handler = handler
-    }
-
-    func stop() {
-        handler = nil
-    }
-
-    func emit(_ state: AssistiveDisplayState) {
-        handler?(.changed(state))
     }
 }
 
@@ -1799,11 +1762,8 @@ private func runtimePublication(usedPercent: Double) throws -> RefreshPublicatio
         issue: nil,
         lastSuccessfulRefresh: capturedAt
     )
-    guard let spark = RefreshPublication.initial.products[.spark] else {
-        throw TestFailure(description: "Expected initial Spark state")
-    }
     return RefreshPublication(
-        products: [.codex: product, .spark: spark],
+        products: [.codex: product],
         lastSuccessfulRefresh: capturedAt,
         failure: nil,
         isRefreshing: false

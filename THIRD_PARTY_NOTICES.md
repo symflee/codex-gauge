@@ -1,10 +1,22 @@
 # Third-Party Notices
 
+## Pretendard
+
+Codex Gauge bundles the unmodified Pretendard SemiBold 1.3.9 font by Kil Hyung-jin under the SIL Open Font License 1.1, with Reserved Font Name Pretendard.
+
+Source: [Pretendard 1.3.9](https://github.com/orioncactus/pretendard/releases/tag/v1.3.9).
+
+The complete copyright and license are in `Sources/CodexGaugeAppKit/Resources/Fonts/Pretendard-LICENSE.txt`. Application distributions include `Pretendard-LICENSE.txt` and `Pretendard-SOURCE.txt` alongside the font in the AppKit resource bundle. The font is used within the app and is not installed system-wide.
+
+## Sparkle
+
 Codex Gauge includes Sparkle 2.9.6 as its in-app update framework. The Swift Package Manager binary archive is pinned with SHA-256 `8d5fb41d960b43f4a68aa14126bf62b098544ec8d191cdcc73eb14e63a8e7606`.
 
 Source and license: <https://github.com/sparkle-project/Sparkle/tree/2.9.6>
 
 The following is the complete `LICENSE` distributed with Sparkle 2.9.6. This notice must remain in source distributions and be bundled with application distributions that include Sparkle.
+
+### MIT License and bundled external licenses
 
 ```text
 Copyright (c) 2006-2013 Andy Matuschak.

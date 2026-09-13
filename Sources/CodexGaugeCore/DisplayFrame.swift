@@ -21,7 +21,6 @@ public struct DisplayQuota: Equatable, Sendable {
 
 public enum DisplayFrame: Equatable, Sendable {
     case single(DisplayQuota)
-    case comparison(codex: DisplayQuota, spark: DisplayQuota)
 }
 
 public struct FormattedDisplayFrame: Equatable, Sendable {

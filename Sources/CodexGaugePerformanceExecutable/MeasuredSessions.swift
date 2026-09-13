@@ -187,8 +187,7 @@ private actor SyntheticQuotaSource {
         let primary = QuotaWindow(slot: .primary, usedPercent: Double(used), windowDurationMinutes: 300)!
         let secondary = QuotaWindow(slot: .secondary, usedPercent: 29, windowDurationMinutes: 10_080)!
         return RateLimitReadResult(capturedAt: capturedAt, rateLimitsByProduct: [
-            .codex: ProductRateLimits(state: .available, windows: [primary, secondary]),
-            .spark: ProductRateLimits(state: .unavailable, windows: [])
+            .codex: ProductRateLimits(state: .available, windows: [primary, secondary])
         ])
     }
 }

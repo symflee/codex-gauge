@@ -114,7 +114,7 @@ private func sessionCompletesProtocolFlowTest() -> TestCase {
             let second = try await session.readRateLimits(capturedAt: syntheticDate)
 
             try expect(first.rateLimits(for: .codex).state == .available, "Expected Codex quota")
-            try expect(first.rateLimits(for: .spark).state == .available, "Expected Spark quota")
+            try expect(first.rateLimitsByProduct.count == 1, "Expected unknown extra buckets to be ignored")
             try expect(second == first, "Expected reusable session with monotonic request IDs")
         }
     }
@@ -135,7 +135,7 @@ private func sessionAllowsUnknownProviderTest() -> TestCase {
         try await withSyntheticSession(.unknownProvider) { session in
             let result = try await session.readRateLimits(capturedAt: syntheticDate)
 
-            try expect(result.rateLimits(for: .spark).state == .available, "Expected rate-limit attempt")
+            try expect(result.rateLimits(for: .codex).state == .available, "Expected rate-limit attempt")
         }
     }
 }

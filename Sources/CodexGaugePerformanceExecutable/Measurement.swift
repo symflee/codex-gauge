@@ -2,7 +2,7 @@ import Darwin
 import Foundation
 
 enum MeasurementMode: String, CaseIterable, Codable, Sendable {
-    case empty, idle, burst, rotation, settings, menu, real, native, badge, model, legacyModel
+    case empty, idle, burst, settings, menu, real, native, badge, model, legacyModel
     case menuShell, menuAttached, engine
 }
 
@@ -11,7 +11,7 @@ struct MeasurementOptions: Sendable {
     let duration: Int
 
     static let usage = """
-    codex-gauge-performance --mode empty|idle|burst|rotation|settings|menu|real|native|badge|model|legacyModel|menuShell|menuAttached|engine [--duration SECONDS]
+    codex-gauge-performance --mode empty|idle|burst|settings|menu|real|native|badge|model|legacyModel|menuShell|menuAttached|engine [--duration SECONDS]
     Defaults: idle, 600 seconds; burst 340 seconds; settings 60 seconds; menu 10 seconds.
     Duration: 1...86400; burst requires at least 340; settings at least 30; menu at least 5.
     Run in a logged-in macOS GUI session. No build or installation is performed.

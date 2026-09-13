@@ -3,7 +3,7 @@
 set -euo pipefail
 
 usage() {
-    echo "Usage: test-fast.sh [--suite <core|protocol|process|refresh|settings|appkit|full>] [--filter <substring>] [--verbose] [--developer-dir <path>] [--dry-run]" >&2
+    echo "Usage: test-fast.sh (--suite <core|protocol|process|refresh|settings|appkit|full> | --filter <substring>) [--verbose] [--developer-dir <path>] [--dry-run]" >&2
 }
 
 fail() {
@@ -86,6 +86,8 @@ if [ -n "$suite" ]; then
 fi
 [ "$filter_set" -eq 0 ] || [ -n "$filter" ] \
     || fail "filter must not be empty"
+[ -n "$suite" ] || [ "$filter_set" -eq 1 ] \
+    || fail "choose --suite or --filter; use --suite full for all headless tests"
 [ "$filter_set" -eq 0 ] || runner_arguments+=(--filter "$filter")
 [ "$verbose" -eq 0 ] || runner_arguments+=(--verbose)
 if [ -n "$developer_directory" ]; then

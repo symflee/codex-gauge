@@ -13,43 +13,10 @@ public struct DisplayFrameBuilder: Sendable {
     ) -> [DisplayFrame] {
         switch preference.quotaSelection {
         case .automatic:
-            automaticFrames(
-                productMode: preference.productMode,
-                productStates: productStates,
-                now: now
-            )
-        case .manual(let identifiers):
-            manualFrames(
-                identifiers: identifiers,
-                productMode: preference.productMode,
-                productStates: productStates,
-                now: now
-            )
-        }
-    }
-
-    private func automaticFrames(
-        productMode: DisplayProductMode,
-        productStates: [UsageProduct: ProductUsageState],
-        now: Date
-    ) -> [DisplayFrame] {
-        switch productMode {
-        case .codex:
             [.single(automaticQuota(for: .codex, states: productStates, now: now))]
-        case .spark:
-            [.single(automaticQuota(for: .spark, states: productStates, now: now))]
-        case .both:
-            [automaticComparison(states: productStates, now: now)]
+        case .manual(let identifier):
+            [.single(selectedQuota(identifier: identifier, state: productStates[.codex] ?? .unavailable, now: now))]
         }
-    }
-
-    private func automaticComparison(
-        states: [UsageProduct: ProductUsageState],
-        now: Date
-    ) -> DisplayFrame {
-        let codex = automaticQuota(for: .codex, states: states, now: now)
-        let spark = automaticQuota(for: .spark, states: states, now: now)
-        return .comparison(codex: codex, spark: spark)
     }
 
     private func automaticQuota(
@@ -69,77 +36,6 @@ public struct DisplayFrameBuilder: Sendable {
             quota: quota,
             productValue: value,
             freshness: freshness,
-            now: now
-        )
-    }
-
-    private func manualFrames(
-        identifiers: Set<QuotaSelectionID>,
-        productMode: DisplayProductMode,
-        productStates: [UsageProduct: ProductUsageState],
-        now: Date
-    ) -> [DisplayFrame] {
-        let relevant = identifiers.filter {
-            productMode.products.contains($0.product)
-        }
-        guard !relevant.isEmpty else {
-            return automaticFrames(
-                productMode: productMode,
-                productStates: productStates,
-                now: now
-            )
-        }
-        let durations = orderedDurations(from: relevant)
-        return durations.compactMap {
-            manualFrame(
-                durationMinutes: $0,
-                identifiers: relevant,
-                productStates: productStates,
-                now: now
-            )
-        }
-    }
-
-    private func manualFrame(
-        durationMinutes: Int?,
-        identifiers: Set<QuotaSelectionID>,
-        productStates: [UsageProduct: ProductUsageState],
-        now: Date
-    ) -> DisplayFrame? {
-        let codex = manualQuota(
-            product: .codex,
-            durationMinutes: durationMinutes,
-            identifiers: identifiers,
-            states: productStates,
-            now: now
-        )
-        let spark = manualQuota(
-            product: .spark,
-            durationMinutes: durationMinutes,
-            identifiers: identifiers,
-            states: productStates,
-            now: now
-        )
-        return frame(codex: codex, spark: spark)
-    }
-
-    private func manualQuota(
-        product: UsageProduct,
-        durationMinutes: Int?,
-        identifiers: Set<QuotaSelectionID>,
-        states: [UsageProduct: ProductUsageState],
-        now: Date
-    ) -> DisplayQuota? {
-        let identifier = QuotaSelectionID(
-            product: product,
-            rawDurationMinutes: durationMinutes
-        )
-        guard identifiers.contains(identifier) else {
-            return nil
-        }
-        return selectedQuota(
-            identifier: identifier,
-            state: states[product] ?? .unavailable,
             now: now
         )
     }
@@ -246,36 +142,4 @@ public struct DisplayFrameBuilder: Sendable {
         return DisplayQuota(identifier: identifier, value: .unavailable)
     }
 
-    private func orderedDurations(
-        from identifiers: Set<QuotaSelectionID>
-    ) -> [Int?] {
-        let durations = Set(identifiers.map(\.rawDurationMinutes))
-        return durations.sorted(by: durationComesBefore)
-    }
-
-    private func durationComesBefore(_ left: Int?, _ right: Int?) -> Bool {
-        guard let left else {
-            return false
-        }
-        guard let right else {
-            return true
-        }
-        return left < right
-    }
-
-    private func frame(
-        codex: DisplayQuota?,
-        spark: DisplayQuota?
-    ) -> DisplayFrame? {
-        if let codex, let spark {
-            return .comparison(codex: codex, spark: spark)
-        }
-        if let codex {
-            return .single(codex)
-        }
-        if let spark {
-            return .single(spark)
-        }
-        return nil
-    }
 }

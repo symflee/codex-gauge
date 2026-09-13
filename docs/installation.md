@@ -29,9 +29,9 @@ SHA-256 only checks that the downloaded artifact matches. It does not provide Ap
 
 ## 앱에서 업데이트 / In-app updates
 
-`v0.1.0`에는 updater가 없습니다. 첫 updater-bearing version인 `v0.2.0` build 3이 배포되면 기존 사용자는 그 DMG를 위 절차로 한 번 직접 설치해야 합니다. 그 이후에는 앱을 실행할 때마다 새 stable version을 한 번 확인합니다. 새 version이 있으면 메뉴의 `현재 버전: vX.Y.Z (최신 vA.B.C)`를 선택해 표준 update 창을 엽니다.
+`v0.1.0`에는 인앱 업데이트가 없습니다. 기존 사용자는 실행 중인 Codex Gauge를 종료하고 `v0.2.0` DMG를 위 절차로 설치해 Applications의 기존 앱을 한 번 교체해야 합니다. 그 이후에는 앱을 실행할 때마다 새 정식 버전을 한 번 확인합니다. 새 버전이 있으면 메뉴의 `현재 버전: vX.Y.Z (최신 vA.B.C)`를 선택해 업데이트 창을 엽니다.
 
-`v0.1.0` does not contain an updater. When the first updater-bearing version, `v0.2.0` build 3, is released, existing users must manually install that DMG once using the steps above. After that, Codex Gauge checks once for a new stable version whenever the app launches. If one is available, choose `Current version: vX.Y.Z (latest vA.B.C)` from the menu to open the standard update window.
+`v0.1.0` does not contain an updater. Existing users must quit Codex Gauge, install the `v0.2.0` DMG using the steps above, and replace the existing app in Applications once. After that, Codex Gauge checks once for a new stable version whenever the app launches. If one is available, choose `Current version: vX.Y.Z (latest vA.B.C)` from the menu to open the standard update window.
 
 새 version을 찾았다는 사실만으로 download나 installation이 시작되지 않습니다. Sparkle 표준 창에서 사용자가 `업데이트`를 선택한 경우에만 full DMG를 다운로드하고 EdDSA 서명을 검증한 뒤 앱을 교체합니다. beta, delta, 단계적·강제 update와 downgrade는 제공하지 않습니다. 취소하거나 network·signature 검증이 실패하면 현재 앱을 그대로 유지합니다.
 

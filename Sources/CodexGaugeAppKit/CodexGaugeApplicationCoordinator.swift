@@ -22,7 +22,6 @@ public final class CodexGaugeApplicationCoordinator {
     private let settingsRuntime: any ApplicationSettingsRuntime
     private let applicationUpdateRuntime: any ApplicationUpdateRuntime
     private let systemActivityMonitor: any ApplicationSystemActivityMonitoring
-    private let assistiveDisplayMonitor: any ApplicationAssistiveDisplayMonitoring
     private let deadlineSchedulerBuilder: ApplicationUsageDeadlineSchedulerBuilder
     private let launchAtLoginController: any ApplicationLaunchAtLoginControlling
     private let refreshCoordinatorBuilder: any ApplicationRefreshCoordinatorBuilding
@@ -84,7 +83,6 @@ public final class CodexGaugeApplicationCoordinator {
         applicationUpdateRuntime: any ApplicationUpdateRuntime =
             DisabledApplicationUpdateRuntime(),
         systemActivityMonitor: any ApplicationSystemActivityMonitoring,
-        assistiveDisplayMonitor: any ApplicationAssistiveDisplayMonitoring,
         deadlineSchedulerBuilder: ApplicationUsageDeadlineSchedulerBuilder,
         launchAtLoginController: any ApplicationLaunchAtLoginControlling,
         refreshCoordinatorBuilder: any ApplicationRefreshCoordinatorBuilding,
@@ -104,7 +102,6 @@ public final class CodexGaugeApplicationCoordinator {
         self.applicationUpdateRuntime = applicationUpdateRuntime
         applicationUpdateState = applicationUpdateRuntime.state
         self.systemActivityMonitor = systemActivityMonitor
-        self.assistiveDisplayMonitor = assistiveDisplayMonitor
         self.deadlineSchedulerBuilder = deadlineSchedulerBuilder
         self.launchAtLoginController = launchAtLoginController
         launchAtLoginState = LaunchAtLoginSettingsState(
@@ -245,7 +242,6 @@ public final class CodexGaugeApplicationCoordinator {
             return
         }
         isShuttingDown = true
-        statusRuntime.setRotationPaused(true, for: .sleeping)
         pendingRefreshDispatch = RefreshDispatch()
         pendingRefreshReplacement = nil
         installedRefreshGeneration = nil
@@ -255,7 +251,6 @@ public final class CodexGaugeApplicationCoordinator {
         applicationUpdateRuntime.stop()
         refreshGeneration &+= 1
         systemActivityMonitor.stop()
-        assistiveDisplayMonitor.stop()
         deadlineScheduler?.stop()
         deadlineScheduler = nil
         pendingOperation?.cancel()
@@ -301,9 +296,6 @@ public final class CodexGaugeApplicationCoordinator {
     private func startMonitors() {
         systemActivityMonitor.start { [weak self] event in
             self?.systemActivityChanged(event)
-        }
-        assistiveDisplayMonitor.start { [weak self] event in
-            self?.assistiveDisplayChanged(event)
         }
     }
 
@@ -647,16 +639,12 @@ public final class CodexGaugeApplicationCoordinator {
         guard !isShuttingDown else { return }
         switch event {
         case .sleep:
-            statusRuntime.setRotationPaused(true, for: .sleeping)
             applyActivityEvent(.began(.sleep))
         case .wake:
-            statusRuntime.setRotationPaused(false, for: .sleeping)
             applyActivityEvent(.ended(.sleep))
         case .sessionLocked:
-            statusRuntime.setRotationPaused(true, for: .screenLocked)
             applyActivityEvent(.began(.sessionLocked))
         case .sessionUnlocked:
-            statusRuntime.setRotationPaused(false, for: .screenLocked)
             applyActivityEvent(.ended(.sessionLocked))
         case .lowPowerModeChanged(let enabled):
             lowPowerModeChanged(enabled)
@@ -704,19 +692,6 @@ public final class CodexGaugeApplicationCoordinator {
         lowPowerModeEnabled = enabled
         pendingRefreshDispatch.lowPowerMode = enabled
         scheduleRefreshDispatch()
-    }
-
-    private func assistiveDisplayChanged(_ event: AssistiveDisplayEvent) {
-        guard !isShuttingDown else { return }
-        let state = event.state
-        statusRuntime.setRotationPaused(
-            state.isVoiceOverEnabled,
-            for: .voiceOver
-        )
-        statusRuntime.setRotationPaused(
-            state.shouldReduceMotion,
-            for: .reduceMotion
-        )
     }
 
     private func usageDeadlineReached(_ reason: UsageDeadlineReason) {

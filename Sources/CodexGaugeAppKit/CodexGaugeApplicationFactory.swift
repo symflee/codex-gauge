@@ -172,7 +172,6 @@ public enum CodexGaugeApplicationFactory {
             settingsRuntime: settingsRuntime,
             applicationUpdateRuntime: applicationUpdateRuntime,
             systemActivityMonitor: SystemActivityMonitor(workspace: workspace),
-            assistiveDisplayMonitor: AssistiveDisplayMonitor(workspace: workspace),
             deadlineSchedulerBuilder: .system(),
             launchAtLoginController: launchAtLoginController,
             refreshCoordinatorBuilder: refreshBuilder,
@@ -200,7 +199,6 @@ public enum CodexGaugeApplicationFactory {
         )
         let controller = StatusMenuController(
             presenter: presenter,
-            statusItemController: statusController,
             actions: actions
         )
         return StatusMenuRuntimeAdapter(controller: controller)

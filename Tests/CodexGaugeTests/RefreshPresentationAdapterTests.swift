@@ -20,19 +20,12 @@ private func refreshPresentationMapsSpendControlWithoutChangingStatusFramesTest(
     TestCase(name: "refresh presentation maps spend controls without changing status frames") {
         let capturedAt = Date(timeIntervalSince1970: 1_900_000_000)
         let codexWindow = try presentationWindow(used: 17, duration: 300)
-        let sparkWindow = try presentationWindow(used: 9, duration: 10_080)
         let productsWithSpendControl: [UsageProduct: RefreshProductResult] = [
             .codex: presentationProduct(
                 windows: [codexWindow],
                 freshness: .fresh,
                 capturedAt: capturedAt,
                 spendControl: SpendControlLimit(remainingPercent: 67, reached: true)
-            ),
-            .spark: presentationProduct(
-                windows: [sparkWindow],
-                freshness: .fresh,
-                capturedAt: capturedAt,
-                spendControl: SpendControlLimit(remainingPercent: 72, reached: nil)
             )
         ]
         let productsWithoutSpendControl = productsWithSpendControl.mapValues { product in
@@ -46,11 +39,7 @@ private func refreshPresentationMapsSpendControlWithoutChangingStatusFramesTest(
             )
         }
         let preference = DisplayPreference(
-            productMode: .both,
-            quotaSelection: .manual([
-                QuotaSelectionID(product: .codex, rawDurationMinutes: 300),
-                QuotaSelectionID(product: .spark, rawDurationMinutes: 10_080)
-            ])
+            quotaSelection: .manual(QuotaSelectionID(product: .codex, rawDurationMinutes: 300))
         )
         let withSpendControl = RefreshPresentationAdapter().makePresentation(
             publication: presentationPublication(
@@ -73,8 +62,7 @@ private func refreshPresentationMapsSpendControlWithoutChangingStatusFramesTest(
 
         try expect(
             withSpendControl.menuInput.spendControlsByProduct == [
-                .codex: .reached,
-                .spark: .remaining(percent: 72)
+                .codex: .reached
             ],
             "Expected reached to take precedence and products to remain independent"
         )
@@ -83,8 +71,8 @@ private func refreshPresentationMapsSpendControlWithoutChangingStatusFramesTest(
             "Expected spend control to stay out of toolbar frames"
         )
         try expect(
-            withSpendControl.frames.count == 2,
-            "Expected identical multi-frame rotation input"
+            withSpendControl.frames.count == 1,
+            "Expected exactly one selected frame"
         )
         let formatter = DisplayFrameFormatter()
         try expect(
@@ -94,7 +82,7 @@ private func refreshPresentationMapsSpendControlWithoutChangingStatusFramesTest(
         )
         try expect(
             withSpendControl.discoveredQuotaIDs == withoutSpendControl.discoveredQuotaIDs,
-            "Expected spend control to stay out of rotation and width inputs"
+            "Expected spend control to stay out of display selection"
         )
     }
 }
@@ -110,12 +98,6 @@ private func refreshPresentationPreservesIncompleteSpendControlMeaningTest() -> 
                     freshness: .fresh,
                     capturedAt: capturedAt,
                     spendControl: SpendControlLimit(remainingPercent: nil, reached: false)
-                ),
-                .spark: RefreshProductResult(
-                    usageState: .unavailable,
-                    rateLimits: ProductRateLimits(state: .malformed, windows: []),
-                    issue: .malformed,
-                    lastSuccessfulRefresh: nil
                 )
             ],
             capturedAt: capturedAt
@@ -140,14 +122,6 @@ private func refreshPresentationPreservesIncompleteSpendControlMeaningTest() -> 
         }
         try expect(codexValue.quotaWindows == [window], "Expected intact quota window")
         try expect(freshness == .fresh, "Expected intact quota freshness")
-        try expect(
-            presentation.menuInput.spendControlsByProduct[.spark] == nil,
-            "Expected malformed or missing spend control to remain absent"
-        )
-        try expect(
-            presentation.menuInput.productStates[.spark] == .unavailable,
-            "Expected malformed spend data not to invent a quota value"
-        )
     }
 }
 
@@ -155,16 +129,10 @@ private func refreshPresentationBuildsFramesAndMenuInputTest() -> TestCase {
     TestCase(name: "refresh presentation builds frames menu state and discovered quotas") {
         let capturedAt = Date(timeIntervalSince1970: 1_900_000_000)
         let codexWindow = try presentationWindow(used: 17, duration: 300)
-        let sparkWindow = try presentationWindow(used: 9, duration: 300)
         let publication = RefreshPublication(
             products: [
                 .codex: presentationProduct(
                     windows: [codexWindow],
-                    freshness: .fresh,
-                    capturedAt: capturedAt
-                ),
-                .spark: presentationProduct(
-                    windows: [sparkWindow],
                     freshness: .fresh,
                     capturedAt: capturedAt
                 )
@@ -174,7 +142,6 @@ private func refreshPresentationBuildsFramesAndMenuInputTest() -> TestCase {
             isRefreshing: false
         )
         let preference = DisplayPreference(
-            productMode: .both,
             quotaSelection: .automatic
         )
 
@@ -185,20 +152,17 @@ private func refreshPresentationBuildsFramesAndMenuInputTest() -> TestCase {
             now: capturedAt
         )
 
-        try expect(presentation.frames.count == 1, "Expected one automatic comparison")
-        guard case let .comparison(codex, spark) = presentation.frames[0] else {
-            throw TestFailure(description: "Expected comparison frame")
+        try expect(presentation.frames.count == 1, "Expected one automatic Codex frame")
+        guard case let .single(codex) = presentation.frames[0] else {
+            throw TestFailure(description: "Expected single frame")
         }
         try expect(codex.value == .fresh(83), "Expected Codex remaining percent")
-        try expect(spark.value == .fresh(91), "Expected Spark remaining percent")
         try expect(presentation.discoveredQuotaIDs == [
             QuotaSelectionID(product: .codex, rawDurationMinutes: 300),
-            QuotaSelectionID(product: .spark, rawDurationMinutes: 300)
         ], "Expected product-specific discovered IDs")
         try expect(
             presentation.menuInput.lastSuccessfulRefreshByProduct == [
-                .codex: capturedAt,
-                .spark: capturedAt
+                .codex: capturedAt
             ],
             "Expected product-specific success times"
         )
@@ -214,7 +178,7 @@ private func refreshPresentationBuildsFramesAndMenuInputTest() -> TestCase {
 }
 
 private func refreshPresentationKeepsProductIssuesIndependentTest() -> TestCase {
-    TestCase(name: "refresh presentation maps product issues without contaminating siblings") {
+    TestCase(name: "refresh presentation preserves partial quota issues with the available value") {
         let capturedAt = Date(timeIntervalSince1970: 1_900_000_100)
         let codexWindow = try presentationWindow(used: 25, duration: 10_080)
         let codex = presentationProduct(
@@ -223,14 +187,8 @@ private func refreshPresentationKeepsProductIssuesIndependentTest() -> TestCase 
             capturedAt: capturedAt,
             issue: .partial
         )
-        let spark = RefreshProductResult(
-            usageState: .unavailable,
-            rateLimits: ProductRateLimits(state: .malformed, windows: []),
-            issue: .malformed,
-            lastSuccessfulRefresh: nil
-        )
         let publication = RefreshPublication(
-            products: [.codex: codex, .spark: spark],
+            products: [.codex: codex],
             lastSuccessfulRefresh: capturedAt,
             failure: nil,
             isRefreshing: false
@@ -245,18 +203,13 @@ private func refreshPresentationKeepsProductIssuesIndependentTest() -> TestCase 
 
         try expect(
             presentation.menuInput.issuesByProduct == [
-                .codex: .partialData,
-                .spark: .incompatibleProtocol
+                .codex: .partialData
             ],
-            "Expected independent partial and malformed reasons"
+            "Expected the Codex partial issue"
         )
         try expect(
             presentation.menuInput.productStates[.codex] == codex.usageState,
-            "Expected successful sibling preserved"
-        )
-        try expect(
-            presentation.menuInput.productStates[.spark] == .unavailable,
-            "Expected malformed product unavailable"
+            "Expected partial quota value preserved"
         )
     }
 }
@@ -290,8 +243,7 @@ private func refreshPresentationMapsGlobalFailuresTest() -> TestCase {
 
             try expect(
                 presentation.menuInput.issuesByProduct == [
-                    .codex: issue,
-                    .spark: issue
+                    .codex: issue
                 ],
                 "Expected global failure mapped for every product"
             )
@@ -331,7 +283,7 @@ private func refreshPresentationPreservesLoadingStateTest() -> TestCase {
         try expect(presentation.menuInput.issuesByProduct.isEmpty, "Expected no loading error")
         try expect(
             presentation.menuInput.productStates.values.allSatisfy { $0 == .loading },
-            "Expected loading for both products"
+            "Expected loading for Codex"
         )
         try expect(presentation.discoveredQuotaIDs.isEmpty, "Expected no invented quotas")
     }

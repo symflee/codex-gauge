@@ -16,50 +16,25 @@ func settingsFormTests() -> [TestCase] {
 }
 
 private func settingsFormBuildsQuotaOptionsTest() -> TestCase {
-    TestCase(name: "settings form keeps discovered and missing saved quotas") {
-        let codexFiveHour = settingsQuotaID(product: .codex, duration: 300)
-        let codexWeekly = settingsQuotaID(product: .codex, duration: 10_080)
-        let codexUnknown = settingsQuotaID(product: .codex, duration: nil)
-        let sparkFiveHour = settingsQuotaID(product: .spark, duration: 300)
-        let missingSparkWeekly = settingsQuotaID(product: .spark, duration: 10_080)
-        let preferences = settingsPreferences(
-            productMode: .both,
-            selection: .manual([codexFiveHour, missingSparkWeekly])
-        )
+    TestCase(name: "settings form keeps discovered and one missing saved quota") {
+        let fiveHour = settingsQuotaID(product: .codex, duration: 300)
+        let weekly = settingsQuotaID(product: .codex, duration: 10_080)
+        let unknown = settingsQuotaID(product: .codex, duration: nil)
         let state = SettingsFormState(
-            preferences: preferences,
-            discoveredQuotaIDs: [
-                codexUnknown,
-                sparkFiveHour,
-                codexWeekly,
-                codexFiveHour
-            ]
+            preferences: settingsPreferences(selection: .manual(weekly)),
+            discoveredQuotaIDs: [unknown, fiveHour]
         )
-
-        try expect(
-            state.quotaOptions.map(\.identifier) == [
-                codexFiveHour,
-                codexWeekly,
-                codexUnknown,
-                sparkFiveHour,
-                missingSparkWeekly
-            ],
-            "Expected product, duration and unknown ordering"
-        )
-        try expect(state.quotaOptions[0].isSelected, "Expected saved Codex selection")
+        try expect(state.quotaOptions.map(\.identifier) == [fiveHour, weekly, unknown], "Expected duration ordering")
+        try expect(state.selectedQuotaIDs == [weekly], "Expected one saved selection")
         try expect(state.quotaOptions[0].availability == .discovered, "Expected discovered row")
-        try expect(state.quotaOptions[4].isSelected, "Expected missing selection retained")
-        try expect(
-            state.quotaOptions[4].availability == .currentlyUnavailable,
-            "Expected missing selection status"
-        )
+        try expect(state.quotaOptions[1].isSelected && state.quotaOptions[1].availability == .currentlyUnavailable, "Expected missing selection retained")
     }
 }
 
 private func settingsFormReducerEditsPreferencesTest() -> TestCase {
     TestCase(name: "settings reducer edits only visible preferences") {
         let executableURL = URL(fileURLWithPath: "/Synthetic/Codex/codex")
-        let identifier = settingsQuotaID(product: .spark, duration: 300)
+        let identifier = settingsQuotaID(product: .codex, duration: 300)
         let initial = AppPreferences(
             selectedExecutableURL: executableURL,
             hasCompletedFirstLaunch: true,
@@ -78,7 +53,6 @@ private func settingsFormReducerEditsPreferencesTest() -> TestCase {
         try expect(state.selectedQuotaIDs.isEmpty, "Expected automatic mode to ignore checks")
 
         let events: [SettingsFormEvent] = [
-            .productModeChanged(.both),
             .quotaSelectionModeChanged(.manual),
             .quotaSelectionChanged(identifier, isSelected: true),
             .refreshProfileChanged(.fast),
@@ -90,9 +64,8 @@ private func settingsFormReducerEditsPreferencesTest() -> TestCase {
         }
         let formValues = state.formValues
 
-        try expect(formValues.displayPreference.productMode == .both, "Expected both products")
         try expect(
-            formValues.displayPreference.quotaSelection == .manual([identifier]),
+            formValues.displayPreference.quotaSelection == .manual(identifier),
             "Expected manual quota selection"
         )
         try expect(formValues.refreshProfile == .fast, "Expected fast refresh")
@@ -147,38 +120,29 @@ private func settingsFormEditsGaugeAppearanceTest() -> TestCase {
 }
 
 private func settingsFormReducerFiltersProductsTest() -> TestCase {
-    TestCase(name: "settings form filters discovery while retaining saved selections") {
-        let codex = settingsQuotaID(product: .codex, duration: 300)
-        let spark = settingsQuotaID(product: .spark, duration: 300)
+    TestCase(name: "single quota settings replace the previous manual choice") {
+        let fiveHour = settingsQuotaID(product: .codex, duration: 300)
+        let weekly = settingsQuotaID(product: .codex, duration: 10_080)
         let reducer = SettingsFormReducer()
-        let preferences = settingsPreferences(
-            productMode: .codex,
-            selection: .manual([codex])
-        )
         var state = SettingsFormState(
-            preferences: preferences,
-            discoveredQuotaIDs: [codex, spark]
+            preferences: settingsPreferences(selection: .manual(fiveHour)),
+            discoveredQuotaIDs: [fiveHour, weekly]
         )
-
-        try expect(state.quotaOptions.map(\.identifier) == [codex], "Expected Codex discovery")
-
-        state = reducer.reduce(state: state, event: .productModeChanged(.spark))
-
-        try expect(state.quotaOptions.map(\.identifier) == [spark], "Expected Spark discovery")
-        try expect(state.selectedQuotaIDs.isEmpty, "Expected off-product choice excluded")
-        try expect(
-            state.formValues.displayPreference.quotaSelection == .automatic,
-            "Expected empty effective manual selection to recover"
-        )
-
-        state = reducer.reduce(state: state, event: .productModeChanged(.codex))
-
-        try expect(state.selectedQuotaIDs == [codex], "Expected transient choice restoration")
+        state = reducer.reduce(state: state, event: .quotaSelectionChanged(weekly, isSelected: true))
+        try expect(state.selectedQuotaIDs == [weekly], "Expected radio choice to replace previous choice")
+        try expect(state.formValues.displayPreference.quotaSelection == .manual(weekly), "Expected singular persisted selection")
+        state = reducer.reduce(state: state, event: .quotaSelectionModeChanged(.automatic))
+        try expect(state.formValues.displayPreference.quotaSelection == .automatic, "Expected automatic mode")
+        state = reducer.reduce(state: state, event: .quotaSelectionModeChanged(.manual))
+        try expect(state.selectedQuotaIDs == [weekly], "Expected manual choice restored")
+        let unknown = settingsQuotaID(product: .codex, duration: 60)
+        state = reducer.reduce(state: state, event: .quotaSelectionChanged(unknown, isSelected: true))
+        try expect(state.selectedQuotaIDs == [weekly], "Expected undiscovered choice rejected")
     }
 }
 
 private func settingsFormPresenterTest() -> TestCase {
-    TestCase(name: "settings presenter derives checkbox and empty states") {
+    TestCase(name: "settings presenter derives single-choice and empty states") {
         let identifier = settingsQuotaID(product: .codex, duration: 300)
         let presenter = SettingsFormPresenter()
         let automatic = SettingsFormState(
@@ -235,8 +199,7 @@ private func settingsFormReplacesDiscoveredQuotasTest() -> TestCase {
         let selected = settingsQuotaID(product: .codex, duration: 300)
         let discovered = settingsQuotaID(product: .codex, duration: 10_080)
         let preferences = settingsPreferences(
-            productMode: .codex,
-            selection: .manual([selected])
+            selection: .manual(selected)
         )
         let reducer = SettingsFormReducer()
         let initial = SettingsFormState(
@@ -263,12 +226,10 @@ private func settingsFormReplacesDiscoveredQuotasTest() -> TestCase {
 }
 
 private func settingsPreferences(
-    productMode: DisplayProductMode,
     selection: DisplayQuotaSelection
 ) -> AppPreferences {
     AppPreferences(
         displayPreference: DisplayPreference(
-            productMode: productMode,
             quotaSelection: selection
         )
     )

@@ -27,8 +27,7 @@ private func quotaResetSchedulesEarliestFutureDateTest() -> TestCase {
         try await MainActor.run {
             let fixture = ResetSchedulerFixture(nowOffset: 0)
             let productStates = try resetProductStates(
-                codexOffsets: [600, 300, nil],
-                sparkOffsets: [300]
+                codexOffsets: [600, 300, nil, 300]
             )
 
             fixture.controller.publish(productStates: productStates)
@@ -86,10 +85,10 @@ private func quotaResetReplacesChangedPublicationTest() -> TestCase {
                 productStates: try resetProductStates(codexOffsets: [600])
             )
             fixture.controller.publish(
-                productStates: try resetProductStates(sparkOffsets: [300])
+                productStates: try resetProductStates(codexOffsets: [300])
             )
             fixture.controller.publish(
-                productStates: try resetProductStates(sparkOffsets: [300])
+                productStates: try resetProductStates(codexOffsets: [300])
             )
             fixture.timer.fireRequest(at: 0)
 
@@ -113,8 +112,7 @@ private func quotaResetRefreshesPastDateOnceTest() -> TestCase {
         try await MainActor.run {
             let fixture = ResetSchedulerFixture(nowOffset: 500)
             let productStates = try resetProductStates(
-                codexOffsets: [100, 300, 700],
-                sparkOffsets: [200, 300]
+                codexOffsets: [100, 300, 700, 200, 300]
             )
             let originalQuota = try resetQuotas(offsets: [100])[0]
 
@@ -139,8 +137,7 @@ private func quotaResetIgnoresEmptySnapshotTest() -> TestCase {
 
             fixture.controller.publish(productStates: [
                 .codex: .loading,
-                .spark: .unavailable
-            ])
+                ])
 
             try expect(fixture.timer.requests.isEmpty, "Expected no empty publication timer")
             try expect(fixture.handledReasons.isEmpty, "Expected no empty publication event")
@@ -209,7 +206,7 @@ private func quotaResetSuspendsForSleepTest() -> TestCase {
 
             fixture.controller.systemDidSleep()
             fixture.controller.publish(
-                productStates: try resetProductStates(sparkOffsets: [600])
+                productStates: try resetProductStates(codexOffsets: [600])
             )
 
             try expect(fixture.timer.cancelCount == 1, "Expected sleep cancellation")
@@ -259,7 +256,7 @@ private func quotaResetStopIsFinalTest() -> TestCase {
             fixture.postClockChange()
             fixture.controller.systemDidWake()
             fixture.controller.publish(
-                productStates: try resetProductStates(sparkOffsets: [500])
+                productStates: try resetProductStates(codexOffsets: [500])
             )
 
             try expect(fixture.timer.cancelCount == 1, "Expected stop cancellation")
@@ -300,35 +297,24 @@ private func quotaResetSchedulesValidityExpiryTest() -> TestCase {
 }
 
 private func quotaResetSchedulesOldestProductExpiryTest() -> TestCase {
-    TestCase(name: "quota reset slot preserves each product capture expiry") {
+    TestCase(name: "quota reset replaces the single product capture expiry after a fresh response") {
         try await MainActor.run {
             let fixture = ResetSchedulerFixture(nowOffset: 0)
-            let productStates = try resetProductStates(
-                codexOffsets: [100_000],
-                sparkOffsets: [100_000],
-                codexCapturedAtOffset: 0,
-                sparkCapturedAtOffset: 600,
-                sparkFreshness: .stale
-            )
-
-            fixture.controller.publish(productStates: productStates)
-
-            try expect(
-                fixture.controller.scheduledDeadlineDate == resetDate(86_400),
-                "Expected the older Codex value to expire first"
-            )
-            fixture.clock.now = resetDate(86_400)
-            fixture.timer.fireCurrent()
-
-            try expect(fixture.invalidationCount == 1, "Expected Codex expiry invalidation")
-            try expect(
-                fixture.controller.scheduledDeadlineDate == resetDate(87_000),
-                "Expected stale Spark value to retain its own later expiry"
-            )
+            fixture.controller.publish(productStates: try resetProductStates(
+                codexOffsets: [100_000], codexCapturedAtOffset: 0
+            ))
+            try expect(fixture.controller.scheduledDeadlineDate == resetDate(86_400), "Expected initial value expiry")
+            fixture.clock.now = resetDate(600)
+            fixture.controller.publish(productStates: try resetProductStates(
+                codexOffsets: [100_000], codexCapturedAtOffset: 600
+            ))
+            try expect(fixture.controller.scheduledDeadlineDate == resetDate(87_000), "Expected latest capture expiry")
+            fixture.timer.fireRequest(at: 0)
+            try expect(fixture.invalidationCount == 0, "Expected canceled old capture timer to be ignored")
             fixture.clock.now = resetDate(87_000)
             fixture.timer.fireCurrent()
-
-            try expect(fixture.invalidationCount == 2, "Expected each product expiry once")
+            try expect(fixture.invalidationCount == 1, "Expected latest capture to expire once")
+            try expect(fixture.controller.scheduledDeadlineDate == resetDate(100_000), "Expected remaining reset deadline")
         }
     }
 }
@@ -382,8 +368,8 @@ private func quotaResetPrunesHandledDeadlinesTest() -> TestCase {
                 codexCapturedAtOffset: 0
             )
             let secondStates = try resetProductStates(
-                sparkOffsets: [200],
-                sparkCapturedAtOffset: 1
+                codexOffsets: [200],
+                codexCapturedAtOffset: 1
             )
 
             fixture.controller.publish(productStates: firstStates)
@@ -492,27 +478,15 @@ private func resetDate(_ offset: TimeInterval) -> Date {
 
 private func resetProductStates(
     codexOffsets: [TimeInterval?] = [],
-    sparkOffsets: [TimeInterval?] = [],
-    codexCapturedAtOffset: TimeInterval = 0,
-    sparkCapturedAtOffset: TimeInterval = 0,
-    sparkFreshness: ProductValueFreshness = .fresh
+    codexCapturedAtOffset: TimeInterval = 0
 ) throws -> [UsageProduct: ProductUsageState] {
-    [
-        .codex: .value(
-            ProductQuotaValue(
-                capturedAt: resetDate(codexCapturedAtOffset),
-                quotaWindows: try resetQuotas(offsets: codexOffsets)
-            ),
-            freshness: .fresh
+    [.codex: .value(
+        ProductQuotaValue(
+            capturedAt: resetDate(codexCapturedAtOffset),
+            quotaWindows: try resetQuotas(offsets: codexOffsets)
         ),
-        .spark: .value(
-            ProductQuotaValue(
-                capturedAt: resetDate(sparkCapturedAtOffset),
-                quotaWindows: try resetQuotas(offsets: sparkOffsets)
-            ),
-            freshness: sparkFreshness
-        )
-    ]
+        freshness: .fresh
+    )]
 }
 
 private func resetQuotas(offsets: [TimeInterval?]) throws -> [QuotaWindow] {

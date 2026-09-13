@@ -17,61 +17,22 @@ public struct DisplayPreferenceQuotaSampleSelector: SelectedQuotaSampleSelecting
         from result: RateLimitReadResult,
         preference: DisplayPreference
     ) -> SelectedQuotaSamples {
-        let pairs = selectedWindows(from: result, preference: preference)
-        let values = Dictionary(uniqueKeysWithValues: pairs.map(samplePair))
-        return SelectedQuotaSamples(values)
-    }
-
-    private func selectedWindows(
-        from result: RateLimitReadResult,
-        preference: DisplayPreference
-    ) -> [(UsageProduct, QuotaWindow)] {
+        let windows = result.rateLimits(for: .codex).windows
+        let selected: QuotaWindow?
         switch preference.quotaSelection {
         case .automatic:
-            return automaticWindows(from: result, preference: preference)
-        case let .manual(identifiers):
-            return manualWindows(identifiers, from: result, preference: preference)
+            selected = quotaSelector.automaticQuota(from: windows)
+        case let .manual(identifier):
+            selected = quotaSelector.quota(matching: identifier, from: windows)
         }
-    }
-
-    private func automaticWindows(
-        from result: RateLimitReadResult,
-        preference: DisplayPreference
-    ) -> [(UsageProduct, QuotaWindow)] {
-        preference.productMode.products.compactMap { product in
-            let windows = result.rateLimits(for: product).windows
-            guard let window = quotaSelector.automaticQuota(from: windows) else {
-                return nil
-            }
-            return (product, window)
+        guard let selected else {
+            return SelectedQuotaSamples([:])
         }
-    }
-
-    private func manualWindows(
-        _ identifiers: Set<QuotaSelectionID>,
-        from result: RateLimitReadResult,
-        preference: DisplayPreference
-    ) -> [(UsageProduct, QuotaWindow)] {
-        identifiers.compactMap { identifier in
-            guard preference.productMode.products.contains(identifier.product) else {
-                return nil
-            }
-            let windows = result.rateLimits(for: identifier.product).windows
-            guard let window = quotaSelector.quota(matching: identifier, from: windows) else {
-                return nil
-            }
-            return (identifier.product, window)
-        }
-    }
-
-    private func samplePair(
-        _ pair: (UsageProduct, QuotaWindow)
-    ) -> (RefreshQuotaKey, Int) {
         let key = RefreshQuotaKey(
-            product: pair.0,
-            rawDurationMinutes: pair.1.windowDurationMinutes,
-            resetsAt: pair.1.resetsAt
+            product: .codex,
+            rawDurationMinutes: selected.windowDurationMinutes,
+            resetsAt: selected.resetsAt
         )
-        return (key, pair.1.comparisonUsedPercent)
+        return SelectedQuotaSamples([key: selected.comparisonUsedPercent])
     }
 }

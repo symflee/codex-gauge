@@ -80,6 +80,7 @@ jobs:
       - name: Test Xcode UI smoke
         env:
           CODEX_GAUGE_LOCAL_RELEASE_EFFECTS_ALLOWED: "1"
+          TEST_RUNNER_CODEX_GAUGE_LOCAL_RELEASE_EFFECTS_ALLOWED: "1"
         run: >-
           xcodebuild test
           -project CodexGauge.xcodeproj

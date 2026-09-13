@@ -3,7 +3,6 @@ import CodexGaugeRefresh
 
 public enum SettingsFormEvent: Equatable, Sendable {
     case discoveredQuotaIDsChanged(Set<QuotaSelectionID>)
-    case productModeChanged(DisplayProductMode)
     case quotaSelectionModeChanged(SettingsQuotaSelectionMode)
     case quotaSelectionChanged(QuotaSelectionID, isSelected: Bool)
     case refreshProfileChanged(RefreshProfile)
@@ -25,8 +24,6 @@ public struct SettingsFormReducer: Sendable {
         switch event {
         case .discoveredQuotaIDsChanged(let identifiers):
             replacing(state, discoveredQuotaIDs: identifiers)
-        case .productModeChanged(let productMode):
-            replacing(state, productMode: productMode)
         case .quotaSelectionModeChanged(let selectionMode):
             replacing(state, quotaSelectionMode: selectionMode)
         case .quotaSelectionChanged(let identifier, let isSelected):
@@ -72,7 +69,7 @@ public struct SettingsFormReducer: Sendable {
         }
         var selection = state.rememberedQuotaIDs
         if isSelected {
-            selection.insert(identifier)
+            selection = [identifier]
         } else {
             selection.remove(identifier)
         }
@@ -81,7 +78,6 @@ public struct SettingsFormReducer: Sendable {
 
     private func replacing(
         _ state: SettingsFormState,
-        productMode: DisplayProductMode? = nil,
         quotaSelectionMode: SettingsQuotaSelectionMode? = nil,
         rememberedQuotaIDs: Set<QuotaSelectionID>? = nil,
         refreshProfile: RefreshProfile? = nil,
@@ -91,7 +87,6 @@ public struct SettingsFormReducer: Sendable {
         discoveredQuotaIDs: Set<QuotaSelectionID>? = nil
     ) -> SettingsFormState {
         SettingsFormState(
-            productMode: productMode ?? state.productMode,
             quotaSelectionMode: quotaSelectionMode ?? state.quotaSelectionMode,
             rememberedQuotaIDs: rememberedQuotaIDs ?? state.rememberedQuotaIDs,
             refreshProfile: refreshProfile ?? state.refreshProfile,

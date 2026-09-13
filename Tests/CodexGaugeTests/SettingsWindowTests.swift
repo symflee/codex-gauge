@@ -56,8 +56,7 @@ private func settingsWindowRelocalizesInPlaceScenario() async throws {
     let quota = QuotaSelectionID(product: .codex, rawDurationMinutes: 300)
     let preferences = AppPreferences(
         displayPreference: DisplayPreference(
-            productMode: .both,
-            quotaSelection: .manual([quota])
+            quotaSelection: .manual(quota)
         ),
         language: .korean,
         statusGaugeAppearance: .preset(.green)
@@ -98,10 +97,6 @@ private func settingsWindowRelocalizesInPlaceScenario() async throws {
         "Expected recognizable language autonyms"
     )
     try expect(
-        viewController.renderedProductOptionTitles.last == "Codex와 Spark",
-        "Expected Korean product option"
-    )
-    try expect(
         viewController.renderedSelectionOptionTitles == ["자동 선택", "직접 선택"],
         "Expected Korean selection options"
     )
@@ -134,7 +129,7 @@ private func settingsWindowRelocalizesInPlaceScenario() async throws {
     try expect(viewController.formState.language == .english, "Expected English form state")
     try expect(
         viewController.renderedSectionTitles == [
-            "Language", "Display", "Gauge colors", "Quotas to display",
+            "Language", "Display", "Gauge colors", "Quota to display",
             "Refresh profile", "Codex connection"
         ],
         "Expected every English section title"
@@ -142,10 +137,6 @@ private func settingsWindowRelocalizesInPlaceScenario() async throws {
     try expect(
         viewController.renderedLanguageOptionTitles == ["한국어", "English"],
         "Expected stable language autonyms"
-    )
-    try expect(
-        viewController.renderedProductOptionTitles.last == "Codex and Spark",
-        "Expected English product option"
     )
     try expect(
         viewController.renderedSelectionOptionTitles == ["Automatic", "Manual"],
@@ -408,10 +399,21 @@ private func settingsWindowStructureScenario() async throws {
         outerScrollViews.first?.hasVerticalScroller == true,
         "Expected vertical form scrolling"
     )
+    // The shorter single-quota form can fit the default window. Exercise overflow
+    // with a constrained viewport instead of requiring unnecessary default scrolling.
+    window.contentMinSize = NSSize(width: 440, height: 360)
+    window.setContentSize(NSSize(width: 440, height: 360))
     window.contentView?.layoutSubtreeIfNeeded()
-    let formHeight = outerScrollViews.first?.documentView?.frame.height ?? 0
-    let viewportHeight = outerScrollViews.first?.contentView.bounds.height ?? 0
+    guard let scrollView = outerScrollViews.first else {
+        throw TestFailure(description: "Expected the form scroll view")
+    }
+    let formHeight = scrollView.documentView?.frame.height ?? 0
+    let viewportHeight = scrollView.contentView.bounds.height
     try expect(formHeight > viewportHeight, "Expected form content to require scrolling")
+    scrollView.contentView.scroll(to: NSPoint(x: 0, y: formHeight - viewportHeight))
+    scrollView.reflectScrolledClipView(scrollView.contentView)
+    try expect(scrollView.contentView.bounds.minY > 0, "Expected access to content below the viewport")
+    try expect(abs(scrollView.contentView.bounds.maxY - formHeight) < 1, "Expected the bottom of the form to remain reachable")
     try expect(!window.title.hasPrefix("settings."), "Expected localized window title")
     let repeatedController = try await showSettingsController(coordinator)
     try expect(repeatedController === controller, "Expected one settings window")
@@ -571,8 +573,7 @@ private func settingsWindowPersistenceScenario() async throws {
     var runtimeValues = [SettingsFormValues]()
     let initial = AppPreferences(
         displayPreference: DisplayPreference(
-            productMode: .codex,
-            quotaSelection: .manual([missing])
+            quotaSelection: .manual(missing)
         ),
         selectedExecutableURL: initialExecutableURL,
         hasCompletedFirstLaunch: false
@@ -610,21 +611,19 @@ private func settingsWindowPersistenceScenario() async throws {
     )
     try await repository.save(externallyUpdated)
 
-    viewController.apply(.productModeChanged(.both))
     viewController.apply(.quotaSelectionChanged(discovered, isSelected: true))
     viewController.apply(.refreshProfileChanged(.fast))
     viewController.apply(.launchAtLoginIntentChanged(true))
     await coordinator.flushPendingSave()
     let saved = await repository.load()
 
-    try expect(saved.displayPreference.productMode == .both, "Expected products saved")
     try expect(
-        saved.displayPreference.quotaSelection == .manual([missing, discovered]),
+        saved.displayPreference.quotaSelection == .manual(discovered),
         "Expected manual selections saved"
     )
     try expect(saved.refreshProfile == .fast, "Expected refresh profile saved")
     try expect(saved.launchAtLoginIntent, "Expected login intent saved")
-    try expect(runtimeValues.count == 4, "Expected every form change forwarded")
+    try expect(runtimeValues.count == 3, "Expected every form change forwarded")
     try expect(
         runtimeValues.last == viewController.formState.formValues,
         "Expected latest form values forwarded for runtime application"
@@ -647,7 +646,7 @@ private func settingsWindowRecreationScenario() async throws {
     let store = try SettingsUITestStore()
     defer { store.cleanUp() }
     let repository = try store.repository()
-    let identifier = QuotaSelectionID(product: .spark, rawDurationMinutes: 300)
+    let identifier = QuotaSelectionID(product: .codex, rawDurationMinutes: 300)
     let coordinator = SettingsWindowCoordinator(
         repository: repository,
         discoveredQuotaProvider: { [identifier] }
@@ -658,8 +657,7 @@ private func settingsWindowRecreationScenario() async throws {
     controller = nil
     let updated = AppPreferences(
         displayPreference: DisplayPreference(
-            productMode: .spark,
-            quotaSelection: .manual([identifier])
+            quotaSelection: .manual(identifier)
         ),
         refreshProfile: .eco,
         launchAtLoginIntent: true,
@@ -671,7 +669,6 @@ private func settingsWindowRecreationScenario() async throws {
     guard let state = controller?.settingsViewController.formState else {
         throw TestFailure(description: "Expected recreated settings state")
     }
-    try expect(state.productMode == .spark, "Expected reloaded product mode")
     try expect(state.selectedQuotaIDs == [identifier], "Expected reloaded selection")
     try expect(state.refreshProfile == .eco, "Expected reloaded refresh profile")
     try expect(state.launchAtLoginIntent, "Expected reloaded login intent")

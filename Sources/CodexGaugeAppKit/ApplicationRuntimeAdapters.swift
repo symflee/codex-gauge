@@ -14,10 +14,6 @@ public protocol ApplicationStatusRuntime: AnyObject {
         statusGaugeAppearance: StatusGaugeAppearance
     )
 
-    func setRotationPaused(
-        _ paused: Bool,
-        for reason: StatusRotationPauseReason
-    )
 }
 
 public extension ApplicationStatusRuntime {
@@ -54,13 +50,6 @@ public final class StatusItemRuntimeAdapter: ApplicationStatusRuntime {
                 cache: imageCache
             )
         )
-    }
-
-    public func setRotationPaused(
-        _ paused: Bool,
-        for reason: StatusRotationPauseReason
-    ) {
-        controller.setPaused(paused, for: reason)
     }
 }
 
@@ -159,16 +148,6 @@ public protocol ApplicationSystemActivityMonitoring: AnyObject {
 }
 
 extension SystemActivityMonitor: ApplicationSystemActivityMonitoring {}
-
-@MainActor
-public protocol ApplicationAssistiveDisplayMonitoring: AnyObject {
-    func start(
-        handler: @escaping @MainActor @Sendable (AssistiveDisplayEvent) -> Void
-    )
-    func stop()
-}
-
-extension AssistiveDisplayMonitor: ApplicationAssistiveDisplayMonitoring {}
 
 @MainActor
 public protocol ApplicationUsageDeadlineScheduling: AnyObject {

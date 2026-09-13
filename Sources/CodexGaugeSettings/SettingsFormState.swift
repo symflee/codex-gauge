@@ -61,7 +61,6 @@ public struct SettingsFormValues: Equatable, Sendable {
 }
 
 public struct SettingsFormState: Equatable, Sendable {
-    public let productMode: DisplayProductMode
     public let quotaSelectionMode: SettingsQuotaSelectionMode
     public let refreshProfile: RefreshProfile
     public let launchAtLoginIntent: Bool
@@ -75,7 +74,6 @@ public struct SettingsFormState: Equatable, Sendable {
         preferences: AppPreferences,
         discoveredQuotaIDs: Set<QuotaSelectionID>
     ) {
-        productMode = preferences.displayPreference.productMode
         refreshProfile = preferences.refreshProfile
         launchAtLoginIntent = preferences.launchAtLoginIntent
         language = preferences.language
@@ -86,17 +84,14 @@ public struct SettingsFormState: Equatable, Sendable {
         case .automatic:
             quotaSelectionMode = .automatic
             rememberedQuotaIDs = []
-        case .manual(let identifiers):
+        case .manual(let identifier):
             quotaSelectionMode = .manual
-            rememberedQuotaIDs = identifiers
+            rememberedQuotaIDs = [identifier]
         }
     }
 
     public var selectedQuotaIDs: Set<QuotaSelectionID> {
-        let products = Set(productMode.products)
-        return Set(rememberedQuotaIDs.filter { identifier in
-            products.contains(identifier.product)
-        })
+        rememberedQuotaIDs
     }
 
     public var quotaOptions: [SettingsQuotaOption] {
@@ -106,7 +101,6 @@ public struct SettingsFormState: Equatable, Sendable {
     public var formValues: SettingsFormValues {
         SettingsFormValues(
             displayPreference: DisplayPreference(
-                productMode: productMode,
                 quotaSelection: persistedQuotaSelection
             ),
             refreshProfile: refreshProfile,
@@ -117,7 +111,6 @@ public struct SettingsFormState: Equatable, Sendable {
     }
 
     init(
-        productMode: DisplayProductMode,
         quotaSelectionMode: SettingsQuotaSelectionMode,
         rememberedQuotaIDs: Set<QuotaSelectionID>,
         refreshProfile: RefreshProfile,
@@ -126,7 +119,6 @@ public struct SettingsFormState: Equatable, Sendable {
         statusGaugeAppearance: StatusGaugeAppearance,
         discoveredQuotaIDs: Set<QuotaSelectionID>
     ) {
-        self.productMode = productMode
         self.quotaSelectionMode = quotaSelectionMode
         self.rememberedQuotaIDs = rememberedQuotaIDs
         self.refreshProfile = refreshProfile
@@ -137,18 +129,15 @@ public struct SettingsFormState: Equatable, Sendable {
     }
 
     private var visibleQuotaIDs: [QuotaSelectionID] {
-        let visibleProducts = Set(productMode.products)
-        let discovered = discoveredQuotaIDs.filter { identifier in
-            visibleProducts.contains(identifier.product)
-        }
-        return Array(Set(discovered).union(selectedQuotaIDs)).sorted(by: quotaIDAscending)
+        Array(discoveredQuotaIDs.union(selectedQuotaIDs)).sorted(by: quotaIDAscending)
     }
 
     private var persistedQuotaSelection: DisplayQuotaSelection {
         guard quotaSelectionMode == .manual else {
             return .automatic
         }
-        return .manual(selectedQuotaIDs)
+        guard let identifier = selectedQuotaIDs.first else { return .automatic }
+        return .manual(identifier)
     }
 
     private func makeOption(_ identifier: QuotaSelectionID) -> SettingsQuotaOption {
@@ -172,17 +161,10 @@ public struct SettingsFormState: Equatable, Sendable {
         _ left: QuotaSelectionID,
         _ right: QuotaSelectionID
     ) -> Bool {
-        guard left.product == right.product else {
-            return productRank(left.product) < productRank(right.product)
-        }
         return durationAscending(
             left.rawDurationMinutes,
             right.rawDurationMinutes
         )
-    }
-
-    private func productRank(_ product: UsageProduct) -> Int {
-        product == .codex ? 0 : 1
     }
 
     private func durationAscending(_ left: Int?, _ right: Int?) -> Bool {

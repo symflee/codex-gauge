@@ -13,7 +13,6 @@
 "status.accessibility.duration.one-week" = "1 week";
 "status.accessibility.duration.weeks" = "{count} weeks";
 "menu.product.codex" = "Codex";
-"menu.product.spark" = "Spark";
 "menu.quota.with_reset" = "[{duration}] · {remaining}% remaining · resets {reset}";
 "menu.quota.without_reset" = "[{duration}] · {remaining}% remaining · reset unavailable";
 "menu.quota.expired_with_reset" = "[{duration}] · — · resets {reset} · refresh required";
@@ -48,9 +47,6 @@
 "settings.language.english" = "English";
 "settings.section.display" = "Display";
 "settings.product.codex" = "Codex";
-"settings.product.spark" = "Spark";
-"settings.product.both" = "Codex and Spark";
-"settings.product.accessibility" = "Products to display";
 "settings.selection.automatic" = "Automatic";
 "settings.selection.manual" = "Manual";
 "settings.selection.accessibility" = "Quota selection mode";
@@ -65,7 +61,7 @@
 "settings.gauge.preset.custom" = "Custom";
 "settings.gauge.border" = "Border color";
 "settings.gauge.fill" = "Fill color";
-"settings.section.quotas" = "Quotas to display";
+"settings.section.quotas" = "Quota to display";
 "settings.quota.format" = "%@ [%@]";
 "settings.quota.unavailable.format" = "%@ — Currently unavailable";
 "settings.quota.accessibility.format" = "%@ %@ quota";

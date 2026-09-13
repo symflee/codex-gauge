@@ -104,7 +104,8 @@ private func immutableSnapshotTest() -> TestCase {
 
         try expect(snapshot.capturedAt == capturedAt, "Expected snapshot capture date")
         try expect(snapshot.quotaWindows(for: .codex) == [quota], "Expected owned Codex quota")
-        try expect(snapshot.quotaWindows(for: .spark).isEmpty, "Expected absent Spark quota")
+        let empty = UsageSnapshot(capturedAt: capturedAt, quotasByProduct: [:])
+        try expect(empty.quotaWindows(for: .codex).isEmpty, "Expected absent Codex quota to remain empty")
     }
 }
 

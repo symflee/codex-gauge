@@ -9,7 +9,7 @@ func adaptiveRefreshReducerTests() -> [TestCase] {
         wakeBaselineTest(),
         increaseAndExtensionTest(),
         decreaseAndResetChangeTest(),
-        multiSelectionIncreaseTest(),
+        selectedWeeklyQuotaIncreaseTest(),
         burstDeadlineTest(),
         backoffLadderTest(),
         successResetsBackoffTest(),
@@ -265,16 +265,16 @@ private func decreaseAndResetChangeTest() -> TestCase {
     }
 }
 
-private func multiSelectionIncreaseTest() -> TestCase {
-    TestCase(name: "any selected quota increase starts burst") {
+private func selectedWeeklyQuotaIncreaseTest() -> TestCase {
+    TestCase(name: "selected weekly Codex quota increase starts burst") {
         var harness = RefreshHarness()
-        let baseline = refreshSamples(codexUsed: 10, sparkUsed: 20)
+        let baseline = refreshSamples(codexUsed: 20, durationMinutes: 10_080)
         try establishBaseline(&harness, samples: baseline)
-        let changed = refreshSamples(codexUsed: 10, sparkUsed: 21)
+        let changed = refreshSamples(codexUsed: 21, durationMinutes: 10_080)
 
         _ = try completeManualRefresh(&harness, samples: changed, at: refreshInstant(15))
 
-        try expect(harness.state.burstDeadline == refreshInstant(315), "Expected Spark increase burst")
+        try expect(harness.state.burstDeadline == refreshInstant(315), "Expected selected weekly increase burst")
     }
 }
 
@@ -869,26 +869,16 @@ private func completeManualRefresh(
 
 private func refreshSamples(
     codexUsed: Int,
-    sparkUsed: Int? = nil,
+    durationMinutes: Int = 300,
     resetOffset: TimeInterval = 1_000
 ) -> SelectedQuotaSamples {
-    var values = [
+    SelectedQuotaSamples([
         RefreshQuotaKey(
             product: .codex,
-            rawDurationMinutes: 300,
+            rawDurationMinutes: durationMinutes,
             resetsAt: refreshResetDate(resetOffset)
         ): codexUsed
-    ]
-    if let sparkUsed {
-        values[
-            RefreshQuotaKey(
-                product: .spark,
-                rawDurationMinutes: 300,
-                resetsAt: refreshResetDate(resetOffset)
-            )
-        ] = sparkUsed
-    }
-    return SelectedQuotaSamples(values)
+    ])
 }
 
 private let refreshBaseInstant = ContinuousClock().now

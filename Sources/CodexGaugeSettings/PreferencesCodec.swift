@@ -4,7 +4,7 @@ import CoreFoundation
 import Foundation
 
 enum PreferencesCodec {
-    private static let currentVersion = 4
+    private static let currentVersion = 5
 
     static func encode(_ preferences: AppPreferences) throws -> Data {
         let object: [String: Any] = [
@@ -57,7 +57,7 @@ enum PreferencesCodec {
             )
         case 3:
             return decodeVersionThree(dictionary, defaultLanguage: defaultLanguage)
-        case currentVersion:
+        case 4, currentVersion:
             return decodeCurrent(
                 dictionary,
                 defaultLanguage: defaultLanguage
@@ -77,14 +77,13 @@ enum PreferencesCodec {
         guard let version = integer(dictionary["version"]) else {
             return false
         }
-        return (0...3).contains(version)
+        return (0...4).contains(version)
     }
 
     private static func encodeDisplay(
         _ preference: DisplayPreference
     ) -> [String: Any] {
         [
-            "productMode": preference.productMode.rawValue,
             "selection": encodeSelection(preference.quotaSelection)
         ]
     }
@@ -92,12 +91,12 @@ enum PreferencesCodec {
     private static func encodeSelection(
         _ selection: DisplayQuotaSelection
     ) -> [String: Any] {
-        guard case .manual(let identifiers) = selection else {
+        guard case .manual(let identifier) = selection else {
             return ["mode": "automatic"]
         }
         return [
             "mode": "manual",
-            "items": sorted(identifiers).map(encodeIdentifier)
+            "item": encodeIdentifier(identifier)
         ]
     }
 
@@ -126,33 +125,6 @@ enum PreferencesCodec {
                 "borderColor": borderColor.hexString,
                 "fillColor": fillColor.hexString
             ]
-        }
-    }
-
-    private static func sorted(
-        _ identifiers: Set<QuotaSelectionID>
-    ) -> [QuotaSelectionID] {
-        identifiers.sorted { left, right in
-            if left.product != right.product {
-                return left.product.rawValue < right.product.rawValue
-            }
-            return durationPrecedes(
-                left.rawDurationMinutes,
-                right.rawDurationMinutes
-            )
-        }
-    }
-
-    private static func durationPrecedes(_ left: Int?, _ right: Int?) -> Bool {
-        switch (left, right) {
-        case let (left?, right?):
-            return left < right
-        case (_?, nil):
-            return true
-        case (nil, _?):
-            return false
-        case (nil, nil):
-            return false
         }
     }
 
@@ -213,7 +185,7 @@ enum PreferencesCodec {
         appearance: StatusGaugeAppearance
     ) -> AppPreferences {
         AppPreferences(
-            displayPreference: decodeDisplay(dictionary["display"]),
+            displayPreference: decodeDisplay(dictionary["display"], legacy: integer(dictionary["version"]) != currentVersion),
             refreshProfile: decodeRefreshProfile(
                 dictionary["refreshProfile"]
             ),
@@ -272,14 +244,12 @@ enum PreferencesCodec {
         return StatusGaugeColor(hexString: hexString)
     }
 
-    private static func decodeDisplay(_ value: Any?) -> DisplayPreference {
+    private static func decodeDisplay(_ value: Any?, legacy: Bool) -> DisplayPreference {
         guard let dictionary = value as? [String: Any] else {
             return .default
         }
-        let productMode = decodeProductMode(dictionary["productMode"])
-        let selection = decodeSelection(dictionary["selection"])
+        let selection = decodeSelection(dictionary["selection"], legacy: legacy)
         return DisplayPreference(
-            productMode: productMode,
             quotaSelection: selection
         )
     }
@@ -289,9 +259,6 @@ enum PreferencesCodec {
         defaultLanguage: AppLanguage
     ) -> AppPreferences {
         let display = DisplayPreference(
-            productMode: decodeProductMode(
-                dictionary["displayProductMode"]
-            ),
             quotaSelection: decodeVersionZeroSelection(dictionary)
         )
         return AppPreferences(
@@ -331,15 +298,9 @@ enum PreferencesCodec {
         return decodeManualSelection(dictionary["manualQuotaSelections"])
     }
 
-    private static func decodeProductMode(_ value: Any?) -> DisplayProductMode {
-        guard let rawValue = string(value) else {
-            return .codex
-        }
-        return DisplayProductMode(rawValue: rawValue) ?? .codex
-    }
-
     private static func decodeSelection(
-        _ value: Any?
+        _ value: Any?,
+        legacy: Bool
     ) -> DisplayQuotaSelection {
         guard let dictionary = value as? [String: Any] else {
             return .automatic
@@ -347,7 +308,13 @@ enum PreferencesCodec {
         guard string(dictionary["mode"]) == "manual" else {
             return .automatic
         }
-        return decodeManualSelection(dictionary["items"])
+        if legacy {
+            return decodeManualSelection(dictionary["items"])
+        }
+        guard let item = dictionary["item"], let identifier = decodeIdentifier(item) else {
+            return .automatic
+        }
+        return .manual(identifier)
     }
 
     private static func decodeManualSelection(
@@ -357,10 +324,10 @@ enum PreferencesCodec {
             return .automatic
         }
         let identifiers = Set(values.compactMap(decodeIdentifier))
-        guard !identifiers.isEmpty else {
+        guard identifiers.count == 1, let identifier = identifiers.first else {
             return .automatic
         }
-        return .manual(identifiers)
+        return .manual(identifier)
     }
 
     private static func decodeIdentifier(_ value: Any) -> QuotaSelectionID? {
